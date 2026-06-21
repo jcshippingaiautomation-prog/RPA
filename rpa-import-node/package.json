@@ -1,0 +1,38 @@
+{
+  "name": "rpa-import-node",
+  "version": "1.0.0",
+  "description": "RPA — import declaration data into DCTK (Node.js + Playwright port of rpa_import.py)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./cli": "./dist/main.js",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc && mkdir -p dist/data && cp -f src/data/field-catalog.json dist/data/ 2>/dev/null || true",
+    "start": "node dist/main.js",
+    "dev": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "postinstall": "playwright install chromium"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "nodemailer": "^6.9.16",
+    "pdf-lib": "^1.17.1",
+    "playwright": "^1.49.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/nodemailer": "^6.4.17",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

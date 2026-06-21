@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>เข้าสู่ระบบ — JC Shipping RPA</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .login-wrap {
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: var(--bg, #0f172a);
+    }
+    .login-card {
+      background: #fff; border-radius: 14px; padding: 32px 28px; width: 360px;
+      box-shadow: 0 10px 40px rgba(0,0,0,.25);
+    }
+    .login-card h1 { font-size: 20px; margin: 0 0 4px; color: #1e293b; }
+    .login-card p.sub { margin: 0 0 20px; color: #64748b; font-size: 13px; }
+    .login-card label { display: block; font-size: 13px; color: #334155; margin: 12px 0 4px; }
+    .login-card input {
+      width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px;
+      font-family: inherit; font-size: 14px; box-sizing: border-box;
+    }
+    .login-card button {
+      width: 100%; margin-top: 20px; padding: 11px; border: 0; border-radius: 8px;
+      background: #1e3a8a; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
+    }
+    .login-card button:disabled { opacity: .6; cursor: default; }
+    .login-msg { margin-top: 14px; font-size: 13px; min-height: 18px; }
+    .login-msg.err { color: #dc2626; }
+    .login-msg.ok { color: #16a34a; }
+  </style>
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="login-card">
+      <h1>JC Shipping RPA</h1>
+      <p class="sub">เข้าสู่ระบบเพื่อใช้งาน</p>
+      <form id="loginForm">
+        <label for="email">อีเมล</label>
+        <input type="email" id="email" autocomplete="username" required />
+        <label for="password">รหัสผ่าน</label>
+        <input type="password" id="password" autocomplete="current-password" required />
+        <button type="submit" id="btnLogin">เข้าสู่ระบบ</button>
+      </form>
+      <div class="login-msg" id="msg"></div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="login.js"></script>
+</body>
+</html>

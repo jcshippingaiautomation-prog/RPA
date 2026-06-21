@@ -1,0 +1,55 @@
+# ===== Secrets (ห้ามขึ้น git เด็ดขาด) =====
+.env
+.env.*
+**/.env
+**/.env.*
+*config.local.json
+
+# DCTK credentials (อยู่ใน config.json — เก็บแยก ไม่ commit ค่าจริง)
+rpa-import-node/config.json
+
+# ===== Dependencies / build =====
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+
+# ===== Logs / temp / runtime =====
+*.log
+**/*.log
+.DS_Store
+**/.DS_Store
+
+# ===== RPA runtime output (เอกสาร/ภาพที่ generate ตอนรัน) =====
+file download/
+**/file download/
+error_record_*.png
+**/error_record_*.png
+debug_finalize_before.png
+**/debug_finalize_before.png
+inspect/
+**/inspect/
+data.xlsx
+**/data.xlsx
+
+# ===== ไฟล์ใหญ่ / เอกสารลูกค้า (ไม่ควรอยู่ใน repo โค้ด) =====
+*.zip
+RPA for inport Data/
+RPA for inport Data 2/
+*.pdf
+*.xls
+*.xlsx
+*.docx
+*.doc
+COCOS*.pdf
+KASEMCHAI*.pdf
+
+# ===== IDE =====
+.vscode/
+.idea/
+
+# ===== ไฟล์ debug / backup เพิ่มเติม =====
+debug_*.png
+**/debug_*.png
+src.backup.*/
+**/src.backup.*/

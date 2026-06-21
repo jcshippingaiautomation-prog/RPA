@@ -1,0 +1,814 @@
+[
+ {
+  "key": "departuredate",
+  "label": "วันที่ส่งออก",
+  "page": 1,
+  "type": "text",
+  "selector": "#DepartureDate"
+ },
+ {
+  "key": "jobno",
+  "label": "เลขที่รับงาน",
+  "page": 1,
+  "type": "text",
+  "selector": "#JobNo"
+ },
+ {
+  "key": "edidoctype",
+  "label": "เลขที่รับงาน",
+  "page": 1,
+  "type": "text",
+  "selector": "[name=\"EdiDocType_input\"]"
+ },
+ {
+  "key": "declarationno",
+  "label": "เลขที่ใบขนฯ",
+  "page": 1,
+  "type": "text",
+  "selector": "#DeclarationNo"
+ },
+ {
+  "key": "customscheckingstatusname",
+  "label": "เลขที่ใบขนฯ",
+  "page": 1,
+  "type": "text",
+  "selector": "#CustomsCheckingStatusName"
+ },
+ {
+  "key": "paymentno",
+  "label": "เลขที่ชำระอากร",
+  "page": 1,
+  "type": "text",
+  "selector": "#PaymentNo"
+ },
+ {
+  "key": "totalfobcurrencycode",
+  "label": "อัตราแลกเปลี่ยน",
+  "page": 1,
+  "type": "text",
+  "selector": "#TotalFobCurrencyCode"
+ },
+ {
+  "key": "totalnetweightunitcode",
+  "label": "หน่วยน้ำหนัก",
+  "page": 1,
+  "type": "text",
+  "selector": "#TotalNetWeightUnitCode"
+ },
+ {
+  "key": "totalgrossweightunitcode",
+  "label": "หน่วยน้ำหนัก",
+  "page": 1,
+  "type": "text",
+  "selector": "#TotalGrossWeightUnitCode"
+ },
+ {
+  "key": "totalpackageunitcode",
+  "label": "หน่วยหีบห่อรวม",
+  "page": 1,
+  "type": "text",
+  "selector": "#TotalPackageUnitCode"
+ },
+ {
+  "key": "cmpnamethai",
+  "label": "เลขประจำตัวผู้เสียภาษี*",
+  "page": 1,
+  "type": "text",
+  "selector": "#CmpNameThai"
+ },
+ {
+  "key": "managercardno",
+  "label": "ผู้จัดการ",
+  "page": 1,
+  "type": "text",
+  "selector": "[name=\"ManagerCardNo_input\"]"
+ },
+ {
+  "key": "brknamethai",
+  "label": "เลขประจำตัวผู้เสียภาษี",
+  "page": 1,
+  "type": "text",
+  "selector": "#BrkNameThai"
+ },
+ {
+  "key": "customscardno",
+  "label": "ชื่อผู้ผ่านพิธีการ",
+  "page": 1,
+  "type": "text",
+  "selector": "[name=\"CustomsCardNo_input\"]"
+ },
+ {
+  "key": "vesselname",
+  "label": "ชื่อยานพาหนะ",
+  "page": 1,
+  "type": "text",
+  "selector": "[name=\"VesselName_input\"]"
+ },
+ {
+  "key": "voyage",
+  "label": "เที่ยวเรือ",
+  "page": 1,
+  "type": "text",
+  "selector": "#Voyage"
+ },
+ {
+  "key": "releasedportname",
+  "label": "สถานที่ตรวจปล่อย*",
+  "page": 1,
+  "type": "text",
+  "selector": "#ReleasedPortName"
+ },
+ {
+  "key": "loadedportname",
+  "label": "สถานที่รับบรรทุก*",
+  "page": 1,
+  "type": "text",
+  "selector": "#LoadedPortName"
+ },
+ {
+  "key": "mawb",
+  "label": "MAWB",
+  "page": 1,
+  "type": "text",
+  "selector": "#Mawb"
+ },
+ {
+  "key": "hawb",
+  "label": "HAWB/BL",
+  "page": 1,
+  "type": "text",
+  "selector": "#Hawb"
+ },
+ {
+  "key": "referencenocommon",
+  "label": "เลขอ้างอิงในการขนส่ง",
+  "page": 1,
+  "type": "text",
+  "selector": "#ReferenceNoCommon"
+ },
+ {
+  "key": "exporttaxincentivesdescription",
+  "label": "Export Tax Incentives",
+  "page": 1,
+  "type": "text",
+  "selector": "#ExportTaxIncentivesDescription"
+ },
+ {
+  "key": "establishname",
+  "label": "รหัสคลังทัณฑ์บน",
+  "page": 1,
+  "type": "text",
+  "selector": "#EstablishName"
+ },
+ {
+  "key": "factorycmpname",
+  "label": "ชื่อผู้ประกอบการเขตปลอด",
+  "page": 1,
+  "type": "text",
+  "selector": "#FactoryCmpName"
+ },
+ {
+  "key": "payeraccountname",
+  "label": "บัญชีชำระเงิน",
+  "page": 1,
+  "type": "text",
+  "selector": "#PayerAccountName"
+ },
+ {
+  "key": "guaranteeaccountno",
+  "label": "เลขที่หนังสือสัญญา",
+  "page": 1,
+  "type": "text",
+  "selector": "#GuaranteeAccountNo"
+ },
+ {
+  "key": "guaranteebankcode",
+  "label": "รหัสธนาคารค้ำประกัน",
+  "page": 1,
+  "type": "text",
+  "selector": "[name=\"GuaranteeBankCode_input\"]"
+ },
+ {
+  "key": "guaranteebankbranchcode",
+  "label": "รหัสธนาคารค้ำประกัน",
+  "page": 1,
+  "type": "text",
+  "selector": "[name=\"GuaranteeBankBranchCode_input\"]"
+ },
+ {
+  "key": "guaranteebankname",
+  "label": "รหัสธนาคารค้ำประกัน",
+  "page": 1,
+  "type": "text",
+  "selector": "#GuaranteeBankName"
+ },
+ {
+  "key": "rgsbankcode",
+  "label": "รหัสธนาคาร RGS",
+  "page": 1,
+  "type": "text",
+  "selector": "[name=\"RgsBankCode_input\"]"
+ },
+ {
+  "key": "rgsbankname",
+  "label": "รหัสธนาคาร RGS",
+  "page": 1,
+  "type": "text",
+  "selector": "#RgsBankName"
+ },
+ {
+  "key": "chkassessmentrequest",
+  "label": "ขอพบเจ้าหน้าที่ (กรณีมีปัญหาเรื่องพิกัด/ราคา)",
+  "page": 1,
+  "type": "checkbox",
+  "selector": "#chkAssessmentRequest"
+ },
+ {
+  "key": "chkinspectionrequest",
+  "label": "ขอเปิดตรวจสินค้า/มัดลวด",
+  "page": 1,
+  "type": "checkbox",
+  "selector": "#chkInspectionRequest"
+ },
+ {
+  "key": "aeosreferenceno",
+  "label": "เลข AEOs ของ*",
+  "page": 1,
+  "type": "text",
+  "selector": "#AeosReferenceNo"
+ },
+ {
+  "key": "defaultreferenceno",
+  "label": "โปรไฟล์ที่จะบันทึก",
+  "page": 1,
+  "type": "dropdown",
+  "selector": "#defaultReferenceNo"
+ },
+ {
+  "key": "exdecdoctype",
+  "label": "ชนิดเอกสารใบขนขาออก",
+  "page": 1,
+  "type": "dropdown",
+  "selector": "#ExDecDocType"
+ },
+ {
+  "key": "cmptaxno",
+  "label": "เลขประจำตัวผู้เสียภาษี*",
+  "page": 1,
+  "type": "combo",
+  "selector": "[name=\"CmpTaxNo_input\"]"
+ },
+ {
+  "key": "cmpbrnno",
+  "label": "เลขประจำตัวผู้เสียภาษี*",
+  "page": 1,
+  "type": "dropdown",
+  "selector": "#CmpBrnNo"
+ },
+ {
+  "key": "brktaxno",
+  "label": "เลขประจำตัวผู้เสียภาษี",
+  "page": 1,
+  "type": "combo",
+  "selector": "[name=\"BrkTaxNo_input\"]"
+ },
+ {
+  "key": "brkbrnno",
+  "label": "เลขประจำตัวผู้เสียภาษี",
+  "page": 1,
+  "type": "dropdown",
+  "selector": "#BrkBrnNo"
+ },
+ {
+  "key": "transportmode",
+  "label": "วิธีขนส่ง",
+  "page": 1,
+  "type": "dropdown",
+  "selector": "#TransportMode"
+ },
+ {
+  "key": "cargopackingtype",
+  "label": "วิธีขนส่ง",
+  "page": 1,
+  "type": "dropdown",
+  "selector": "#CargoPackingType"
+ },
+ {
+  "key": "releasedport",
+  "label": "สถานที่ตรวจปล่อย*",
+  "page": 1,
+  "type": "combo",
+  "selector": "[name=\"ReleasedPort_input\"]"
+ },
+ {
+  "key": "loadedport",
+  "label": "สถานที่รับบรรทุก*",
+  "page": 1,
+  "type": "combo",
+  "selector": "[name=\"LoadedPort_input\"]"
+ },
+ {
+  "key": "exporttaxincentivesid",
+  "label": "Export Tax Incentives",
+  "page": 1,
+  "type": "combo",
+  "selector": "[name=\"ExportTaxIncentivesId_input\"]"
+ },
+ {
+  "key": "establishno",
+  "label": "รหัสคลังทัณฑ์บน",
+  "page": 1,
+  "type": "combo",
+  "selector": "[name=\"EstablishNo_input\"]"
+ },
+ {
+  "key": "factoryno",
+  "label": "ชื่อผู้ประกอบการเขตปลอด",
+  "page": 1,
+  "type": "combo",
+  "selector": "[name=\"FactoryNo_input\"]"
+ },
+ {
+  "key": "paymentmethod",
+  "label": "รหัสวิธีการชำระภาษีอากร\t*",
+  "page": 1,
+  "type": "dropdown",
+  "selector": "#PaymentMethod"
+ },
+ {
+  "key": "payeraccountno",
+  "label": "บัญชีชำระเงิน",
+  "page": 1,
+  "type": "dropdown",
+  "selector": "#PayerAccountNo"
+ },
+ {
+  "key": "taxcardaccountno",
+  "label": "เลขที่บัญชีบัตรภาษี",
+  "page": 1,
+  "type": "dropdown",
+  "selector": "#TaxCardAccountNo"
+ },
+ {
+  "key": "guaranteemethod",
+  "label": "วิธีวางประกัน",
+  "page": 1,
+  "type": "dropdown",
+  "selector": "#GuaranteeMethod"
+ },
+ {
+  "key": "guaranteetype",
+  "label": "ประเภทการวางประกัน",
+  "page": 1,
+  "type": "dropdown",
+  "selector": "#GuaranteeType"
+ },
+ {
+  "key": "useaeosnoof",
+  "label": "เลข AEOs ของ*",
+  "page": 1,
+  "type": "dropdown",
+  "selector": "#UseAeosNoOf"
+ },
+ {
+  "key": "referenceno",
+  "label": "เลขที่อ้างอิง*",
+  "page": 2,
+  "type": "text",
+  "selector": "#ReferenceNo"
+ },
+ {
+  "key": "invoiceno",
+  "label": "เลขที่ใบกำกับฯ*",
+  "page": 2,
+  "type": "text",
+  "selector": "#InvoiceNo"
+ },
+ {
+  "key": "ponumber",
+  "label": "เลขที่ใบสั่งซื้อ",
+  "page": 2,
+  "type": "text",
+  "selector": "#PoNumber"
+ },
+ {
+  "key": "termpayment",
+  "label": "เงื่อนไขการชำระเงิน",
+  "page": 2,
+  "type": "text",
+  "selector": "#TermPayment"
+ },
+ {
+  "key": "consigneestreetandno",
+  "label": "ที่อยู่/อาคาร, ถนน*",
+  "page": 2,
+  "type": "text",
+  "selector": "#ConsigneeStreetAndNo"
+ },
+ {
+  "key": "consigneedistrictname",
+  "label": "ตำบล/แขวง",
+  "page": 2,
+  "type": "text",
+  "selector": "#ConsigneeDistrictName"
+ },
+ {
+  "key": "consigneesubprovincename",
+  "label": "อำเภอ/เขต",
+  "page": 2,
+  "type": "text",
+  "selector": "#ConsigneeSubProvinceName"
+ },
+ {
+  "key": "consigneeprovincename",
+  "label": "จังหวัด",
+  "page": 2,
+  "type": "text",
+  "selector": "#ConsigneeProvinceName"
+ },
+ {
+  "key": "consigneepostcode",
+  "label": "รหัสไปรษณีย์",
+  "page": 2,
+  "type": "text",
+  "selector": "#ConsigneePostCode"
+ },
+ {
+  "key": "consigneeemailaddress",
+  "label": "อีเมลล์",
+  "page": 2,
+  "type": "text",
+  "selector": "#ConsigneeEmailAddress"
+ },
+ {
+  "key": "purcountrycode",
+  "label": "รหัสประเทศผู้ซื้อ",
+  "page": 2,
+  "type": "text",
+  "selector": "#PurCountryCode"
+ },
+ {
+  "key": "purcountryname",
+  "label": "อีเมลล์",
+  "page": 2,
+  "type": "text",
+  "selector": "#PurCountryName"
+ },
+ {
+  "key": "chkaveragetofreeitem",
+  "label": "กระจายค่าใช้จ่ายในรายการของแถมหรือไม่?",
+  "page": 2,
+  "type": "checkbox",
+  "selector": "#chkAverageToFreeItem"
+ },
+ {
+  "key": "amount",
+  "label": "ราคา",
+  "page": 2,
+  "type": "text",
+  "selector": "[name=\"_Amount_input\"]"
+ },
+ {
+  "key": "forward",
+  "label": "ค่าขนส่ง",
+  "page": 2,
+  "type": "text",
+  "selector": "[name=\"_Forward_input\"]"
+ },
+ {
+  "key": "freight",
+  "label": "ค่าระวาง",
+  "page": 2,
+  "type": "text",
+  "selector": "[name=\"_Freight_input\"]"
+ },
+ {
+  "key": "insurance",
+  "label": "ค่าประกัน",
+  "page": 2,
+  "type": "text",
+  "selector": "[name=\"_Insurance_input\"]"
+ },
+ {
+  "key": "pack",
+  "label": "ค่าบรรจุ",
+  "page": 2,
+  "type": "text",
+  "selector": "[name=\"_Pack_input\"]"
+ },
+ {
+  "key": "inland",
+  "label": "Inland",
+  "page": 2,
+  "type": "text",
+  "selector": "[name=\"_Inland_input\"]"
+ },
+ {
+  "key": "landing",
+  "label": "Landing",
+  "page": 2,
+  "type": "text",
+  "selector": "[name=\"_Landing_input\"]"
+ },
+ {
+  "key": "otherchargedetail",
+  "label": "รายละเอียดค่าใช้จ่ายอื่น ๆ",
+  "page": 2,
+  "type": "text",
+  "selector": "#OtherChargeDetail"
+ },
+ {
+  "key": "selfcertificationremark",
+  "label": "หมายเหตุรับรองถิ่นกำเนิดด้วยตนเอง",
+  "page": 2,
+  "type": "text",
+  "selector": "#SelfCertificationRemark"
+ },
+ {
+  "key": "note1",
+  "label": "หมายเหตุ 1",
+  "page": 2,
+  "type": "text",
+  "selector": "#Note1"
+ },
+ {
+  "key": "invoicedate",
+  "label": "วันที่ใบกำกับฯ*",
+  "page": 2,
+  "type": "date",
+  "selector": "#InvoiceDate"
+ },
+ {
+  "key": "consigneename",
+  "label": "ชื่อผู้ซื้อ*",
+  "page": 2,
+  "type": "combo",
+  "selector": "[name=\"ConsigneeName_input\"]"
+ },
+ {
+  "key": "buyerstatus",
+  "label": "ชื่อผู้ซื้อ*",
+  "page": 2,
+  "type": "dropdown",
+  "selector": "#BuyerStatus"
+ },
+ {
+  "key": "termcode",
+  "label": "เงื่อนไข",
+  "page": 2,
+  "type": "dropdown",
+  "selector": "#_TermCode"
+ },
+ {
+  "key": "forwardaverageby",
+  "label": "ค่าขนส่ง",
+  "page": 2,
+  "type": "dropdown",
+  "selector": "#_ForwardAverageBy"
+ },
+ {
+  "key": "freightaverageby",
+  "label": "ค่าระวาง",
+  "page": 2,
+  "type": "dropdown",
+  "selector": "#_FreightAverageBy"
+ },
+ {
+  "key": "insuranceaverageby",
+  "label": "ค่าประกัน",
+  "page": 2,
+  "type": "dropdown",
+  "selector": "#_InsuranceAverageBy"
+ },
+ {
+  "key": "packaverageby",
+  "label": "ค่าบรรจุ",
+  "page": 2,
+  "type": "dropdown",
+  "selector": "#_PackAverageBy"
+ },
+ {
+  "key": "inlandaverageby",
+  "label": "Inland",
+  "page": 2,
+  "type": "dropdown",
+  "selector": "#_InlandAverageBy"
+ },
+ {
+  "key": "landingaverageby",
+  "label": "Landing",
+  "page": 2,
+  "type": "dropdown",
+  "selector": "#_LandingAverageBy"
+ },
+ {
+  "key": "extra1chargecode",
+  "label": "เงื่อนไข",
+  "page": 2,
+  "type": "dropdown",
+  "selector": "#_Extra1ChargeCode"
+ },
+ {
+  "key": "extra1",
+  "label": "เงื่อนไข",
+  "page": 2,
+  "type": "combo",
+  "selector": "[name=\"_Extra1_input\"]"
+ },
+ {
+  "key": "extra1averageby",
+  "label": "เงื่อนไข",
+  "page": 2,
+  "type": "dropdown",
+  "selector": "#_Extra1AverageBy"
+ },
+ {
+  "key": "extra2chargecode",
+  "label": "เงื่อนไข",
+  "page": 2,
+  "type": "dropdown",
+  "selector": "#_Extra2ChargeCode"
+ },
+ {
+  "key": "extra2",
+  "label": "เงื่อนไข",
+  "page": 2,
+  "type": "combo",
+  "selector": "[name=\"_Extra2_input\"]"
+ },
+ {
+  "key": "extra2averageby",
+  "label": "เงื่อนไข",
+  "page": 2,
+  "type": "dropdown",
+  "selector": "#_Extra2AverageBy"
+ },
+ {
+  "key": "itemno",
+  "label": "รายการที่",
+  "page": 3,
+  "type": "text",
+  "selector": "#ItemNo"
+ },
+ {
+  "key": "invitemno",
+  "label": "ลำดับรายการในใบกำกับ",
+  "page": 3,
+  "type": "text",
+  "selector": "#InvItemNo"
+ },
+ {
+  "key": "tariffcode",
+  "label": "พิกัดศุลกากร",
+  "page": 3,
+  "type": "text",
+  "selector": "#TariffCode"
+ },
+ {
+  "key": "statisticalcode",
+  "label": "รหัสสถิติสินค้า",
+  "page": 3,
+  "type": "text",
+  "selector": "[name=\"StatisticalCode_input\"]"
+ },
+ {
+  "key": "goodsunitcode",
+  "label": "หน่วยหลังพิกัด",
+  "page": 3,
+  "type": "text",
+  "selector": "#GoodsUnitCode"
+ },
+ {
+  "key": "privilegecode",
+  "label": "รหัสสิทธิพิเศษ",
+  "page": 3,
+  "type": "text",
+  "selector": "[name=\"PrivilegeCode_input\"]"
+ },
+ {
+  "key": "ahtncode",
+  "label": "รหัสอ้างอิง AHTN",
+  "page": 3,
+  "type": "text",
+  "selector": "#AhtnCode"
+ },
+ {
+  "key": "udngno",
+  "label": "รหัสสินค้าอันตราย",
+  "page": 3,
+  "type": "text",
+  "selector": "#UdngNo"
+ },
+ {
+  "key": "chkismanualcalweight",
+  "label": "คำนวณน้ำหนักแบบ Manual",
+  "page": 3,
+  "type": "checkbox",
+  "selector": "#chkIsManualCalWeight"
+ },
+ {
+  "key": "unitprice",
+  "label": "ราคา/หน่วย",
+  "page": 3,
+  "type": "text",
+  "selector": "[name=\"_UnitPrice_input\"]"
+ },
+ {
+  "key": "brand",
+  "label": "ยี่ห้อสินค้า",
+  "page": 3,
+  "type": "text",
+  "selector": "#Brand"
+ },
+ {
+  "key": "productdescriptionthai",
+  "label": "คำอธิบายสินค้าภาษาไทย",
+  "page": 3,
+  "type": "text",
+  "selector": "#ProductDescriptionThai"
+ },
+ {
+  "key": "productdescriptioneng",
+  "label": "คำอธิบายสินค้าภาษาอังกฤษ",
+  "page": 3,
+  "type": "text",
+  "selector": "#ProductDescriptionEng"
+ },
+ {
+  "key": "remark",
+  "label": "หมายเหตุ",
+  "page": 3,
+  "type": "text",
+  "selector": "#Remark"
+ },
+ {
+  "key": "shippingmark",
+  "label": "เลขหมายหีบห่อ",
+  "page": 3,
+  "type": "text",
+  "selector": "#ShippingMark"
+ },
+ {
+  "key": "origincountrycode",
+  "label": "รหัสประเทศต้นกำเนิด",
+  "page": 3,
+  "type": "text",
+  "selector": "#OriginCountryCode"
+ },
+ {
+  "key": "origincountryname",
+  "label": "รหัสประเทศต้นกำเนิด",
+  "page": 3,
+  "type": "text",
+  "selector": "#OriginCountryName"
+ },
+ {
+  "key": "chkislastentry",
+  "label": "เป็นรายการสุดท้ายหรือไม่",
+  "page": 3,
+  "type": "checkbox",
+  "selector": "#chkIsLastEntry"
+ },
+ {
+  "key": "invquantityunitcode",
+  "label": "ปริมาณในใบกำกับ*",
+  "page": 3,
+  "type": "combo",
+  "selector": "[name=\"InvQuantityUnitCode_input\"]"
+ },
+ {
+  "key": "quantityunitcode",
+  "label": "ปริมาณในใบขน*",
+  "page": 3,
+  "type": "combo",
+  "selector": "[name=\"QuantityUnitCode_input\"]"
+ },
+ {
+  "key": "netweightunitcode",
+  "label": "น้ำหนักสุทธิ*",
+  "page": 3,
+  "type": "combo",
+  "selector": "[name=\"NetWeightUnitCode_input\"]"
+ },
+ {
+  "key": "grossweightunitcode",
+  "label": "น้ำหนักรวมหีบห่อ*",
+  "page": 3,
+  "type": "combo",
+  "selector": "[name=\"GrossWeightUnitCode_input\"]"
+ },
+ {
+  "key": "packageunitcode",
+  "label": "จำนวนหีบห่อ*",
+  "page": 3,
+  "type": "combo",
+  "selector": "[name=\"PackageUnitCode_input\"]"
+ },
+ {
+  "key": "naturetrans",
+  "label": "รายการของแถม",
+  "page": 3,
+  "type": "dropdown",
+  "selector": "#NatureTrans"
+ }
+]

@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ระบบใบขนสินค้า DCTK</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { fontFamily: { sans: ['"Noto Sans Thai"', "sans-serif"] } } } };
+  </script>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="icons.js"></script>
+</head>
+<body>
+  <div class="layout">
+    <!-- ===== Sidebar ===== -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo"><i data-icon="package"></i></div>
+        <div class="brand-text">
+          <div class="brand-title">DCTK Automation</div>
+          <div class="brand-sub">ระบบใบขนสินค้าขาออก</div>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item active" href="#list" data-page="list"><span class="nav-ico" data-icon="list"></span> รายการใบขน</a>
+        <a class="nav-item" href="#history" data-page="history"><span class="nav-ico" data-icon="clock"></span> ประวัติงาน</a>
+        <a class="nav-item" href="#settings" data-page="settings" data-admin="true"><span class="nav-ico" data-icon="settings"></span> ตั้งค่า</a>
+      </nav>
+      <div class="sidebar-foot">
+        <div id="userBadge" class="user-badge"></div>
+        <button class="btn btn-ghost" id="btnLogout" style="width:100%;justify-content:center;margin-top:8px"><i data-icon="log-out"></i> ออกจากระบบ</button>
+      </div>
+    </aside>
+
+    <!-- ===== Main ===== -->
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1 id="pageTitle">รายการใบขน</h1>
+          <p class="subtitle" id="pageSubtitle">จัดการใบขนสินค้าทั้งหมดในที่เดียว</p>
+        </div>
+        <div class="topbar-right">
+          <span class="poll-status" id="pollStatus" title="สถานะการดึงอีเมลอัตโนมัติ"></span>
+        </div>
+      </header>
+
+      <!-- ============ PAGE: รายการใบขน ============ -->
+      <div id="page-list" class="page">
+        <!-- Stat cards -->
+        <div class="stat-grid stat-grid-3">
+          <div class="stat-card"><div class="stat-ico s-blue"><i data-icon="list"></i></div><div><div class="stat-num" id="cTotal">0</div><div class="stat-label">ทั้งหมด</div></div></div>
+          <div class="stat-card"><div class="stat-ico s-amber"><i data-icon="inbox"></i></div><div><div class="stat-num" id="cReady">0</div><div class="stat-label">พร้อมรัน</div></div></div>
+          <div class="stat-card"><div class="stat-ico s-green"><i data-icon="check-circle"></i></div><div><div class="stat-num" id="cDone">0</div><div class="stat-label">เสร็จแล้ว</div></div></div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="toolbar">
+          <div class="toolbar-left">
+            <select id="filterCustomer" class="sel sel-sm">
+              <option value="">ทุกลูกค้า</option>
+            </select>
+            <select id="filterStatus" class="sel sel-sm">
+              <option value="">ทุกสถานะ</option>
+              <option value="ready">พร้อมรัน</option>
+              <option value="done">เสร็จแล้ว</option>
+            </select>
+          </div>
+          <div class="toolbar-right">
+            <button class="btn btn-ghost" id="btnPollEmail"><i data-icon="mail"></i> ดึงอีเมลตอนนี้</button>
+            <button class="btn btn-ghost" id="btnUpload"><i data-icon="upload"></i> อัปโหลดไฟล์</button>
+            <button class="btn btn-ghost" id="btnCreate"><i data-icon="plus"></i> สร้างรายการ</button>
+            <button class="btn btn-ghost icon-only" id="btnRefresh" title="รีเฟรช"><i data-icon="refresh"></i></button>
+          </div>
+        </div>
+
+        <!-- bulk action bar (โผล่เมื่อเลือก) -->
+        <div id="bulkBar" class="bulk-bar" style="display:none">
+          <span><b id="bulkCount">0</b> รายการที่เลือก</span>
+          <button class="btn btn-primary btn-sm" id="btnRunSel"><i data-icon="play"></i> รัน RPA ที่เลือก</button>
+          <button class="btn btn-danger btn-sm" id="btnDeleteSel"><i data-icon="trash"></i> ลบที่เลือก</button>
+          <button class="btn btn-ghost btn-sm" id="btnClearSel">ยกเลิกเลือก</button>
+        </div>
+
+        <!-- ตารางรายการ -->
+        <div class="card-table">
+          <table class="dt">
+            <thead>
+              <tr>
+                <th class="w-chk"><input type="checkbox" id="checkAll" /></th>
+                <th>ลูกค้า</th>
+                <th>Consignee</th>
+                <th>Invoice</th>
+                <th>ETD</th>
+                <th>มูลค่า</th>
+                <th>ที่มา</th>
+                <th>สถานะ</th>
+                <th class="ta-right">จัดการ</th>
+              </tr>
+            </thead>
+            <tbody id="listBody">
+              <tr><td colspan="9" class="empty">กำลังโหลด…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ PAGE: ประวัติงาน ============ -->
+      <div id="page-history" class="page" style="display:none">
+        <div class="card-table">
+          <div class="card-head">
+            <h2><i data-icon="clock"></i> ประวัติงาน</h2>
+            <div style="display:flex; gap:8px; align-items:center">
+              <select id="jobFilterType" class="sel sel-sm">
+                <option value="">ทุกประเภท</option>
+                <option value="rpa_import">นำเข้าข้อมูล (สร้างใบ)</option>
+                <option value="rpa_edit">แก้ไขใบเดิม</option>
+                <option value="get_email">ดึงอีเมล</option>
+              </select>
+              <button class="btn btn-ghost btn-sm" id="btnRefreshJobs"><i data-icon="refresh"></i> โหลด</button>
+            </div>
+          </div>
+          <table class="dt">
+            <thead><tr><th>เวลา</th><th>ประเภท</th><th>สถานะ</th><th>ผล</th><th>โดย</th></tr></thead>
+            <tbody id="jobsBody"><tr><td colspan="5" class="empty">ยังไม่มีประวัติ</td></tr></tbody>
+          </table>
+          <div class="pager" id="jobsPager"></div>
+        </div>
+      </div>
+
+      <!-- ============ PAGE: ตั้งค่า ============ -->
+      <div id="page-settings" class="page" style="display:none">
+        <!-- Tab bar -->
+        <div class="tabs">
+          <button class="tab active" data-tab="email"><i data-icon="mail"></i> อีเมล</button>
+          <button class="tab" data-tab="customer"><i data-icon="list"></i> ลูกค้า</button>
+          <button class="tab" data-tab="airpa"><i data-icon="settings"></i> AI &amp; RPA</button>
+          <button class="tab" data-tab="users"><i data-icon="user"></i> ผู้ใช้</button>
+        </div>
+
+        <!-- ===== TAB: อีเมล ===== -->
+        <div class="tab-panel" data-panel="email">
+        <!-- ดึงอีเมลอัตโนมัติ -->
+        <section class="card">
+          <div class="card-head"><h2><i data-icon="mail"></i> ดึงอีเมลอัตโนมัติ</h2></div>
+          <p class="muted">ระบบจะเช็กอีเมลใหม่จากผู้ส่งใน Allowlist ตามรอบเวลา แล้วสกัดข้อมูลเข้ารายการอัตโนมัติ</p>
+          <div class="note" style="margin-bottom:10px">🔒 ฟังก์ชันนี้ถูกล็อกไว้ชั่วคราว — ยังเปิดใช้งานไม่ได้</div>
+          <label class="switch"><input type="checkbox" id="epEnabled" disabled /><span>เปิดดึงอีเมลอัตโนมัติ</span></label>
+          <div class="row-flex" style="margin-top:8px">
+            <label style="font-size:13px;color:var(--muted2)">เช็กอีเมลทุก</label>
+            <input type="number" id="epEvery" min="1" max="1440" value="5" class="inp" style="width:90px;text-align:center" disabled />
+            <label style="font-size:13px;color:var(--muted2)">นาที</label>
+          </div>
+          <div class="row-flex" style="margin-top:14px">
+            <button class="btn btn-primary" id="btnSaveEmailSch" disabled><i data-icon="save"></i> บันทึก</button>
+            <span id="epSaved" class="saved" style="display:none"><i data-icon="check"></i> บันทึกแล้ว</span>
+            <span class="muted" id="epStatus" style="margin-left:auto"></span>
+          </div>
+        </section>
+
+        <!-- Allowlist -->
+        <section class="card">
+          <div class="card-head"><h2><i data-icon="mail"></i> อีเมลผู้ส่งที่อนุญาต (Allowlist)</h2></div>
+          <p class="muted">ระบบจะประมวลผลเฉพาะอีเมลจากผู้ส่งในรายการนี้</p>
+          <div id="emailRulesNote" class="note"></div>
+          <div class="row-flex" style="margin:12px 0">
+            <input type="text" id="erSender" placeholder="อีเมลผู้ส่ง เช่น peach@iconlogistic.com" class="inp" style="flex:1;max-width:360px" />
+            <button class="btn btn-primary" id="btnAddEmailRule"><i data-icon="plus"></i> เพิ่ม</button>
+            <button class="btn btn-ghost" id="btnReloadEmailRules"><i data-icon="refresh"></i> โหลดใหม่</button>
+          </div>
+          <div class="table-wrap"><table><thead><tr><th>อีเมลผู้ส่ง</th><th></th></tr></thead>
+            <tbody id="emailRulesBody"><tr><td colspan="2" class="empty">ยังไม่มีผู้ส่ง</td></tr></tbody></table></div>
+        </section>
+        </div><!-- /panel email -->
+
+        <!-- ===== TAB: AI & RPA ===== -->
+        <div class="tab-panel" data-panel="airpa" style="display:none">
+        <!-- AI Model -->
+        <section class="card">
+          <div class="card-head"><h2><i data-icon="bot"></i> AI Model (สกัดข้อมูล)</h2></div>
+          <p class="muted" id="modelNote">เลือก Gemini model ที่ใช้สกัดข้อมูลจากเอกสาร</p>
+          <div class="row-flex" style="margin-top:10px">
+            <select id="modelSel" class="sel" style="max-width:280px">
+              <option value="gemini-2.5-flash">gemini-2.5-flash (เร็ว/ถูก)</option>
+              <option value="gemini-2.5-pro">gemini-2.5-pro (แม่นสุด)</option>
+              <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (ถูกสุด)</option>
+              <option value="__custom__">พิมพ์ชื่อเอง…</option>
+            </select>
+            <input type="text" id="modelCustom" placeholder="เช่น gemini-2.5-pro" class="inp" style="display:none;max-width:280px" />
+            <button class="btn btn-primary" id="btnSaveModel"><i data-icon="save"></i> บันทึก</button>
+            <span id="modelSaved" class="saved" style="display:none"><i data-icon="check"></i> บันทึกแล้ว</span>
+          </div>
+        </section>
+
+        <!-- ตั้งค่า RPA -->
+        <section class="card">
+          <div class="card-head"><h2><i data-icon="settings"></i> ตั้งค่า RPA (DCTK)</h2></div>
+          <div class="settings-grid">
+            <div><label>URL</label><input type="text" id="cfgUrl" class="inp" /></div>
+            <div><label>Username</label><input type="text" id="cfgUser" class="inp" /></div>
+            <div><label>Password (เว้นว่าง = ไม่เปลี่ยน)</label><input type="password" id="cfgPass" class="inp" placeholder="********" /></div>
+            <div><label>slow_mo (ms)</label><input type="number" id="cfgSlow" class="inp" /></div>
+            <div><label>timeout (ms)</label><input type="number" id="cfgTimeout" class="inp" /></div>
+            <div><label>ผู้รับอีเมลผลลัพธ์</label><input type="text" id="cfgRecipient" class="inp" /></div>
+          </div>
+          <label class="switch" style="margin-top:14px"><input type="checkbox" id="cfgHeadless" /><span>รันแบบ headless (ไม่เปิดหน้าเว็บ)</span></label>
+          <label class="switch"><input type="checkbox" id="cfgEmail" /><span>ส่งอีเมลหลังเสร็จ</span></label>
+          <div class="row-flex" style="margin-top:14px">
+            <button class="btn btn-primary" id="btnSaveCfg"><i data-icon="save"></i> บันทึก config</button>
+            <span id="cfgSaved" class="saved" style="display:none"><i data-icon="check"></i> บันทึกแล้ว</span>
+          </div>
+        </section>
+        </div><!-- /panel airpa -->
+
+        <!-- ===== TAB: ลูกค้า ===== -->
+        <div class="tab-panel" data-panel="customer" style="display:none">
+
+        <!-- AI ตั้งค่าลูกค้าใหม่ -->
+        <section class="card">
+          <div class="card-head"><h2><i data-icon="bot"></i> AI ตั้งค่าลูกค้าใหม่</h2></div>
+          <p class="muted">ใส่ชื่อลูกค้า + Subject อีเมลตัวอย่าง → AI จะดึงอีเมลจริงมาวิเคราะห์ แล้วสรุปคู่มือการสกัดข้อมูลให้ · ตรวจ/แก้ได้ก่อนบันทึก หรือส่งคอมเมนต์ให้ AI ปรับใหม่</p>
+          <div id="aiSetupNote" class="note"></div>
+          <div class="row-flex" style="margin:12px 0; flex-wrap:wrap; gap:8px">
+            <input type="text" id="aiCustName" placeholder="ชื่อลูกค้า (เช่น THANAKORN)" class="inp" style="flex:1; min-width:200px" />
+            <input type="text" id="aiSubject" placeholder="Subject อีเมลตัวอย่าง" class="inp" style="flex:1; min-width:220px" />
+            <button class="btn btn-primary" id="btnAiDraft"><i data-icon="bot"></i> ให้ AI วิเคราะห์</button>
+          </div>
+          <div id="aiDraftBox" style="display:none; margin-top:8px">
+            <label class="field-label">คู่มือการสกัดข้อมูล (AI ร่าง — แก้ไขได้)</label>
+            <textarea id="aiDraftText" class="inp" rows="12" style="width:100%; font-family:inherit; line-height:1.6"></textarea>
+            <div class="row-flex" style="margin-top:8px; flex-wrap:wrap; gap:8px">
+              <input type="text" id="aiComment" placeholder="คอมเมนต์ให้ AI ปรับ (เช่น invoice เอามาจาก LOT)" class="inp" style="flex:1; min-width:240px" />
+              <button class="btn btn-ghost" id="btnAiRevise"><i data-icon="refresh"></i> ส่งให้ AI แก้</button>
+              <button class="btn btn-success" id="btnAiSave"><i data-icon="save"></i> บันทึกลูกค้านี้</button>
+            </div>
+            <span id="aiSampleInfo" class="muted" style="display:block; margin-top:6px"></span>
+          </div>
+        </section>
+
+        <!-- Field Rules -->
+        <section class="card">
+          <div class="card-head"><h2><i data-icon="list"></i> ข้อมูลที่ต้องกรอกของแต่ละลูกค้า</h2></div>
+          <p class="muted">เลือกว่าช่องไหนใช้ค่าจาก AI หรือกำหนดเอง (config) — ตอนรัน RPA จะกรอกเฉพาะช่องที่ติ๊ก</p>
+          <div id="rulesNote" class="note"></div>
+          <div class="row-flex" style="margin:12px 0">
+            <input type="text" id="newCustomer" placeholder="ชื่อลูกค้าใหม่ (เช่น THANAKORN)" class="inp" style="flex:1;max-width:320px" />
+            <button class="btn btn-primary" id="btnAddCustomer"><i data-icon="plus"></i> เพิ่มลูกค้า</button>
+            <button class="btn btn-ghost" id="btnReloadRules"><i data-icon="refresh"></i> โหลดใหม่</button>
+          </div>
+          <div id="rulesContainer"><p class="muted">กำลังโหลด…</p></div>
+          <div class="row-flex" style="margin-top:14px">
+            <button class="btn btn-success" id="btnSaveRules"><i data-icon="save"></i> บันทึกทั้งหมด</button>
+            <span id="rulesSaved" class="saved" style="display:none"><i data-icon="check"></i> บันทึกแล้ว</span>
+          </div>
+        </section>
+        </div><!-- /panel customer -->
+
+        <!-- ===== TAB: ผู้ใช้ ===== -->
+        <div class="tab-panel" data-panel="users" style="display:none">
+        <section class="card">
+          <div class="card-head"><h2><i data-icon="user"></i> สร้างผู้ใช้ใหม่</h2></div>
+          <p class="muted">สร้างบัญชีให้พนักงานเข้าใช้ระบบ — ระบบจะยืนยันอีเมลให้อัตโนมัติ พนักงานล็อกอินได้ทันที</p>
+          <div id="userNote" class="note"></div>
+          <div class="row-flex" style="margin:12px 0; flex-wrap:wrap; gap:8px">
+            <input type="email" id="newUserEmail" placeholder="อีเมล (เช่น staff@company.com)" class="inp" style="flex:1; min-width:220px" />
+            <input type="password" id="newUserPass" placeholder="รหัสผ่าน (อย่างน้อย 6 ตัว)" class="inp" style="flex:1; min-width:180px" />
+            <select id="newUserRole" class="sel">
+              <option value="user">ผู้ใช้ทั่วไป</option>
+              <option value="admin">ผู้ดูแล (admin)</option>
+            </select>
+            <button class="btn btn-primary" id="btnAddUser"><i data-icon="plus"></i> สร้างผู้ใช้</button>
+          </div>
+          <table class="dt" style="margin-top:8px">
+            <thead><tr><th>อีเมล</th><th>สิทธิ์</th><th>สถานะ</th><th>สร้างเมื่อ</th><th></th></tr></thead>
+            <tbody id="usersBody"><tr><td colspan="5" class="empty">กำลังโหลด…</td></tr></tbody>
+          </table>
+        </section>
+        </div><!-- /panel users -->
+      </div>
+    </main>
+  </div>
+
+  <!-- ===== Modal: รายละเอียด/แก้ไขใบขน ===== -->
+  <div id="modalDetail" class="modal" style="display:none">
+    <div class="modal-box modal-lg">
+      <div class="modal-head">
+        <h3 id="mdTitle">รายละเอียดใบขน</h3>
+        <button class="modal-x" id="mdClose"><i data-icon="x"></i></button>
+      </div>
+      <div class="modal-body" id="mdBody"></div>
+      <div class="modal-foot">
+        <span id="mdSaved" class="saved" style="display:none"><i data-icon="check"></i> บันทึกแล้ว</span>
+        <div style="flex:1"></div>
+        <button class="btn btn-ghost" id="mdDelete"><i data-icon="x"></i> ลบรายการ</button>
+        <button class="btn btn-primary" id="mdSave"><i data-icon="save"></i> บันทึก</button>
+        <button class="btn btn-warn" id="mdEdit" title="ต้องมีเลขใบขน DCTK ก่อน"><i data-icon="refresh"></i> แก้ไขและรัน RPA</button>
+        <button class="btn btn-success" id="mdRun"><i data-icon="play"></i> รัน RPA (สร้าง)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Modal: ดูไฟล์ (ใบขน PDF + แคปหน้าจอ) ===== -->
+  <div id="modalFiles" class="modal" style="display:none">
+    <div class="modal-box modal-lg">
+      <div class="modal-head">
+        <h3 id="filesTitle">ไฟล์เอกสาร</h3>
+        <button class="modal-x" id="filesClose"><i data-icon="x"></i></button>
+      </div>
+      <div class="modal-body" id="filesBody"><p class="muted">กำลังโหลด…</p></div>
+      <div class="modal-foot">
+        <div style="flex:1"></div>
+        <button class="btn btn-ghost" id="filesCloseBtn"><i data-icon="x"></i> ปิด</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Modal: ดู log + สาเหตุของงาน (จากประวัติงาน) ===== -->
+  <div id="modalJobLog" class="modal" style="display:none">
+    <div class="modal-box modal-lg">
+      <div class="modal-head">
+        <h3>รายละเอียดงาน / สาเหตุที่ไม่สำเร็จ</h3>
+        <button class="modal-x" id="jlClose"><i data-icon="x"></i></button>
+      </div>
+      <div class="modal-body" id="jlBody"><p class="muted">กำลังโหลด…</p></div>
+      <div class="modal-foot">
+        <div style="flex:1"></div>
+        <button class="btn btn-ghost" id="jlCloseBtn"><i data-icon="x"></i> ปิด</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Modal: ดึงอีเมล (เลือก subject ได้) ===== -->
+  <div id="modalPoll" class="modal" style="display:none">
+    <div class="modal-box">
+      <div class="modal-head"><h3>ดึงอีเมล</h3><button class="modal-x" id="pollClose"><i data-icon="x"></i></button></div>
+      <div class="modal-body">
+        <p class="muted">เว้นว่าง = ดึงอีเมลใหม่ทั้งหมดตามรายชื่อผู้ส่งที่อนุญาต · หรือใส่ Subject เพื่อดึงเฉพาะอีเมลที่ตรง</p>
+        <label class="field-label" style="margin-top:10px">Subject ที่ต้องการดึง (ไม่บังคับ)</label>
+        <input type="text" id="pollSubject" class="inp" style="width:100%" placeholder="เช่น INV202606 หรือ ชื่อเรื่องอีเมล" />
+      </div>
+      <div class="modal-foot">
+        <div style="flex:1"></div>
+        <button class="btn btn-ghost" id="pollCancel"><i data-icon="x"></i> ยกเลิก</button>
+        <button class="btn btn-primary" id="pollSubmit"><i data-icon="mail"></i> ดึงอีเมล</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Modal: อัปโหลดไฟล์ ===== -->
+  <div id="modalUpload" class="modal" style="display:none">
+    <div class="modal-box">
+      <div class="modal-head"><h3>อัปโหลดไฟล์ให้ AI สกัดข้อมูล</h3><button class="modal-x" id="upClose"><i data-icon="x"></i></button></div>
+      <div class="modal-body">
+        <p class="muted">เลือกลูกค้า + ไฟล์เอกสาร (PDF / รูป / Excel / Word) ระบบจะให้ AI อ่านตามกฎของลูกค้าแล้วสร้างรายการให้</p>
+        <div class="fld" style="margin-bottom:14px">
+          <label>ลูกค้า</label>
+          <select id="upCustomer" class="sel">
+            <option value="">— ให้ AI ระบุเอง —</option>
+          </select>
+        </div>
+        <div class="dropzone" id="dropzone">
+          <i data-icon="upload"></i>
+          <div>ลากไฟล์มาวาง หรือคลิกเพื่อเลือก</div>
+          <input type="file" id="fileInput" multiple accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,.docx,.doc" hidden />
+        </div>
+        <div id="fileList" class="file-list"></div>
+        <div id="upProgress" class="note"></div>
+      </div>
+      <div class="modal-foot">
+        <div style="flex:1"></div>
+        <button class="btn btn-ghost" id="upCancel">ยกเลิก</button>
+        <button class="btn btn-primary" id="upSubmit"><i data-icon="upload"></i> ประมวลผล</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Modal: สร้างรายการเอง ===== -->
+  <div id="modalCreate" class="modal" style="display:none">
+    <div class="modal-box modal-lg">
+      <div class="modal-head"><h3>สร้างรายการใบขนใหม่</h3><button class="modal-x" id="crClose"><i data-icon="x"></i></button></div>
+      <div class="modal-body" id="crBody"></div>
+      <div class="modal-foot">
+        <div style="flex:1"></div>
+        <button class="btn btn-ghost" id="crCancel">ยกเลิก</button>
+        <button class="btn btn-primary" id="crSubmit"><i data-icon="plus"></i> สร้างรายการ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Modal: ยืนยันการลบ ===== -->
+  <div id="modalConfirm" class="modal" style="display:none">
+    <div class="modal-box" style="width:440px">
+      <div class="modal-head"><h3 id="cfTitle">ยืนยันการลบ</h3><button class="modal-x" id="cfClose"><i data-icon="x"></i></button></div>
+      <div class="modal-body">
+        <div class="confirm-ico"><i data-icon="trash"></i></div>
+        <p id="cfMsg" style="text-align:center;margin:0"></p>
+      </div>
+      <div class="modal-foot">
+        <div style="flex:1"></div>
+        <button class="btn btn-ghost" id="cfCancel">ยกเลิก</button>
+        <button class="btn btn-danger" id="cfOk"><i data-icon="trash"></i> ลบ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- toast -->
+  <div id="toast" class="toast" style="display:none"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

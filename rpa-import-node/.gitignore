@@ -1,0 +1,7 @@
+node_modules/
+dist/
+file download/
+error_record_*.png
+data.xlsx
+*.log
+.DS_Store

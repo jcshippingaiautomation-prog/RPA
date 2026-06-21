@@ -1,0 +1,75 @@
+// ============================================================
+//  Worker-side Supabase data helpers — uploadDocument + customer settings
+//  (มินิมอล mirror จาก rpa-web/src/supabase.ts; worker import ตรงไม่ได้)
+// ============================================================
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { workerSupabase } from "./queue.js";
+import { config } from "./config.js";
+
+export interface CustomerSetting {
+  customer_name: string;
+  allowed_fields: string[];
+  presets: { [field: string]: string };
+  request_screenshot?: boolean;
+}
+
+/** อ่าน customer settings ทั้งหมด (สำหรับ build overrides เหมือน server.ts) */
+export async function listCustomerSettings(): Promise<CustomerSetting[]> {
+  try {
+    const { data, error } = await workerSupabase()
+      .from("customer_settings")
+      .select("customer_name, allowed_fields, presets, request_screenshot");
+    if (error) throw error;
+    return (data ?? []).map((r) => ({
+      customer_name: r.customer_name,
+      allowed_fields: r.allowed_fields ?? [],
+      presets: r.presets ?? {},
+      request_screenshot: r.request_screenshot ?? false,
+    }));
+  } catch (err) {
+    console.error("[worker] listCustomerSettings error:", err);
+    return [];
+  }
+}
+
+/** อัป PDF → Storage + insert documents (mirror rpa-web uploadDocument) */
+export async function uploadDocument(
+  filePath: string,
+  meta: { customer?: string | null; invoice?: string | null; kind: string },
+): Promise<{ filename: string } | null> {
+  try {
+    const sb = workerSupabase();
+    const filename = path.basename(filePath);
+    const bytes = await readFile(filePath);
+    const d = new Date();
+    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const storagePath = `${meta.kind}/${ym}/${Date.now()}_${filename}`;
+    // content type ตามนามสกุล (PDF ใบขน / PNG screenshot)
+    const lower = filename.toLowerCase();
+    const contentType = lower.endsWith(".png") ? "image/png"
+      : lower.endsWith(".jpg") || lower.endsWith(".jpeg") ? "image/jpeg"
+      : "application/pdf";
+
+    const up = await sb.storage
+      .from(config.supabase.bucket)
+      .upload(storagePath, bytes, { contentType, upsert: false });
+    if (up.error) throw up.error;
+
+    const { data: pub } = sb.storage.from(config.supabase.bucket).getPublicUrl(storagePath);
+    const record = {
+      customer: meta.customer ?? null,
+      invoice: meta.invoice ?? null,
+      kind: meta.kind,
+      filename,
+      storage_path: storagePath,
+      public_url: pub?.publicUrl ?? null,
+    };
+    const ins = await sb.from("documents").insert(record).select().single();
+    if (ins.error) throw ins.error;
+    return { filename };
+  } catch (err) {
+    console.error("[worker] uploadDocument error:", err);
+    return null;
+  }
+}

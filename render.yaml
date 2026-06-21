@@ -1,0 +1,73 @@
+# Render Blueprint — deploy เว็บ (rpa-web) + worker (rpa-worker) พร้อมกัน
+# วิธีใช้: Render Dashboard → New → Blueprint → เลือก repo นี้ → Apply
+#   จากนั้นตั้งค่า env (secrets) ในแต่ละ service ตามคู่มือ rpa-web/DEPLOY.md
+#
+# ⚠ หมายเหตุ:
+#   - secrets (SUPABASE_*, GEMINI_*, GMAIL_*) ตั้ง sync:false → ใส่เองในdashboard (ไม่เก็บใน git)
+#   - worker บน Render ต้อง plan ที่มี RAM พอ (Playwright/Chromium ~512MB-1GB)
+#     ถ้าจะรัน worker บน VM ของตัวเองแทน (ตามที่เลือก) → ลบ service "rpa-worker" บล็อกล่างออก
+#     แล้ว setup worker บน VM ตาม DEPLOY.md หัวข้อ "2) RPA Worker — VM"
+
+services:
+  # ---------- เว็บ (Express + SSE) ----------
+  - type: web
+    name: rpa-web
+    runtime: node
+    plan: free                      # free = sleep หลังไม่มีคน 15 นาที; starter ($7) = always-on
+    rootDir: rpa-web
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /login.html
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production           # เปิด auth guard (บังคับ login)
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_BUCKET
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: GMAIL_CLIENT_ID
+        sync: false
+      - key: GMAIL_CLIENT_SECRET
+        sync: false
+      - key: GMAIL_REFRESH_TOKEN
+        sync: false
+      - key: GAS_WEBAPP_URL
+        sync: false
+      - key: GAS_SHARED_TOKEN
+        sync: false
+
+  # ---------- worker (Playwright → DCTK) ----------
+  # ⚠ ถ้ารัน worker บน VM ของตัวเอง (แนะนำ เพราะ VM ต่อ DCTK ได้) → ลบบล็อกนี้ทิ้ง
+  #   แล้ว setup บน VM ตาม DEPLOY.md (Build: + npx playwright install --with-deps chromium)
+  - type: worker
+    name: rpa-worker
+    runtime: node
+    plan: starter                   # worker ต้อง RAM พอสำหรับ Chromium (free อาจไม่พอ)
+    rootDir: rpa-worker
+    buildCommand: npm install && npm run build && npx playwright install --with-deps chromium
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SUPABASE_BUCKET
+        sync: false
+      - key: WORKER_POLL_MS
+        value: "3000"
+      - key: WORKER_TYPES
+        value: rpa_import,rpa_edit
+      - key: RPA_PAUSE_ON_ERROR
+        value: "0"                  # production = ไม่ค้างเบราว์เซอร์
+      - key: RPA_HEADLESS
+        value: "1"                  # production = รันเบราว์เซอร์เงียบ
