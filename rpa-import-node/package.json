@@ -18,7 +18,7 @@
     "start": "node dist/main.js",
     "dev": "tsx src/main.ts",
     "typecheck": "tsc --noEmit",
-    "postinstall": "playwright install chromium"
+    "postinstall": "node -e \"try{require('child_process').execSync('npx playwright install chromium',{stdio:'inherit'})}catch(e){console.log('[postinstall] ข้าม playwright install (เว็บไม่ต้องใช้ chromium — worker ลงเองผ่าน build command)')}\""
   },
   "engines": {
     "node": ">=20"
