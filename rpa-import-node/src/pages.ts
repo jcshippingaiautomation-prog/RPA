@@ -702,6 +702,15 @@ async function fillOneGoodsItem(
   const descVal = String(item.description ?? "").trim();
   if (allowed(r, "description_eng") && descVal) {
     await comboPickStrict(page, S.SEL_DESC_INPUT, descVal, "รหัสสินค้า");
+    // หลังเลือกรหัสสินค้า DCTK auto-fill พิกัด/หน่วย (ใช้เวลา โดยเฉพาะบน VM ที่ช้า)
+    //   → ปิด dropdown ที่อาจค้าง + รอ DCTK เติมเสร็จ + รอช่องน้ำหนักพร้อม ก่อนกรอก (กันค้าง/timeout ยาว)
+    await page.keyboard.press("Escape").catch(() => { /* */ });
+    await page.waitForLoadState("networkidle", { timeout: 12000 }).catch(() => { /* */ });
+    await sleep(1500);
+    // รอช่องน้ำหนัก (SEL_NET_TON_1) ปรากฏ + พร้อมกรอก ก่อนไปต่อ (poll ~16s แทนรอ default 30s/ช่อง)
+    await page.waitForSelector(S.SEL_NET_TON_1, { state: "visible", timeout: 16000 }).catch(() => {
+      log("  ⚠ ช่องน้ำหนัก (Page 3) ยังไม่ขึ้นหลังเลือกสินค้า — ลองกรอกต่อ");
+    });
   }
 
   // ⚠ ทำตาม Python ที่สำเร็จเป๊ะ: Python "ไม่แตะ" Brand/descThai/descEng/พิกัด/หน่วยช่อง2/ค่าระวาง
