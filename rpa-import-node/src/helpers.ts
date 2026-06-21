@@ -540,10 +540,12 @@ async function fuzzyPickFromMaster(
   let bestRowText = "";
   for (const query of wantTok) {
     log(`  🔎 fuzzy: ค้น master ด้วยคำสำคัญ "${query}" (จาก "${want}")`);
-    await page.click(inputSelector);
-    await page.fill(inputSelector, "");
+    // ปิด dropdown เดิมที่อาจเปิดค้าง (บัง input → click ค้าง 30s บน VM) + click/fill มี timeout สั้น
+    await page.keyboard.press("Escape").catch(() => { /* */ });
+    await page.click(inputSelector, { timeout: 8000 }).catch(() => { /* */ });
+    await page.fill(inputSelector, "", { timeout: 8000 }).catch(() => { /* */ });
     await sleep(150);
-    await page.type(inputSelector, query, { delay: 50 });
+    await page.type(inputSelector, query, { delay: 50 }).catch(() => { /* */ });
     for (let w = 0; w < 14; w++) {
       if ((await page.locator(rowsSel).count()) > 0) break;
       await sleep(500);
@@ -574,12 +576,13 @@ async function fuzzyPickFromMaster(
   if (best.score >= SAFE && (!second || best.score - second.score >= 0.2 || second.score < SAFE)) {
     // ค้นชื่อ best อีกรอบให้ขึ้น dropdown แล้วคลิกแถวที่ตรง (text ตรง) เพื่อเลือก
     log(`  ✓ fuzzy: เลือก "${best.text}" (overlap ${Math.round(best.score * 100)}%) แทน "${want}"`);
-    await page.click(inputSelector);
-    await page.fill(inputSelector, "");
+    await page.keyboard.press("Escape").catch(() => { /* */ });
+    await page.click(inputSelector, { timeout: 8000 }).catch(() => { /* */ });
+    await page.fill(inputSelector, "", { timeout: 8000 }).catch(() => { /* */ });
     await sleep(150);
     // พิมพ์คำสำคัญที่ทำให้ best โผล่ (ใช้ token แรกของ best เอง)
     const bestFirstTok = productTokens(bestRowText)[0] || wantTok[0];
-    await page.type(inputSelector, bestFirstTok, { delay: 50 });
+    await page.type(inputSelector, bestFirstTok, { delay: 50 }).catch(() => { /* */ });
     for (let w = 0; w < 14; w++) {
       if ((await page.locator(rowsSel).count()) > 0) break;
       await sleep(500);
