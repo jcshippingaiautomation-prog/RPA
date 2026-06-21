@@ -540,18 +540,26 @@ async function fuzzyPickFromMaster(
   let bestRowText = "";
   for (const query of wantTok) {
     log(`  🔎 fuzzy: ค้น master ด้วยคำสำคัญ "${query}" (จาก "${want}")`);
-    // ปิด dropdown เดิมที่อาจเปิดค้าง (บัง input → click ค้าง 30s บน VM) + click/fill มี timeout สั้น
+    // ปิด dropdown เดิมที่อาจเปิดค้าง (บัง input → click ค้าง 30s บน VM) + ทุก action มี timeout สั้น + log สเต็ป
     await page.keyboard.press("Escape").catch(() => { /* */ });
-    await page.click(inputSelector, { timeout: 8000 }).catch(() => { /* */ });
-    await page.fill(inputSelector, "", { timeout: 8000 }).catch(() => { /* */ });
-    await sleep(150);
-    await page.type(inputSelector, query, { delay: 50 }).catch(() => { /* */ });
+    log(`     · click ช่องค้น...`);
+    await page.click(inputSelector, { timeout: 8000 }).catch((e) => log(`     ⚠ click fail: ${String(e).slice(0, 40)}`));
+    log(`     · เคลียร์ + พิมพ์ "${query}"...`);
+    await page.fill(inputSelector, query, { timeout: 8000 }).catch((e) => log(`     ⚠ fill fail: ${String(e).slice(0, 40)}`));
+    // กระตุ้น Kendo ให้ค้น (fill อย่างเดียวบางทีไม่ trigger) — พิมพ์ตัวสุดท้ายซ้ำ
+    await page.locator(inputSelector).press("End", { timeout: 4000 }).catch(() => { /* */ });
+    await page.keyboard.type(" ", { delay: 20 }).catch(() => { /* */ });
+    await page.keyboard.press("Backspace").catch(() => { /* */ });
+    log(`     · รอ dropdown...`);
+    let appeared = false;
     for (let w = 0; w < 14; w++) {
-      if ((await page.locator(rowsSel).count()) > 0) break;
+      const c = await page.locator(rowsSel).count().catch(() => 0);
+      if (c > 0) { appeared = true; break; }
       await sleep(500);
     }
+    log(`     · dropdown ${appeared ? "ขึ้นแล้ว" : "ไม่ขึ้น (7s)"}`);
     const rows = page.locator(rowsSel);
-    const n = await rows.count();
+    const n = await rows.count().catch(() => 0);
     if (n === 0) { log(`  🔎 fuzzy: ค้น "${query}" ไม่เจอแถว — ลองคำถัดไป`); continue; }
 
     // เก็บ candidate ที่ดีสุด/รองจากแถวที่ขึ้นกับ query นี้
