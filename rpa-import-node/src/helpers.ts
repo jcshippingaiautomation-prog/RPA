@@ -585,24 +585,34 @@ async function fuzzyPickFromMaster(
     // ค้นชื่อ best อีกรอบให้ขึ้น dropdown แล้วคลิกแถวที่ตรง (text ตรง) เพื่อเลือก
     log(`  ✓ fuzzy: เลือก "${best.text}" (overlap ${Math.round(best.score * 100)}%) แทน "${want}"`);
     await page.keyboard.press("Escape").catch(() => { /* */ });
+    log(`     · click+พิมพ์ใหม่เพื่อเปิด dropdown เลือก...`);
     await page.click(inputSelector, { timeout: 8000 }).catch(() => { /* */ });
-    await page.fill(inputSelector, "", { timeout: 8000 }).catch(() => { /* */ });
-    await sleep(150);
-    // พิมพ์คำสำคัญที่ทำให้ best โผล่ (ใช้ token แรกของ best เอง)
+    // พิมพ์คำสำคัญที่ทำให้ best โผล่ (ใช้ token แรกของ best เอง) — fill มี timeout
     const bestFirstTok = productTokens(bestRowText)[0] || wantTok[0];
-    await page.type(inputSelector, bestFirstTok, { delay: 50 }).catch(() => { /* */ });
+    await page.fill(inputSelector, bestFirstTok, { timeout: 8000 }).catch(() => { /* */ });
+    await page.locator(inputSelector).press("End", { timeout: 4000 }).catch(() => { /* */ });
+    await page.keyboard.type(" ", { delay: 20 }).catch(() => { /* */ });
+    await page.keyboard.press("Backspace").catch(() => { /* */ });
+    log(`     · รอ dropdown รอบเลือก...`);
     for (let w = 0; w < 14; w++) {
-      if ((await page.locator(rowsSel).count()) > 0) break;
+      if ((await page.locator(rowsSel).count().catch(() => 0)) > 0) break;
       await sleep(500);
     }
     const rows = page.locator(rowsSel);
-    const n = await rows.count();
+    const n = await rows.count().catch(() => 0);
+    log(`     · มี ${n} แถว — หาแถว "${best.text}" เพื่อคลิก`);
+    // หาแถว text ตรง → คลิก (timeout สั้น กันค้าง)
     for (let i = 0; i < n; i++) {
       const cell = rows.nth(i).locator("span.k-cell").first();
       let t = "";
       try { t = ((await cell.count()) ? await cell.innerText() : await rows.nth(i).innerText()).trim().toUpperCase(); }
       catch { continue; }
-      if (t === best.text) { await rows.nth(i).click(); await sleep(300); return true; }
+      if (t === best.text) {
+        log(`     · คลิกแถว ${i} (ตรง)`);
+        await rows.nth(i).click({ timeout: 8000 }).catch(() => { /* */ });
+        await sleep(300);
+        return true;
+      }
     }
     // เผื่อหาแถวเป๊ะไม่เจอ — คลิกแถวที่ score สูงสุดในรอบนี้
     let bi = -1, bs = -1;
@@ -613,7 +623,18 @@ async function fuzzyPickFromMaster(
       catch { continue; }
       const sc = scoreOf(t); if (sc > bs) { bs = sc; bi = i; }
     }
-    if (bi >= 0 && bs >= SAFE) { await rows.nth(bi).click(); await sleep(300); return true; }
+    if (bi >= 0 && bs >= SAFE) {
+      log(`     · คลิกแถว ${bi} (score สูงสุด ${Math.round(bs * 100)}%)`);
+      await rows.nth(bi).click({ timeout: 8000 }).catch(() => { /* */ });
+      await sleep(300);
+      return true;
+    }
+    // เผื่อคลิกแถวไม่ได้เลย — ลอง ArrowDown+Enter เลือก highlighted (Kendo combo)
+    log(`     · คลิกแถวไม่สำเร็จ — ลอง ArrowDown+Enter`);
+    await page.keyboard.press("ArrowDown").catch(() => { /* */ });
+    await page.keyboard.press("Enter").catch(() => { /* */ });
+    await sleep(300);
+    return true;
   }
   log(`  🔎 fuzzy: ไม่กล้าเลือก (best="${best?.text}" ${Math.round((best?.score ?? 0) * 100)}%, รอง="${second?.text}" ${Math.round((second?.score ?? 0) * 100)}%) — ปล่อยให้ error`);
   return false;
