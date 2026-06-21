@@ -352,43 +352,54 @@ async function putCountryCode(
     try { return (await loc.inputValue()).trim().toUpperCase(); } catch { return ""; }
   };
 
-  // ลองหลายวิธีจนกว่าค่าจะ = want (DCTK ช้า/autocomplete ดักตัวอักษร ไม่แน่นอนแต่ละรอบ)
-  for (let attempt = 1; attempt <= 4; attempt++) {
-    // เคลียร์ช่องก่อน
+  // ลองหลายวิธีจนกว่าค่าจะ = want (DCTK ช้า/autocomplete ดักตัวอักษร — timing ต่างกันแต่ละเครื่อง/VM)
+  //   6 รอบ × 4 วิธีหมุนเวียน: พิมพ์ทีละตัว+Esc / fill+Esc / พิมพ์+ArrowDown+Enter / force-set DOM+Kendo
+  for (let attempt = 1; attempt <= 6; attempt++) {
+    // เคลียร์ช่องก่อนทุกครั้ง
     await loc.evaluate((el: any) => { el.focus(); el.click(); }).catch(() => { /* */ });
     await page.keyboard.press("Control+A").catch(() => { /* */ });
+    await page.keyboard.press("Delete").catch(() => { /* */ });
     await page.keyboard.press("Backspace").catch(() => { /* */ });
-    await page.waitForTimeout(120);
+    await page.waitForTimeout(200);
 
-    if (attempt <= 2) {
-      // วิธี A: พิมพ์ทีละตัว + Escape ปิด autocomplete หลัง "แต่ละตัว" (กันตัวที่ 2 โดนดัก)
+    const method = ((attempt - 1) % 4) + 1;
+    if (method === 1) {
+      // วิธี 1: พิมพ์ทีละตัว + Escape หลังแต่ละตัว (กัน autocomplete ดักตัวที่ 2)
       for (const ch of want) {
-        await page.keyboard.type(ch, { delay: 120 });
+        await page.keyboard.type(ch, { delay: 180 });
         await page.keyboard.press("Escape");
-        await page.waitForTimeout(120);
+        await page.waitForTimeout(180);
       }
+    } else if (method === 2) {
+      // วิธี 2: fill ทั้งคำทีเดียว (เร็ว ไม่ทันให้ autocomplete แทรก) + Escape
+      await loc.fill(want).catch(() => { /* */ });
+      await page.waitForTimeout(150);
+      await page.keyboard.press("Escape").catch(() => { /* */ });
+    } else if (method === 3) {
+      // วิธี 3: พิมพ์ทั้งคำ → รอ dropdown → ArrowDown+Enter เลือกตัวเลือกแรก (เผื่อ DCTK บังคับเลือกจาก list)
+      await loc.type(want, { delay: 150 }).catch(() => { /* */ });
+      await page.waitForTimeout(900);
+      await page.keyboard.press("ArrowDown").catch(() => { /* */ });
+      await page.keyboard.press("Enter").catch(() => { /* */ });
     } else {
-      // วิธี B: force-set ค่าตรงผ่าน DOM + dispatch (เผื่อพิมพ์ไม่ติดเลย)
+      // วิธี 4: force-set ตรงทั้ง input value + dispatch event ครบ (input/keyup/change/blur)
       await loc.evaluate((el: any, v: string) => {
-        el.focus();
-        el.value = v;
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("keyup", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.focus(); el.value = v;
+        ["input", "keyup", "change"].forEach((ev) => el.dispatchEvent(new Event(ev, { bubbles: true })));
       }, want);
       await page.keyboard.press("Escape").catch(() => { /* */ });
     }
-    await page.waitForTimeout(250);
+    await page.waitForTimeout(350);
     const got = await readVal();
     if (got === want) {
-      log(`  ✓ รหัสประเทศ [${sheetField}] = "${got}" (วิธี ${attempt <= 2 ? "พิมพ์ทีละตัว" : "force-set"}, รอบ ${attempt})`);
+      log(`  ✓ รหัสประเทศ [${sheetField}] = "${got}" (วิธี ${method}, รอบ ${attempt})`);
       await loc.evaluate((el: any) => el.blur());
       await page.waitForTimeout(100);
       return;
     }
-    log(`  ⚠ รหัสประเทศ [${sheetField}] รอบ ${attempt} ได้ "${got}" ≠ "${want}" — ลองใหม่`);
+    log(`  ⚠ รหัสประเทศ [${sheetField}] รอบ ${attempt} (วิธี ${method}) ได้ "${got}" ≠ "${want}" — ลองใหม่`);
   }
-  log(`  🛑 รหัสประเทศ [${sheetField}] ใส่ "${want}" ไม่สำเร็จหลัง 4 รอบ (DCTK ช้า/autocomplete) — ทำต่อ (อาจ save ไม่ผ่าน)`);
+  log(`  🛑 รหัสประเทศ [${sheetField}] ใส่ "${want}" ไม่สำเร็จหลัง 6 รอบ — ทำต่อ (อาจ save ไม่ผ่าน)`);
   await loc.evaluate((el: any) => el.blur()).catch(() => { /* */ });
   await page.waitForTimeout(100);
 }
