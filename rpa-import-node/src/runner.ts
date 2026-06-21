@@ -119,8 +119,18 @@ export interface RunResult {
 }
 
 export async function loadConfig(): Promise<AppConfig> {
-  const raw = await readFile(CONFIG_PATH, "utf-8");
-  return JSON.parse(raw) as AppConfig;
+  // ถ้าไม่มี config.json (เช่น เว็บบน Render ที่ไม่มี DCTK credentials — มีแค่ worker บน VM)
+  //   → คืน config เปล่า ไม่ throw. เว็บใช้ previewRows แค่หา row index จาก Supabase
+  //   ไม่ต้องใช้ DCTK url/pass; ส่วน worker (ที่เปิด browser จริง) มี config.json อยู่แล้ว
+  try {
+    const raw = await readFile(CONFIG_PATH, "utf-8");
+    return JSON.parse(raw) as AppConfig;
+  } catch (e: unknown) {
+    if ((e as { code?: string })?.code === "ENOENT") {
+      return {} as AppConfig; // เว็บ: ไม่มี config.json → ใช้ค่าเปล่า (ดึง records จาก Supabase ได้ปกติ)
+    }
+    throw e;
+  }
 }
 
 /** ผูก field_rules + customer_rule + capture flag ให้แต่ละ record (Python _attach_rules) */
