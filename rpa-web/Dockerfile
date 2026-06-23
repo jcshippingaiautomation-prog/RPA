@@ -3,7 +3,7 @@
 # ⚠ Build context = REPO ROOT (ไม่ใช่ rpa-web/) เพราะ rpa-web พึ่ง rpa-import-node แบบ
 #   "file:../rpa-import-node" → Docker ต้องเห็นทั้ง 2 โฟลเดอร์ (เหมือน build-web.sh)
 #   render.yaml ตั้ง dockerContext: . และ dockerfilePath: ./rpa-web/Dockerfile
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
 # LibreOffice (calc/writer) + ฟอนต์ไทย (จำเป็น ไม่งั้น xlsx ไทยเพี้ยน/กลายเป็นกล่อง)
 RUN apt-get update \
