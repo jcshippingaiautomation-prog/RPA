@@ -10,13 +10,14 @@
 
 services:
   # ---------- เว็บ (Express + SSE) ----------
+  # runtime: docker → image มี LibreOffice (soffice) แปลง xlsx/docx → PDF ก่อนส่ง Gemini
+  #   (ไม่งั้น Gemini ตอบ HTTP 400 "Unsupported MIME type" กับไฟล์ Excel)
   - type: web
     name: rpa-web
-    runtime: node
+    runtime: docker
     plan: free                      # free = sleep หลังไม่มีคน 15 นาที; starter ($7) = always-on
-    rootDir: rpa-web
-    buildCommand: npm install && npm run build
-    startCommand: npm start
+    dockerContext: .                # build จาก repo root (rpa-web พึ่ง rpa-import-node)
+    dockerfilePath: ./rpa-web/Dockerfile
     healthCheckPath: /login.html
     autoDeploy: true
     envVars:
