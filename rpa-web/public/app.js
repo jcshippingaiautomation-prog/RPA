@@ -566,12 +566,40 @@ async function openFiles(id) {
         </div>
       </div>`;
     };
+    // ถ้ามีเลขใบขนแล้ว แต่ยังไม่มีไฟล์ใบขนจริง (declaration) — เสนอ "พิมพ์ใบขนซ้ำ"
+    //   (เกิดตอน finalize พลาดเพราะ DCTK ค้าง: ใบสร้างใน DCTK แล้ว ได้แต่ capture)
+    const hasDeclNo = !!String(d.declaration_no ?? "").trim();
+    const needsReprint = hasDeclNo && !pdfs.length;
+    const reprintBox = needsReprint
+      ? `<div class="files-section">
+           <p class="muted" style="margin:0 0 8px">⚠ ยังไม่มีไฟล์ใบขนจริง (มีแต่แคปหน้าจอ) — ใบขน ${escapeHtml(String(d.declaration_no))} ถูกสร้างใน DCTK แล้ว กดพิมพ์ใบขนจริงออกมาได้</p>
+           <button class="btn btn-dark btn-xs actReprint" data-id="${d.id}">${svgIcon("play", 13)} พิมพ์ใบขนซ้ำ (ดึง PDF จริงจาก DCTK)</button>
+         </div>`
+      : "";
     body.innerHTML = `
+      ${reprintBox}
       ${pdfs.length ? `<div class="files-section"><div class="files-section-title">📄 ใบขนสินค้า (PDF)</div><div class="files-grid">${pdfs.map(fileRow).join("")}</div></div>` : ""}
       ${captures.length ? `<div class="files-section"><div class="files-section-title">📸 แคปหน้าจอ (PDF รวมทุกหน้า)</div><div class="files-grid">${captures.map(fileRow).join("")}</div></div>` : ""}
     ` || '<p class="muted">ยังไม่มีไฟล์</p>';
+    const reBtn = body.querySelector(".actReprint");
+    if (reBtn) reBtn.onclick = () => reprintDeclaration(reBtn.dataset.id);
   } catch (e) {
     body.innerHTML = `<p class="muted">โหลดไฟล์ไม่ได้: ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+// พิมพ์ใบขนซ้ำ — ส่ง RPA ไปค้นใบเดิมใน DCTK แล้วพิมพ์ PDF จริง (ไม่สร้างใบใหม่)
+async function reprintDeclaration(id) {
+  const d = DECLS.find((x) => x.id === id);
+  if (!d) return;
+  if (!confirm(`พิมพ์ใบขนซ้ำ?\n\n${d.customer_name || ""} — เลขใบขน ${d.declaration_no || ""}\n\nRPA จะเข้า DCTK ค้นใบนี้แล้วพิมพ์ PDF จริง (ไม่สร้างใบใหม่)`)) return;
+  try {
+    await api(`/api/declarations/${encodeURIComponent(id)}/reprint`, "POST", {});
+    closeFiles();
+    toast("ส่งเข้าคิวพิมพ์ใบขนซ้ำแล้ว — รอ worker พิมพ์ (ดูสถานะที่รายการ)", "success");
+    setDeclStatusLocal(id, "queued", "ส่งเข้าคิวพิมพ์ใบขนซ้ำ");
+  } catch (e) {
+    toast("ส่งคำสั่งพิมพ์ซ้ำไม่สำเร็จ: " + e.message, "error");
   }
 }
 

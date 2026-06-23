@@ -159,6 +159,22 @@ export async function finalizeAndPrint(
     log("  ✗ เลือกแถวใบเพื่อพิมพ์ไม่สำเร็จ: grid ไม่ขึ้นหลังรอ ~50s");
     return { pdf: null, declarationNo };
   }
+
+  // grid พร้อมแล้ว → เลือกแถวใบ + พิมพ์ PDF (แยกเป็นฟังก์ชันให้ reprint reuse ได้)
+  return clickRowAndPrint(page, context, downloadDir, declarationNo);
+}
+
+/**
+ * เลือกแถวใบใน grid (ตาม declarationNo) → คลิกพิมพ์ใบขนสินค้า → save PDF จาก Stimulsoft viewer.
+ * Precondition: page อยู่หน้ารายการใบขน (portfolio) + grid โหลดแถวแล้ว.
+ * ใช้ร่วมกันระหว่าง finalizeAndPrint (สร้างใหม่) และ reprintDeclaration (พิมพ์ซ้ำ).
+ */
+async function clickRowAndPrint(
+  page: Page,
+  context: BrowserContext,
+  downloadDir: string,
+  declarationNo: string | null,
+): Promise<FinalizeResult> {
   //   ⚠ สำคัญ: ใบที่เพิ่งสร้าง "อาจไม่ใช่แถวแรก" — DCTK มักมีใบเปล่า (referenceNo ใหม่ ยังไม่มี invoice)
   //     ค้างอยู่แถวบนสุด → ต้องเลือกแถวที่ "เลขที่อ้างอิง = declarationNo" ของเราจริง ไม่ใช่แถวแรกเสมอ
   try {
@@ -334,4 +350,56 @@ export async function finalizeAndPrint(
   }
 
   return { pdf: captured ? dest : null, declarationNo };
+}
+
+/**
+ * พิมพ์ใบขนซ้ำ (reprint) — ไม่สร้างใบใหม่/ไม่กรอกฟอร์ม.
+ * Precondition: login DCTK สำเร็จแล้ว (page อยู่หน้าหลัง login).
+ * Flow: เปิดเมนูรายการใบขน (portfolio) → ค้นด้วย declarationNo → เลือกแถว → คลิกพิมพ์ → save PDF.
+ * ใช้ตอน finalize ตอนสร้างใบล้มเหลว (DCTK ค้าง) แต่ใบถูกสร้างใน DCTK แล้ว — มาพิมพ์ทีหลัง.
+ */
+export async function reprintDeclaration(
+  page: Page,
+  context: BrowserContext,
+  downloadDir: string,
+  declarationNo: string,
+): Promise<FinalizeResult> {
+  log(`Reprint → พิมพ์ใบขนซ้ำ: ${declarationNo}`);
+  const declNo = declarationNo.trim().toUpperCase();
+  if (!declNo) {
+    log("  ✗ ไม่มีเลขใบขนสำหรับพิมพ์ซ้ำ");
+    return { pdf: null, declarationNo: null };
+  }
+
+  // 1) เปิดเมนูรายการใบขน (portfolio)
+  await page.click(S.SEL_PORTFOLIO_MENU, { timeout: 10000 }).catch((e) => {
+    log(`  ⚠ เปิดเมนู portfolio ไม่สำเร็จ: ${e instanceof Error ? e.message.slice(0, 60) : ""}`);
+  });
+  await sleep(5000);
+
+  // 2) ค้นด้วยเลขใบขน (filter cell คอลัมน์ "เลขที่ใบขนฯ") — best-effort
+  //    ถ้าหาช่องค้นไม่เจอ ยังไปต่อได้ (clickRowAndPrint จะหาแถวตาม declNo เอง)
+  try {
+    const search = page.locator(S.SEL_DECL_SEARCH_INPUT).first();
+    if (await search.count().catch(() => 0)) {
+      await search.click({ timeout: 8000 });
+      await search.fill(declNo);
+      await page.keyboard.press("Enter");
+      log(`  🔎 ค้นใบเลข ${declNo}`);
+      await sleep(4000);
+    } else {
+      log("  ℹ ไม่เจอช่องค้น (filter) — ใช้การหาแถวตามเลขใบใน grid แทน");
+    }
+  } catch (e) {
+    log(`  ⚠ ค้นใบไม่สำเร็จ: ${e instanceof Error ? e.message.slice(0, 60) : ""} — ลองหาแถวใน grid ต่อ`);
+  }
+
+  // 3) รอ grid โหลดแถว แล้วเลือกแถว + พิมพ์ (reuse logic เดียวกับ finalize)
+  try {
+    await page.waitForSelector(S.SEL_GRID_FIRST_ROW, { timeout: 30000 });
+  } catch {
+    log("  ✗ grid รายการใบขนไม่ขึ้น — พิมพ์ซ้ำไม่สำเร็จ");
+    return { pdf: null, declarationNo: declNo };
+  }
+  return clickRowAndPrint(page, context, downloadDir, declNo);
 }

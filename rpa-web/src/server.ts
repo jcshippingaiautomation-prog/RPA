@@ -106,7 +106,7 @@ const state: RunState = {
 // map jobId → declarationId (รัน RPA ต่อใบ → อัปเดตสถานะใบเมื่อ job เสร็จ)
 const jobToDeclaration = new Map<string, string>();
 // jobId → "import" | "edit" (ให้ bridge ตั้งสถานะ done vs edited ถูก)
-const jobKind = new Map<string, "import" | "edit">();
+const jobKind = new Map<string, "import" | "edit" | "print">();
 
 // ---- SSE clients -------------------------------------------
 type Client = Response;
@@ -378,6 +378,41 @@ app.post("/api/declarations/:id/run", async (req, res) => {
     state.running = true;
     state.activeJobId = jobId;
     broadcast("decl-status", { id, status: "queued", message: "ส่งเข้าคิว RPA แล้ว" });
+    res.json({ ok: true, jobId });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// พิมพ์ใบขนซ้ำ: RPA ไปค้นใบเดิมใน DCTK (ด้วย declaration_no) → พิมพ์ PDF (ไม่กรอก/ไม่สร้างใหม่)
+//   ใช้ตอน finalize ตอนสร้างล้มเหลว (DCTK ค้าง) แต่ใบถูกสร้างใน DCTK แล้ว → มาพิมพ์ใบขนจริงทีหลัง
+app.post("/api/declarations/:id/reprint", async (req, res) => {
+  if (!supabaseEnabled()) { res.status(400).json({ error: "ยังไม่ได้ตั้งค่า Supabase" }); return; }
+  const id = req.params.id;
+  try {
+    const decl = await getDeclaration(id);
+    if (!decl) { res.status(404).json({ error: "ไม่พบรายการ" }); return; }
+    const declarationNo = String(decl.declaration_no ?? "").trim();
+    if (!declarationNo) {
+      res.status(400).json({ error: "ยังไม่มีเลขใบขน DCTK — ต้องมีเลขใบขนก่อนถึงพิมพ์ซ้ำได้" });
+      return;
+    }
+    const rows = await buildPreviewRows();
+    const row = rows.find((r) => String(r.declarationId) === String(id));
+    if (!row) { res.status(404).json({ error: "ไม่พบใบขนนี้ในรายการที่ดึงมา" }); return; }
+    const headless = (req.body && (req.body as { headless?: boolean }).headless) ?? true;
+    const jobId = await enqueueJob(
+      "rpa_print",
+      { onlyRows: [row.index], headless, declId: id, declaration_no: declarationNo },
+      { dryRun: false, triggeredBy: req.user?.id ?? null, triggerSource: "manual" },
+    );
+    if (!jobId) { res.status(409).json({ error: "คิวไม่พร้อม" }); return; }
+    await setDeclarationStatus(id, "queued", "ส่งเข้าคิวพิมพ์ใบขนซ้ำ", jobId);
+    jobToDeclaration.set(jobId, id);
+    jobKind.set(jobId, "print");
+    state.running = true;
+    state.activeJobId = jobId;
+    broadcast("decl-status", { id, status: "queued", message: "ส่งเข้าคิวพิมพ์ใบขนซ้ำ" });
     res.json({ ok: true, jobId });
   } catch (err) {
     res.status(500).json({ error: String(err) });

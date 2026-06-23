@@ -143,6 +143,41 @@ async function runRpaEdit(job: JobRow): Promise<void> {
   await markDone(job.id, result as unknown as Record<string, unknown>);
 }
 
+/** รันงาน rpa_print 1 งาน — พิมพ์ใบเดิมซ้ำ (ค้นใบใน DCTK ด้วย declaration_no → พิมพ์ PDF, ไม่กรอก/ไม่สร้างใหม่) */
+async function runRpaPrint(job: JobRow): Promise<void> {
+  const payload = job.payload as {
+    onlyRows?: number[]; headless?: boolean; declId?: string; declaration_no?: string;
+  };
+  const onlyRows = Array.isArray(payload.onlyRows) ? payload.onlyRows : undefined;
+  const declarationNo = String(payload.declaration_no ?? "");
+
+  const configOverrides: Partial<AppConfig> = {};
+  if (typeof payload.headless === "boolean") configOverrides.headless = payload.headless;
+
+  await appendLog(job.id, "lifecycle", { event: "run-start", startedAt: Date.now(), mode: "reprint" });
+  await appendLog(job.id, "log", { line: `[WORKER] 🖨 พิมพ์ใบขนซ้ำ DCTK เลข ${declarationNo}` });
+
+  const result = await runImport({
+    mode: "reprint",
+    editDeclarationNo: declarationNo,
+    editDeclarationId: payload.declId,
+    configOverrides,
+    onlyRows,
+    onLog: (line) => void appendLog(job.id, "log", { line }),
+    onRows: (rows: RowInfo[]) => void appendLog(job.id, "row", { rows }),
+    onRowStatus: (row) => void appendLog(job.id, "row-status", row),
+    onDocument: async (doc) => {
+      const rec = await uploadDocument(doc.filePath, { customer: doc.customer, invoice: doc.invoice, kind: doc.kind });
+      if (rec) await appendLog(job.id, "document", rec);
+    },
+    onCaptureMeta: async (meta) => void appendLog(job.id, "capture-meta", meta),
+    shouldStop: () => cancelFlag,
+  });
+
+  await appendLog(job.id, "lifecycle", { event: "run-done", result, mode: "reprint" });
+  await markDone(job.id, result as unknown as Record<string, unknown>);
+}
+
 // flag cancel ต่อ-งาน (poll ขนานกันระหว่างรัน)
 let cancelFlag = false;
 
@@ -165,6 +200,8 @@ async function handleJob(job: JobRow): Promise<void> {
       await runRpaImport(job);
     } else if (job.type === "rpa_edit") {
       await runRpaEdit(job);
+    } else if (job.type === "rpa_print") {
+      await runRpaPrint(job);
     } else if (job.type === "get_email") {
       // get_email รันผ่านเว็บ (in-process processInbox) ไม่ผ่าน worker queue
       //   ถ้ามี job ชนิดนี้หลุดเข้าคิว → จบแบบ done (emit lifecycle กัน state ค้าง)

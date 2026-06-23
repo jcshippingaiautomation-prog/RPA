@@ -770,7 +770,7 @@ export async function getAllowlistSenders(): Promise<string[]> {
 // ============================================================
 //  Job queue (Phase C) — web enqueue งาน, worker (VM) มาหยิบทำ
 // ============================================================
-export type JobType = "rpa_import" | "get_email" | "rpa_edit";
+export type JobType = "rpa_import" | "get_email" | "rpa_edit" | "rpa_print";
 export type JobStatus = "pending" | "processing" | "done" | "error" | "cancel";
 
 export interface JobRow {

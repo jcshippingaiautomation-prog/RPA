@@ -23,7 +23,7 @@ import {
 import { login, openPortfolioAndAdd, fillPage1, fillPage2, fillPage2Open, fillPage2Fill, fillPage3, openDeclarationForEdit, saveDeclarationEdit } from "./pages.js";
 import * as S from "./selectors.js";
 import { dumpPage, dumpGridColumns } from "./inspect.js";
-import { finalizeAndPrint } from "./finalize.js";
+import { finalizeAndPrint, reprintDeclaration } from "./finalize.js";
 import { sendEmailWithPdf, buildCapturePdf } from "./email.js";
 import type { AppConfig, Record } from "./types.js";
 
@@ -80,11 +80,11 @@ export interface RunOptions {
    * สำหรับหา selectors หน้าค้น/แก้ใบขนเดิม (ดู RPA_INSPECT_DECL_NO เป็นเลขทดสอบ)
    */
   inspectEdit?: boolean;
-  /** โหมดทำงาน: "create" (สร้างใบใหม่ default) | "edit" (ค้นใบเดิม→แก้) */
-  mode?: "create" | "edit";
-  /** เลขใบขน DCTK ที่จะค้นเพื่อแก้ (mode=edit) */
+  /** โหมดทำงาน: "create" (สร้างใบใหม่ default) | "edit" (ค้นใบเดิม→แก้) | "reprint" (พิมพ์ใบเดิมซ้ำ ไม่กรอก) */
+  mode?: "create" | "edit" | "reprint";
+  /** เลขใบขน DCTK ที่จะค้นเพื่อแก้ (mode=edit) หรือพิมพ์ซ้ำ (mode=reprint) */
   editDeclarationNo?: string;
-  /** id ใน Supabase ของใบที่จะแก้ (mode=edit — ผูก status) */
+  /** id ใน Supabase ของใบที่จะแก้/พิมพ์ซ้ำ (ผูก status + onCaptureMeta/onDocument) */
   editDeclarationId?: string;
   /** รันเฉพาะแถวเหล่านี้ (1-based). ว่าง = ทุกแถว */
   onlyRows?: number[];
@@ -736,6 +736,42 @@ async function runBrowser(
         result.errors++;
       }
       break; // inspect แค่ record เดียวพอ
+    }
+
+    // ---- REPRINT MODE: พิมพ์ใบเดิมซ้ำ (ไม่กรอก/ไม่สร้างใหม่) — ค้นใบใน DCTK → พิมพ์ PDF ----
+    if (opts.mode === "reprint") {
+      try {
+        const declNo = String(opts.editDeclarationNo ?? record.declaration_no ?? "");
+        if (!declNo) throw new Error("ไม่มีเลขใบขน DCTK สำหรับพิมพ์ซ้ำ");
+        const { pdf, declarationNo } = await reprintDeclaration(page, context, downloadDir, declNo);
+        if (!pdf) throw new Error("พิมพ์ใบขนซ้ำไม่สำเร็จ (ดู log — DCTK อาจค้าง/หาใบไม่เจอ)");
+        // อัปเอกสารใบขนจริง (declaration) → caller เก็บลง Supabase
+        if (opts.onDocument) {
+          const { customer, invoice } = rowLabel(record);
+          try {
+            await opts.onDocument({ filePath: pdf, kind: "declaration", customer, invoice });
+          } catch (e) {
+            log(`  ⚠ onDocument callback error: ${e}`);
+          }
+        }
+        // ยืนยันเลขใบขน (เผื่อ caller ยังไม่มี)
+        if (declarationNo && opts.onCaptureMeta) {
+          try {
+            await opts.onCaptureMeta({
+              declarationId: record.__supabase_id__ != null ? String(record.__supabase_id__) : undefined,
+              declarationNo,
+            });
+          } catch { /* ignore */ }
+        }
+        setStatus(idx, "done");
+        result.done++;
+      } catch (ex) {
+        const msg = ex instanceof Error ? ex.message : String(ex);
+        log(`  ✗ พิมพ์ซ้ำ Record ${i} error: ${msg}`);
+        setStatus(idx, "error", msg);
+        result.errors++;
+      }
+      continue;
     }
 
     // ---- EDIT MODE: ค้นใบเดิมใน DCTK → แก้ช่อง → save (reuse fillPage*) ----

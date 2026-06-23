@@ -7,7 +7,7 @@ import { config } from "./config.js";
 
 export interface JobRow {
   id: string;
-  type: "rpa_import" | "get_email" | "rpa_edit";
+  type: "rpa_import" | "get_email" | "rpa_edit" | "rpa_print";
   status: "pending" | "processing" | "done" | "error" | "cancel";
   payload: Record<string, unknown>;
   dry_run: boolean;
