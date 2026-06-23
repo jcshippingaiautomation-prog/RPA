@@ -366,7 +366,8 @@ app.post("/api/declarations/:id/run", async (req, res) => {
     const headless = (req.body && (req.body as { headless?: boolean }).headless) ?? true;
     const jobId = await enqueueJob(
       "rpa_import",
-      { onlyRows: [row.index], headless },
+      // declId ลง payload ด้วย (persistent) — bridge fallback อ่านได้แม้เว็บ restart/หน่วยความจำหาย
+      { onlyRows: [row.index], headless, declId: id },
       { dryRun: false, triggeredBy: req.user?.id ?? null, triggerSource: "manual" },
     );
     if (!jobId) { res.status(409).json({ error: "กำลังรันอยู่ หรือคิวไม่พร้อม" }); return; }
