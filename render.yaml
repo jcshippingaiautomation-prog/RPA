@@ -47,28 +47,7 @@ services:
         sync: false
 
   # ---------- worker (Playwright → DCTK) ----------
-  # ⚠ ถ้ารัน worker บน VM ของตัวเอง (แนะนำ เพราะ VM ต่อ DCTK ได้) → ลบบล็อกนี้ทิ้ง
-  #   แล้ว setup บน VM ตาม DEPLOY.md (Build: + npx playwright install --with-deps chromium)
-  - type: worker
-    name: rpa-worker
-    runtime: node
-    plan: starter                   # worker ต้อง RAM พอสำหรับ Chromium (free อาจไม่พอ)
-    rootDir: rpa-worker
-    buildCommand: npm install && npm run build && npx playwright install --with-deps chromium
-    startCommand: npm start
-    autoDeploy: true
-    envVars:
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_SERVICE_KEY
-        sync: false
-      - key: SUPABASE_BUCKET
-        sync: false
-      - key: WORKER_POLL_MS
-        value: "3000"
-      - key: WORKER_TYPES
-        value: rpa_import,rpa_edit
-      - key: RPA_PAUSE_ON_ERROR
-        value: "0"                  # production = ไม่ค้างเบราว์เซอร์
-      - key: RPA_HEADLESS
-        value: "1"                  # production = รันเบราว์เซอร์เงียบ
+  # ⛔ worker ไม่ deploy บน Render — รันบน Windows VM (pm2) แทน เพราะ VM ต่อ DCTK ได้
+  #    + Render worker ต้อง plan starter ($7) = บังคับใส่บัตร
+  #    setup worker บน VM: rpa-worker/install-service-pm2.ps1 (ดู DEPLOY.md)
+  #    ถ้าอนาคตอยากย้าย worker มา Render → เพิ่ม block "type: worker" กลับมา (plan: starter)
