@@ -82,16 +82,17 @@ export async function finalizeAndPrint(
     return open.length ? open[open.length - 1] : page;
   };
   // helper: คลิกแบบทน (ถ้า page ปิด/ปุ่มหาย ไม่ throw)
-  const safeClick = async (sel: string, ms = 8000): Promise<void> => {
+  //   ⏱ DCTK บน VM ตอบช้ามาก — default 20s (เดิม 8s ค้างประจำ ทำให้ #BtnSave/grid ไม่ทัน → ได้แต่ capture)
+  const safeClick = async (sel: string, ms = 20000): Promise<void> => {
     try { await livePage().click(sel, { timeout: ms }); } catch (e) { log(`  ⚠ คลิก ${sel.slice(-30)} ข้าม: ${e instanceof Error ? e.message.slice(0, 60) : ""}`); }
   };
 
   await safeClick(S.SEL_BTN_DONE_INVOICE);
   await sleep(5000);
   await safeClick(S.SEL_DIALOG_OK);
-  await safeClick(S.SEL_BTN_SAVE);
-  await safeClick(S.SEL_BTN_SAVE_CLOSE);
-  await sleep(2000);
+  await safeClick(S.SEL_BTN_SAVE, 30000); // ปุ่มบันทึก — DCTK submit ช้า ให้รอนานเป็นพิเศษ
+  await safeClick(S.SEL_BTN_SAVE_CLOSE, 30000);
+  await sleep(3000);
 
   // หลัง Save&Close tab อาจปิด → re-acquire page ที่ยังเปิด ก่อนรอ grid
   page = livePage();
@@ -108,7 +109,7 @@ export async function finalizeAndPrint(
   // รอ grid รายการขึ้น (หลังบันทึกและปิด DCTK ควรกลับมาหน้า portfolio/grid)
   let gridReady = false;
   try {
-    await page.waitForSelector(S.SEL_GRID_FIRST_ROW, { timeout: 15000 });
+    await page.waitForSelector(S.SEL_GRID_FIRST_ROW, { timeout: 30000 });
     gridReady = true;
   } catch {
     log("  ⚠ รอ grid แถวแรกไม่ขึ้น — DCTK ค้างหน้า Edit");
@@ -124,19 +125,19 @@ export async function finalizeAndPrint(
     let saved = false;
     for (let a = 1; a <= 3 && !saved; a++) {
       try {
-        await saveClose.waitFor({ state: "visible", timeout: 8000 });
+        await saveClose.waitFor({ state: "visible", timeout: 15000 });
         await saveClose.scrollIntoViewIfNeeded().catch(() => { /* */ });
-        try { await saveClose.click({ timeout: 5000 }); }
-        catch { try { await saveClose.click({ force: true, timeout: 5000 }); } catch { await saveClose.evaluate((el: any) => el.click()); } }
+        try { await saveClose.click({ timeout: 10000 }); }
+        catch { try { await saveClose.click({ force: true, timeout: 10000 }); } catch { await saveClose.evaluate((el: any) => el.click()); } }
         saved = true;
         log(`  ✓ กด #BtnSaveAndClose (รอบ ${a})`);
       } catch {
         log(`  ⚠ กด #BtnSaveAndClose รอบ ${a} ไม่ติด — รอแล้วลองใหม่`);
-        await sleep(2000);
+        await sleep(3000);
         page = livePage();
       }
     }
-    await sleep(4000);
+    await sleep(5000);
     page = livePage();
   }
 
@@ -146,14 +147,14 @@ export async function finalizeAndPrint(
     try { await page.waitForSelector(S.SEL_GRID_FIRST_ROW, { timeout: ms }); return true; }
     catch { return false; }
   };
-  let rowReady = await waitGrid(20000);
+  let rowReady = await waitGrid(40000);
   if (!rowReady) {
     log("  ↻ grid ยังไม่ขึ้น — เปิดเมนู portfolio (รายการใบขน) เอง");
     page = livePage();
-    await page.click(S.SEL_PORTFOLIO_MENU, { timeout: 8000 }).catch(() => { /* */ });
-    await sleep(5000);
+    await page.click(S.SEL_PORTFOLIO_MENU, { timeout: 15000 }).catch(() => { /* */ });
+    await sleep(6000);
     page = livePage();
-    rowReady = await waitGrid(20000);
+    rowReady = await waitGrid(40000);
   }
   if (!rowReady) {
     log("  ✗ เลือกแถวใบเพื่อพิมพ์ไม่สำเร็จ: grid ไม่ขึ้นหลังรอ ~50s");
