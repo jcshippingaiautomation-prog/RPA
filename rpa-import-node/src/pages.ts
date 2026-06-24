@@ -922,10 +922,16 @@ export async function fillPage3(page: Page, r: Record): Promise<void> {
         log(`  🔑 force สกุลเงินก่อนเซฟ (freight=${hasFreightP3} insurance=${hasInsuranceP3}): ${JSON.stringify(forced)}`);
       }
       await page.click(S.SEL_BTN_SAVE_CLOSE);
-      await sleep(5000);
-      // diag เบา ๆ "หลัง" รอครบ (ปลอดภัย: tab น่าจะปิดแล้ว) — ไม่แตะ DOM ถ้าปิดแล้ว
-      const closed = page.isClosed();
-      log(`  ✓ Page 3 Save&Close — thisPageClosed=${closed}`);
+      // ⏱ รอจน tab ปิดจริง (= DCTK บันทึก Page 3 + ปิดหน้าสำเร็จ) แทน sleep(5000) ตายตัว
+      //   สาเหตุ "localhost ผ่าน VM ไม่ผ่าน": VM ช้ากว่า → tab ปิด >5s → เดิมเข้าใจผิดว่า save ไม่ผ่าน
+      //   → finalize หาปุ่มผิดหน้า → grid ไม่ขึ้น → ได้แค่ capture.
+      //   แก้: poll page.isClosed() สูงสุด ~45s (เผื่อ VM ช้า) — ไม่แตะ DOM ระหว่างนี้ (กันขัด submit)
+      let closed = false;
+      for (let w = 0; w < 22; w++) { // 22 × ~2s ≈ 45s
+        if (page.isClosed()) { closed = true; break; }
+        await sleep(2000);
+      }
+      log(`  ✓ Page 3 Save&Close — thisPageClosed=${closed}${closed ? "" : " (รอ ~45s แล้วยังไม่ปิด)"}`);
       // ถ้าหน้าไม่ปิด = เซฟไม่ผ่าน → ดักข้อความ error ที่ค้างบนหน้า (จะได้รู้ว่า Page 3 ติดอะไร)
       if (!closed) {
         try {
