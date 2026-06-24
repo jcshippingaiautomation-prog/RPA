@@ -29,6 +29,12 @@ export async function finalizeAndPrint(
   log("Finalize → print PDF");
   let declarationNo: string | null = null;
 
+  // 🔬 DEBUG (env-gated): log รายชื่อ tab ตอน finalize เริ่ม (ช่วย diagnose ถ้า print ไม่ออก)
+  if (process.env.RPA_DEBUG_TABS) {
+    const tabs = context.pages().filter((p) => !p.isClosed()).map((p) => (p.url() || "?").slice(0, 80));
+    log(`  🔬 tabs ตอน finalize เริ่ม (${tabs.length}): ${JSON.stringify(tabs)}`);
+  }
+
   // หลัง Save & Close ของ Page 3, tab invoice ปิดไปแล้ว → ใช้ tab ที่ยังเปิดอยู่
   if (page.isClosed()) {
     const openPages = context.pages().filter((p) => !p.isClosed());
@@ -333,11 +339,29 @@ async function savePdfFromReportPage(reportPage: Page, downloadDir: string): Pro
     "tr > td:nth-child(1) > table > tbody > tr > td:nth-child(2) > div > " +
     "table > tbody > tr > td:nth-child(2)";
 
+  // ⏱ รอ report สร้างเสร็จ (รอ canvas/หน้า report โผล่) — direct-URL/headless ใช้เวลาเรนเดอร์
+  await sleep(5000);
+  // 🔑 overlay <div.stiJsViewerDisabledPanel> มี opacity:0 แต่ pointer-events:auto z=40 → บังคลิก Save
+  //   (Playwright เห็นเป็น "visible" เพราะไม่ใช่ display:none → คลิกปกติโดน intercept)
+  //   ทางแก้: ปิด pointer-events + ซ่อน overlay ด้วย JS ก่อนคลิกทุกครั้ง
+  //   ปิดแค่ pointer-events (ไม่ใช่ display:none — กันซ่อนเนื้อ report สำหรับ fallback page.pdf)
+  const killOverlay = async () => {
+    try {
+      await reportPage.evaluate(() => {
+        document.querySelectorAll(".stiJsViewerDisabledPanel").forEach((e) => {
+          (e as HTMLElement).style.pointerEvents = "none";
+        });
+      });
+    } catch { /* */ }
+  };
+  await killOverlay();
+
   let captured = false;
   try {
     await reportPage.click(SEL_SAVE_DROPDOWN, { timeout: 10000 });
     log("  · คลิก Save dropdown");
     await sleep(1000);
+    await killOverlay();
 
     await reportPage
       .locator("td", { hasText: "Adobe PDF File" })
@@ -345,6 +369,7 @@ async function savePdfFromReportPage(reportPage: Page, downloadDir: string): Pro
       .click({ timeout: 10000 });
     log("  · คลิก Adobe PDF File");
     await sleep(1000);
+    await killOverlay();
 
     // ดัก download ผ่าน Playwright — bypass Chrome insecure-download block
     const [download] = await Promise.all([
@@ -397,9 +422,12 @@ export async function reprintDeclaration(
     return { pdf: null, declarationNo: null };
   }
 
-  // ---- วิธีหลัก: เปิด report URL ตรง (ยืนยันจาก log จริง: ExportReport/RptExDec?selectedRecord=DCTKxxx)
-  //   base = origin ของหน้าปัจจุบัน (เช่น http://203.154.140.105/DCTK)
-  try {
+  // ---- วิธีหลัก: grid path (portfolio → ค้น → เลือกแถว → #BtnPrintDec → report tab → export)
+  //   ⚠ direct-URL (goto RptExDec ตรง) พิสูจน์แล้วว่า "ใช้ไม่ได้" — ไม่มี server session →
+  //      ได้หน้า login/error (garbage) แต่ page.pdf fallback ดันรายงานว่าสำเร็จ (false success!).
+  //      report viewer ต้องเปิดผ่าน #BtnPrintDec (มี session) เท่านั้น. จึงปิด direct-URL เป็น default
+  //      (เปิดได้ด้วย RPA_USE_DIRECT_PRINT ถ้าจำเป็น — แต่ปกติไม่ควรใช้)
+  if (process.env.RPA_USE_DIRECT_PRINT) try {
     const cur = page.url();
     const m = cur.match(/^(https?:\/\/[^/]+\/[^/]+)\//i); // http://host/DCTK
     const base = m ? m[1] : cur.replace(/\/[^/]*$/, "");

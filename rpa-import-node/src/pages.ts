@@ -810,8 +810,19 @@ async function fillOneGoodsItem(
     } catch (e) { log(`  ⚠ force-set สกุลเงินค่าระวาง Page 3 ล้ม: ${e instanceof Error ? e.message.slice(0, 50) : ""}`); }
   }
 
-  // ---- STEP: จำนวนเงิน "ค่าประกัน" ----
-  await put(page, r, "insurance_charge", S.SEL_TERM_INSURANCE, stripZeroDecimals(item.insurance ?? r.insurance ?? ""));
+  // ---- STEP: จำนวนเงิน "ค่าประกัน" ต่อ item ----
+  //   🔑 บั๊กเดิม: item.insurance=0 → `item.insurance ?? r.insurance` คืน 0 (?? ไม่ fall through ที่ 0)
+  //      → กรอก "0" ทับค่า 81.25 ที่ DCTK เติมอัตโนมัติ → detail ประกัน=0 ≠ control → "Message Validate"
+  //      บล็อก save → goods ไม่บันทึก → ใบไม่สมบูรณ์ → report ไม่เปิด → พิมพ์ใบขนไม่ออก!
+  //   แก้: ใช้ค่า >0 ของ item ก่อน ไม่งั้นค่าหัวรายการ (single-item) — ถ้าไม่มีค่า >0 = ข้าม (คง DCTK auto)
+  const insItem = stripZeroDecimals(item.insurance ?? "");
+  const insHead = stripZeroDecimals(r.insurance ?? "");
+  const insVal = (insItem && insItem !== "0") ? insItem : ((insHead && insHead !== "0") ? insHead : "");
+  if (insVal) {
+    await put(page, r, "insurance_charge", S.SEL_TERM_INSURANCE, insVal);
+  } else {
+    log("  ⏭ ข้ามกรอกค่าประกันต่อ item (ไม่มีค่า >0) — คงค่าที่ DCTK เติมอัตโนมัติ (กัน 0 ทับ)");
+  }
 
   // FOC (รายการของแถม) — Kendo DropDownList #NatureTrans (ปกติ "11-ไม่ใช่ของแถม")
   //   RPA_DUMP_FOC=1 → dump ตัวเลือก dropdown (ครั้งแรก) เพื่อหาค่าที่ถูกของ "ของแถม"
@@ -923,15 +934,46 @@ export async function fillPage3(page: Page, r: Record): Promise<void> {
       }
       await page.click(S.SEL_BTN_SAVE_CLOSE);
       // ⏱ รอจน tab ปิดจริง (= DCTK บันทึก Page 3 + ปิดหน้าสำเร็จ) แทน sleep(5000) ตายตัว
-      //   สาเหตุ "localhost ผ่าน VM ไม่ผ่าน": VM ช้ากว่า → tab ปิด >5s → เดิมเข้าใจผิดว่า save ไม่ผ่าน
-      //   → finalize หาปุ่มผิดหน้า → grid ไม่ขึ้น → ได้แค่ capture.
-      //   แก้: poll page.isClosed() สูงสุด ~45s (เผื่อ VM ช้า) — ไม่แตะ DOM ระหว่างนี้ (กันขัด submit)
+      //   🔑 ROOT CAUSE จริง (ที่ทำให้ใบไม่สมบูรณ์ → พิมพ์ไม่ออก): หลัง Save&Close DCTK เด้ง
+      //      dialog "Message Validate !" (มีปุ่ม OK) ค้างไว้ — ถ้าไม่กด OK = goods ไม่ถูกบันทึก →
+      //      tab ไม่ปิด → ใบหัว (ExDec/Edit) มี grid สินค้าว่าง → ใบไม่สมบูรณ์ → report ไม่เปิด.
+      //      (เดิมไม่กด OK เพราะคิดว่า DCTK ปิด tab เอง — ผิด: มี confirm dialog คั่น)
+      //   แก้: ระหว่าง poll ปิด ให้กด OK ของ Message Validate dialog ถ้าโผล่ (สูงสุด ~45s เผื่อ VM ช้า)
+      const dismissValidateDialog = async (): Promise<{ clicked: boolean; text?: string }> => {
+        try {
+          if (page.isClosed()) return { clicked: false };
+          // หา dialog "Message Validate" / dialogbox ที่ visible แล้วกดปุ่ม OK ในนั้น
+          return await page.evaluate(() => {
+            const dialogs = Array.from(document.querySelectorAll(
+              "#dialogbox, #dialogboxfoot, .k-window, [id*='ialog'], [class*='odal']",
+            )).filter((d) => (d as HTMLElement).offsetParent !== null);
+            for (const dlg of dialogs) {
+              const btns = Array.from(dlg.querySelectorAll("button, .k-button, input[type=button], a"))
+                .filter((b) => (b as HTMLElement).offsetParent !== null);
+              const ok = btns.find((b) => /^(OK|ตกลง|ใช่|Yes)$/i.test(((b as HTMLElement).innerText || (b as HTMLInputElement).value || "").trim()));
+              if (ok) {
+                const text = ((dlg as HTMLElement).innerText || "").trim().slice(0, 300);
+                (ok as HTMLElement).click();
+                return { clicked: true, text };
+              }
+            }
+            return { clicked: false };
+          });
+        } catch { return { clicked: false }; }
+      };
       let closed = false;
+      let dialogDismissed = false;
       for (let w = 0; w < 22; w++) { // 22 × ~2s ≈ 45s
         if (page.isClosed()) { closed = true; break; }
+        // ลองกด OK dialog (ถ้าโผล่) — ทำซ้ำได้ เผื่อมีหลายชั้น
+        const dlg = await dismissValidateDialog();
+        if (dlg.clicked) {
+          if (!dialogDismissed) log(`  ✓ กด OK ปิด dialog (Page 3) → ให้ DCTK บันทึก goods + ปิดหน้า · ข้อความ: ${JSON.stringify(dlg.text || "")}`);
+          dialogDismissed = true;
+        }
         await sleep(2000);
       }
-      log(`  ✓ Page 3 Save&Close — thisPageClosed=${closed}${closed ? "" : " (รอ ~45s แล้วยังไม่ปิด)"}`);
+      log(`  ✓ Page 3 Save&Close — thisPageClosed=${closed}${closed ? "" : " (รอ ~45s แล้วยังไม่ปิด)"}${dialogDismissed ? " [กด OK dialog แล้ว]" : ""}`);
       // ถ้าหน้าไม่ปิด = เซฟไม่ผ่าน → ดักข้อความ error ที่ค้างบนหน้า (จะได้รู้ว่า Page 3 ติดอะไร)
       if (!closed) {
         try {

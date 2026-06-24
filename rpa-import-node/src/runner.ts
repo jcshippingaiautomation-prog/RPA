@@ -653,6 +653,7 @@ async function runBrowser(
     acceptDownloads: true,
     viewport: { width: 1920, height: 1080 },
   });
+  if (process.env.RPA_DEBUG_TABS) context.on("page", (p) => log(`  [TAB+] ${(p.url() || "about:blank").slice(0, 90)}`));
   let page: Page = await context.newPage();
   page.setDefaultTimeout(cfg.default_timeout_ms ?? 30000);
 
