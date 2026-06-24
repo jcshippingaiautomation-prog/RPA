@@ -826,7 +826,12 @@ async function runBrowser(
         // เรียก finalize ครั้งเดียว (สร้างใบ + พยายามพิมพ์) — เก็บผลไว้ใช้ต่อ
         const finalizeRes = await finalizeAndPrint(page2, context, downloadDir);
         let pdf = finalizeRes.pdf;
-        const declarationNo = finalizeRes.declarationNo;
+        // declarationNo: ใช้จาก finalize ก่อน ไม่งั้น fallback เลขที่จับไว้ตั้งแต่ Page 2 (เผื่อ save ค้าง)
+        const declarationNo = finalizeRes.declarationNo
+          || (typeof record.__declaration_no__ === "string" ? record.__declaration_no__ : null);
+        if (!finalizeRes.declarationNo && declarationNo) {
+          log(`  🧾 finalize อ่านเลขใบขนไม่ได้ — ใช้เลขที่จับไว้ตั้งแต่ Page 2: ${declarationNo}`);
+        }
         // capture เลขใบขน DCTK → แจ้ง caller เก็บลง declarations.declaration_no
         if (declarationNo) {
           result.declarationCreated = true; // ใบสร้างใน DCTK แล้ว — worker ห้าม retry import (กันใบซ้ำ)

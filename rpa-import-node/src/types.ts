@@ -19,6 +19,8 @@ export interface Record {
   __dry_run__?: boolean;
   // id ของแถวใน Supabase declarations (ไว้ mark doc_status หลังทำเสร็จ)
   __supabase_id__?: unknown;
+  // เลขใบขน DCTK ที่จับได้ตั้งแต่ Page 2 (referenceNo) — fallback ให้ finalize/auto-reprint ถ้า save ค้าง
+  __declaration_no__?: string;
   // รายการสินค้าหลายแถว (จาก declaration_items) — ถ้าว่าง fallback ใช้ค่าหัวรายการ
   __items__?: Record[];
 }

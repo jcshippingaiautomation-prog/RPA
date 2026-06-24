@@ -299,25 +299,41 @@ export async function comboPick(
   inputSelector: string,
   value: string,
 ): Promise<void> {
-  // 📝 ACTION LOG
+  const want = value.trim().toUpperCase();
+
+  // 📝 ACTION LOG + เช็คค่าเดิม
+  let wasVal = "";
   try {
     const before = await page.locator(inputSelector).first().evaluate((el: HTMLInputElement) => ({ name: el.name || el.id || "", was: el.value ?? "" }));
+    wasVal = (before.was || "").trim();
     log(`  📝 comboPick → [${before.name || inputSelector.slice(-40)}] เดิม="${before.was}" → ล้าง("") แล้วพิมพ์="${value}"`);
   } catch { log(`  📝 comboPick → [${inputSelector.slice(-40)}] ล้าง+พิมพ์="${value}"`); }
+
+  // ⚡ ถ้าค่าเดิม = ค่าที่ต้องการอยู่แล้ว (DCTK เติม/รายการก่อนหน้าค้างไว้) → ไม่ต้องล้างพิมพ์ใหม่
+  //    (สำคัญกับ multi-item: รายการ 2+ DCTK มักเติมหน่วยเดิมค้างไว้ การล้าง+พิมพ์ทำให้ dropdown ไม่โผล่ → เลือกไม่ได้)
+  if (wasVal.toUpperCase() === want) {
+    log(`  ⚡ comboPick: ค่าเดิม="${wasVal}" = ที่ต้องการแล้ว — ข้าม (ไม่ล้าง/พิมพ์ใหม่)`);
+    return;
+  }
+
   await page.click(inputSelector);
   await page.fill(inputSelector, "");
   await page.type(inputSelector, value, { delay: 50 });
 
-  const want = value.trim().toUpperCase();
-
-  // รอ dropdown โผล่ (DCTK ajax — รอได้ถึง 6s, เช็กทุก 500ms)
-  for (let w = 0; w < 12; w++) {
+  // รอ dropdown โผล่ (DCTK ajax — บน VM ช้า รอได้ถึง 12s, เช็กทุก 500ms; พิมพ์ซ้ำกระตุ้นถ้าเกินครึ่งทาง)
+  let dropdownUp = false;
+  for (let w = 0; w < 24; w++) {
     const has = await page.locator(
       ".k-animation-container:visible li[role=option], ul.k-list:visible > li.k-item",
     ).count();
-    if (has > 0) break;
+    if (has > 0) { dropdownUp = true; break; }
+    // กลางทาง (6s) ยังไม่โผล่ → กระตุ้นใหม่ (พิมพ์ตัวสุดท้ายซ้ำ — เผื่อ ajax รอบแรกหลุดบน VM ช้า)
+    if (w === 12) {
+      try { await page.locator(inputSelector).press("Backspace"); await page.type(inputSelector, value.slice(-1), { delay: 50 }); } catch { /* */ }
+    }
     await sleep(500);
   }
+  if (!dropdownUp) log(`  ⚠ comboPick: dropdown ไม่โผล่ใน 12s (VM ช้า?) — ลองเลือกจากที่มีต่อ`);
 
   // (A) dropdowngrid (Kendo): row = li[role=option] มี span.k-cell (cell แรก = code) — เช็กก่อน
   try {

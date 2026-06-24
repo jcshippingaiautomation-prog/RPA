@@ -648,6 +648,16 @@ export async function fillPage2Fill(page: Page, r: Record): Promise<Page> {
 /** กรอกหน้า 2 — เปิด tab + กรอก + Save (wrapper สำหรับ run ปกติ) */
 export async function fillPage2(page: Page, r: Record): Promise<Page> {
   const page2 = await fillPage2Open(page);
+  // จับเลขใบขน DCTK จาก URL ตั้งแต่ตอนนี้ (referenceNo=DCTK... ใน URL หลัง switched tab)
+  //   เก็บไว้ใน record ให้ finalize ใช้เป็น fallback — เผื่อ Save&Close ค้าง (URL ตอน finalize อ่านเลขไม่ได้)
+  //   ⇒ ทำให้ auto-reprint ยังทำงานได้แม้ DCTK ค้างตอนพิมพ์
+  try {
+    const m = (page2.url() || "").match(/DCTK\d+/i);
+    if (m) {
+      r.__declaration_no__ = m[0].toUpperCase();
+      log(`  🧾 จับเลขใบขนตั้งแต่ Page 2: ${r.__declaration_no__}`);
+    }
+  } catch { /* */ }
   return fillPage2Fill(page2, r);
 }
 
