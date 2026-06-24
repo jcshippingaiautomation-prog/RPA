@@ -56,7 +56,7 @@ async function runRpaImport(job: JobRow): Promise<void> {
     });
   }
 
-  const result = await runImport({
+  const runOnce = () => runImport({
     configOverrides,
     dryRun,
     fieldRulesOverride,
@@ -82,11 +82,23 @@ async function runRpaImport(job: JobRow): Promise<void> {
       await appendLog(job.id, "log", { line: `[WORKER] 🧾 เลขใบขน DCTK: ${meta.declarationNo}` });
       await appendLog(job.id, "capture-meta", meta);
     },
-    shouldStop: () => {
-      // poll cancel แบบไม่ block (best-effort; ดูที่จุดเริ่มแต่ละแถว)
-      return cancelFlag;
-    },
+    shouldStop: () => cancelFlag,
   });
+
+  // ⏱ AUTO-RETRY: DCTK ช้า/ล่มชั่วคราว → รันใหม่อัตโนมัติ สูงสุด 3 รอบ
+  //    retry ได้เฉพาะเมื่อ "ยังไม่ได้สร้างใบใน DCTK" (declarationCreated=false) — กันสร้างใบซ้ำ
+  //    ถ้าใบสร้างแล้วแต่พิมพ์พลาด → auto-reprint ใน runner จัดการเอง (ไม่ retry ทั้งงาน)
+  let result = await runOnce();
+  for (let attempt = 2; attempt <= 3; attempt++) {
+    const failedBeforeCreate = result.errors > 0 && !result.declarationCreated && !result.stopped && !dryRun;
+    if (!failedBeforeCreate) break;
+    await appendLog(job.id, "log", {
+      line: `[WORKER] ↻ รอบ ${attempt - 1} ไม่สำเร็จ (DCTK ช้า/ล่ม ก่อนสร้างใบ) — ลองใหม่อัตโนมัติ (รอบ ${attempt}/3)`,
+    });
+    await sleep(8000);
+    if (cancelFlag) break;
+    result = await runOnce();
+  }
 
   await appendLog(job.id, "lifecycle", { event: "run-done", result });
   await markDone(job.id, result as unknown as Record<string, unknown>);

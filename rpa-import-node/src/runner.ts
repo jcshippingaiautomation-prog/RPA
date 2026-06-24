@@ -116,6 +116,8 @@ export interface RunResult {
   errors: number;
   skipped: number;
   stopped: boolean;
+  /** true ถ้ามี record ที่สร้างใบใน DCTK สำเร็จแล้ว (ได้ declaration_no) — worker ใช้กันการ retry ที่จะสร้างใบซ้ำ */
+  declarationCreated?: boolean;
 }
 
 export async function loadConfig(): Promise<AppConfig> {
@@ -821,18 +823,42 @@ async function runBrowser(
       if (opts.dryRun) {
         log("  🧪 dry run: ข้าม finalize/print/email — กรอกข้อมูลครบแล้วแต่ไม่บันทึก");
       } else {
-        const { pdf, declarationNo } = await finalizeAndPrint(page2, context, downloadDir);
+        // เรียก finalize ครั้งเดียว (สร้างใบ + พยายามพิมพ์) — เก็บผลไว้ใช้ต่อ
+        const finalizeRes = await finalizeAndPrint(page2, context, downloadDir);
+        let pdf = finalizeRes.pdf;
+        const declarationNo = finalizeRes.declarationNo;
         // capture เลขใบขน DCTK → แจ้ง caller เก็บลง declarations.declaration_no
-        if (declarationNo && opts.onCaptureMeta) {
-          try {
-            await opts.onCaptureMeta({
-              declarationId: record.__supabase_id__ != null ? String(record.__supabase_id__) : undefined,
-              declarationNo,
-            });
-          } catch (e) {
-            log(`  ⚠ onCaptureMeta callback error: ${e}`);
+        if (declarationNo) {
+          result.declarationCreated = true; // ใบสร้างใน DCTK แล้ว — worker ห้าม retry import (กันใบซ้ำ)
+          if (opts.onCaptureMeta) {
+            try {
+              await opts.onCaptureMeta({
+                declarationId: record.__supabase_id__ != null ? String(record.__supabase_id__) : undefined,
+                declarationNo,
+              });
+            } catch (e) {
+              log(`  ⚠ onCaptureMeta callback error: ${e}`);
+            }
           }
         }
+
+        // ⏱ AUTO-REPRINT: ถ้า finalize ได้เลขใบขนแล้ว (ใบสร้างใน DCTK สำเร็จ) แต่ PDF=null
+        //    (DCTK ค้างตอนพิมพ์ → ได้แต่ capture) → ลองพิมพ์ซ้ำเองทันที (login อยู่แล้ว ไม่ต้องเริ่มใหม่)
+        //    ทำให้ได้ใบขนจริงโดย user ไม่ต้องกดพิมพ์ซ้ำเอง
+        if (!pdf && declarationNo) {
+          for (let rp = 1; rp <= 2 && !pdf; rp++) {
+            log(`  ↻ finalize ได้แต่ capture (ใบ ${declarationNo} สร้างแล้ว) — auto-reprint พิมพ์ใบขนจริง (รอบ ${rp}/2)`);
+            try {
+              const re = await reprintDeclaration(page, context, downloadDir, declarationNo);
+              if (re.pdf) { pdf = re.pdf; log(`  ✓ auto-reprint สำเร็จ — ได้ใบขนจริง`); break; }
+            } catch (e) {
+              log(`  ⚠ auto-reprint รอบ ${rp} error: ${e instanceof Error ? e.message.slice(0, 80) : ""}`);
+            }
+            await sleep(3000);
+          }
+          if (!pdf) log(`  ✗ auto-reprint ไม่สำเร็จทั้ง 2 รอบ — เก็บ capture ไว้ก่อน (กดพิมพ์ซ้ำในเว็บภายหลังได้)`);
+        }
+
         if (pdf) {
           // แจ้ง caller ให้อัปเอกสาร (เช่น Supabase) ก่อนส่งอีเมล
           if (opts.onDocument) {
