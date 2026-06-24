@@ -76,20 +76,27 @@ const STATUS_META = {
   ready: ["พร้อมรัน", "st-ready"],
   queued: ["รอคิว", "st-queued"],
   running: ["กำลังรัน", "st-running"],
-  done: ["เสร็จ · สร้างแล้ว", "st-done"],
+  done: ["เสร็จ · ได้ใบขนแล้ว", "st-done"],
+  partial: ["สร้างใบแล้ว · รอพิมพ์", "st-partial"],
   edited: ["แก้แล้ว", "st-edited"],
   error: ["ผิดพลาด", "st-error"],
 };
 function statusBadge(status, message, docStatus, opts) {
   // ไม่ใช้ "new" (ใหม่·ต้องตรวจ) — แปลงเป็น "ready" (พร้อมรัน)
   let eff = (status === "new" || !status) ? "ready" : status;
-  // ถ้าสร้างเอกสารใน DCTK แล้ว (doc_status=true) → ถือว่า "เสร็จแล้ว" แม้ status ยังไม่อัปเดต
-  if (docStatus && eff !== "running" && eff !== "queued" && eff !== "edited") eff = "done";
+  // ⚠ ไม่ override เป็น "done" จาก docStatus อีกต่อไป — เพราะ docStatus=true ได้แม้มีแค่ capture
+  //   (ทำให้สถานะโกหกว่า "เสร็จ" ทั้งที่ยังไม่ได้ใบขนจริง) → เชื่อ status จริงที่ worker set เท่านั้น
+  //   (worker set "done" เฉพาะเมื่อได้ใบขนจริง, "partial" เมื่อได้แค่ capture)
   const [label, cls] = STATUS_META[eff] || STATUS_META.ready;
   // badge error ที่คลิกได้ → เปิด modal ดูสาเหตุ (มีไอคอน + ใส่ data-id)
   if (opts && opts.clickable && eff === "error") {
     const tip = ` title="${escapeHtml(message || "คลิกเพื่อดูสาเหตุที่ไม่สำเร็จ")}"`;
     return `<span class="st ${cls} st-clickable errBadge" data-id="${escapeHtml(opts.id || "")}"${tip}>${label} ⓘ</span>`;
+  }
+  // badge partial ที่คลิกได้ → เปิด modal ดูไฟล์ (มีปุ่มพิมพ์ใบขนซ้ำ)
+  if (opts && opts.clickable && eff === "partial") {
+    const tip = ` title="${escapeHtml(message || "ใบสร้างใน DCTK แล้ว — คลิกเพื่อพิมพ์ใบขนซ้ำ")}"`;
+    return `<span class="st ${cls} st-clickable partialBadge" data-id="${escapeHtml(opts.id || "")}"${tip}>${label} ⓘ</span>`;
   }
   const tip = message ? ` title="${escapeHtml(message)}"` : "";
   return `<span class="st ${cls}"${tip}>${label}</span>`;
@@ -179,7 +186,7 @@ function renderList() {
       <td class="muted-cell">${escapeHtml(d.etd || "—")}</td>
       <td class="muted-cell">${escapeHtml(fmtMoney(d.total_goods_amount, d.currency))}</td>
       <td>${sourceBadge(d.source)}</td>
-      <td>${statusBadge(d.status, d.status_message, d.doc_status, { clickable: effStatus(d) === "error", id: d.id })}</td>
+      <td>${statusBadge(d.status, d.status_message, d.doc_status, { clickable: effStatus(d) === "error" || effStatus(d) === "partial", id: d.id })}</td>
       <td class="ta-right">
         <div class="row-actions">
           <button class="btn btn-ghost btn-xs actDetail" data-id="${d.id}" title="ดู/แก้ไขรายละเอียด">${svgIcon("list", 13)} รายละเอียด</button>
@@ -195,6 +202,7 @@ function renderList() {
   // events
   body.querySelectorAll(".actDetail").forEach((b) => (b.onclick = () => openDetail(b.dataset.id)));
   body.querySelectorAll(".errBadge").forEach((b) => (b.onclick = () => openDetail(b.dataset.id)));
+  body.querySelectorAll(".partialBadge").forEach((b) => (b.onclick = () => openFiles(b.dataset.id)));
   body.querySelectorAll(".actFiles").forEach((b) => (b.onclick = () => openFiles(b.dataset.id)));
   body.querySelectorAll(".actRun").forEach((b) => (b.onclick = () => runDeclaration(b.dataset.id)));
   body.querySelectorAll(".actCopy").forEach((b) => (b.onclick = () => copyDeclaration(b.dataset.id)));
@@ -449,33 +457,53 @@ function renderValidationBox(validation) {
 // summary มาจาก backend (summarizeJobError) — สรุปอ่านง่าย + ปุ่มดู log เต็ม
 function renderErrorBox(summary, jobId) {
   if (!summary || !summary.failed) return "";
+  // เด้งแดงช่องข้อมูลที่มีปัญหา (affectedFields จาก backend)
+  if (Array.isArray(summary.affectedFields) && summary.affectedFields.length) {
+    setTimeout(() => highlightFields(summary.affectedFields), 50);
+  }
+  // รายการเทคนิค (ซ่อนใต้ "รายละเอียดทางเทคนิค" — ลูกค้าไม่ต้องอ่าน)
   const issuesHtml = (summary.issues || []).map((it) => {
     const icon = it.level === "error" ? "✗" : "⚠";
     const where = it.where ? `<span class="err-where">${escapeHtml(it.where)}</span>` : "";
     return `<li class="err-item err-${it.level}"><span class="err-ic">${icon}</span> ${escapeHtml(it.text)} ${where}</li>`;
   }).join("");
-  // failedRows = ลำดับ "ใบ/แถวงาน" ที่ error (ในการรันใบเดียวมักเป็น 1 = ใบนี้)
-  //   จึงบอกเป็นคำแนะนำให้แก้ข้อมูลแล้วรันใหม่ ไม่อ้างว่าเป็นเลขรายการสินค้า
-  const rowsNote = (summary.failedRows && summary.failedRows.length)
-    ? `<div class="err-rows">แก้ไขข้อมูลตามสาเหตุข้างต้น (ในฟอร์ม/ตารางด้านล่าง) แล้วกด "รัน RPA" ใหม่อีกครั้ง</div>`
-    : "";
-  const stuck = summary.stuckAt ? `<span class="err-stuck">ติดที่: ${escapeHtml(summary.stuckAt)}</span>` : "";
+  // คำแนะนำภาษาคน (humanHint) — เด่นสุด บอกว่าต้องทำอะไร
+  const hint = summary.humanHint
+    ? `<div class="err-hint">💡 ${escapeHtml(summary.humanHint)}</div>`
+    : `<div class="err-hint">💡 แก้ไขข้อมูลตามที่แจ้ง แล้วกด "รัน" ใหม่อีกครั้ง</div>`;
   const logBtn = jobId
-    ? `<button class="btn btn-ghost btn-xs" id="errLogBtn">${svgIcon("list", 12)} ดู log เต็ม</button>`
+    ? `<button class="btn btn-ghost btn-xs" id="errLogBtn">${svgIcon("list", 12)} รายละเอียดทางเทคนิค</button>`
     : "";
+  // กล่องสรุปสำหรับลูกค้า: พาดหัวภาษาคน + คำแนะนำ + (รายละเอียดเทคนิคซ่อนไว้)
   return `<div class="err-box">
     <div class="err-head">
-      <span class="err-title">${svgIcon("x", 14)} RPA ไม่สำเร็จ</span>
-      ${stuck}
+      <span class="err-title">${svgIcon("x", 14)} ทำรายการไม่สำเร็จ</span>
     </div>
     <div class="err-headline">${escapeHtml(summary.headline || "")}</div>
-    ${issuesHtml ? `<ul class="err-list">${issuesHtml}</ul>` : ""}
-    ${rowsNote}
+    ${hint}
     <div class="err-foot">${logBtn}</div>
     <div id="errLogWrap" class="err-log-wrap" style="display:none">
+      ${issuesHtml ? `<ul class="err-list">${issuesHtml}</ul>` : ""}
       <pre id="errLogPre" class="err-log">กำลังโหลด log…</pre>
     </div>
   </div>`;
+}
+
+// เด้งแดงช่องข้อมูลที่มีปัญหา (เพิ่ม class .fld-error ที่ input / ตารางรายการ)
+function highlightFields(fields) {
+  // เคลียร์ของเดิมก่อน
+  document.querySelectorAll(".fld-error").forEach((el) => el.classList.remove("fld-error"));
+  for (const f of fields) {
+    if (f === "รายการสินค้า") {
+      // เด้งแดงตารางรายการสินค้าทั้งบล็อก
+      const tbl = document.querySelector("table.items-edit");
+      if (tbl) tbl.classList.add("fld-error");
+      continue;
+    }
+    // เด้งแดง input ที่ data-key ตรงกับ field
+    const inp = document.querySelector(`.md-edit[data-key="${f}"]`);
+    if (inp) inp.closest(".fld")?.classList.add("fld-error");
+  }
 }
 
 function bindErrorBox(jobId) {

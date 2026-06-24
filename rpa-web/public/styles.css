@@ -158,6 +158,7 @@ body {
 .st-queued { background: #eef2f7; color: var(--muted2); }
 .st-running { background: #e7eefc; color: #2545a3; }
 .st-done { background: var(--ico-green-bg); color: var(--green-dark); }
+.st-partial { background: #fff3e0; color: #b45309; }
 .st-edited { background: #ede9fe; color: #6d28d9; }
 .st-error { background: #f9eaea; color: var(--red); }
 .src { display: inline-block; padding: 2px 9px; border-radius: 6px; font-size: 11px; font-weight: 600; }
@@ -314,6 +315,11 @@ body {
 .err-title .icon { width: 15px; height: 15px; }
 .err-stuck { font-size: 12px; color: var(--amber); background: #fdf0dd; padding: 2px 9px; border-radius: 999px; font-weight: 600; }
 .err-headline { margin-top: 6px; font-size: 13.5px; font-weight: 600; color: #7f1d1d; }
+.err-hint { margin-top: 8px; padding: 8px 10px; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; font-size: 13px; color: #9a3412; line-height: 1.5; }
+/* เด้งแดงช่องข้อมูล/ตารางที่มีปัญหา */
+.fld-error input, .fld-error.fld input { border-color: #dc2626 !important; background: #fef2f2; box-shadow: 0 0 0 2px rgba(220,38,38,.12); }
+.fld-error label { color: #dc2626; font-weight: 600; }
+table.items-edit.fld-error { outline: 2px solid #dc2626; outline-offset: 2px; border-radius: 6px; }
 .err-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
 .err-item { font-size: 13px; color: var(--muted2); line-height: 1.45; display: flex; align-items: flex-start; gap: 6px; }
 .err-item .err-ic { flex-shrink: 0; font-weight: 700; }

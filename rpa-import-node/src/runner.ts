@@ -31,7 +31,7 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 export const PROJECT_ROOT = path.resolve(ROOT, "..");
 const CONFIG_PATH = path.join(PROJECT_ROOT, "config.json");
 
-export type RowStatus = "pending" | "running" | "done" | "error" | "skipped";
+export type RowStatus = "pending" | "running" | "done" | "error" | "skipped" | "partial";
 
 export interface RowFieldPreview {
   key: string;        // internal key
@@ -820,14 +820,17 @@ async function runBrowser(
       await fillPage1(page, record);
       const page2 = await fillPage2(page, record);
       await fillPage3(page2, record);
+      // ประกาศไว้นอก block เพื่อให้ status logic ด้านล่างใช้ได้ (pdf=ไฟล์ใบขนจริง, declarationNo=เลขใบ)
+      let pdf: string | null = null;
+      let declarationNo: string | null = null;
       if (opts.dryRun) {
         log("  🧪 dry run: ข้าม finalize/print/email — กรอกข้อมูลครบแล้วแต่ไม่บันทึก");
       } else {
         // เรียก finalize ครั้งเดียว (สร้างใบ + พยายามพิมพ์) — เก็บผลไว้ใช้ต่อ
         const finalizeRes = await finalizeAndPrint(page2, context, downloadDir);
-        let pdf = finalizeRes.pdf;
+        pdf = finalizeRes.pdf;
         // declarationNo: ใช้จาก finalize ก่อน ไม่งั้น fallback เลขที่จับไว้ตั้งแต่ Page 2 (เผื่อ save ค้าง)
-        const declarationNo = finalizeRes.declarationNo
+        declarationNo = finalizeRes.declarationNo
           || (typeof record.__declaration_no__ === "string" ? record.__declaration_no__ : null);
         if (!finalizeRes.declarationNo && declarationNo) {
           log(`  🧾 finalize อ่านเลขใบขนไม่ได้ — ใช้เลขที่จับไว้ตั้งแต่ Page 2: ${declarationNo}`);
@@ -881,8 +884,24 @@ async function runBrowser(
           await markDeclarationDone(record.__supabase_id__);
         }
       }
-      setStatus(idx, "done");
-      result.done++;
+      // สถานะตามความจริง: "done" = ได้ "ใบขนจริง" (pdf) เท่านั้น
+      //   ถ้าใบถูกสร้างใน DCTK แล้ว (มีเลข) แต่พิมพ์ใบขนจริงไม่ได้ (auto-reprint ก็ไม่สำเร็จ) → "partial"
+      //   (ห้าม mark done ถ้าได้แค่ capture — สถานะต้องไม่โกหก user)
+      if (opts.dryRun) {
+        setStatus(idx, "done");
+        result.done++;
+      } else if (pdf) {
+        setStatus(idx, "done");
+        result.done++;
+      } else if (declarationNo) {
+        // ใบสร้างใน DCTK แล้ว แต่ยังไม่ได้ใบขนจริง — รอพิมพ์ซ้ำ
+        setStatus(idx, "partial", `ใบขนสร้างใน DCTK แล้ว (${declarationNo}) แต่ยังไม่ได้ไฟล์ใบขนจริง — กดพิมพ์ใบขนซ้ำในเว็บ`);
+        result.errors++;
+      } else {
+        // ไม่ได้แม้แต่เลขใบขน = สร้างใบไม่สำเร็จ
+        setStatus(idx, "error", "สร้างใบขนใน DCTK ไม่สำเร็จ (ไม่ได้เลขใบขน) — ลองรันใหม่");
+        result.errors++;
+      }
     } catch (ex) {
       const msg = ex instanceof Error ? ex.message : String(ex);
       log(`  ✗ Record ${i} error: ${msg}`);

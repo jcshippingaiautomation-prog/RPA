@@ -30,6 +30,10 @@ export interface JobErrorSummary {
   failedRows: number[];
   /** ข้อความ error ดิบจาก lifecycle run-error (ถ้ามี) */
   rawError?: string;
+  /** คำแนะนำภาษาคน — บอกลูกค้าว่าต้องทำอะไร (จาก humanizeError) */
+  humanHint?: string;
+  /** ช่องข้อมูลที่ควรไปแก้ (frontend เด้งแดง) — key ของ field หรือ "รายการสินค้า" */
+  affectedFields?: string[];
 }
 
 const asLine = (payload: unknown): string => {
@@ -38,6 +42,68 @@ const asLine = (payload: unknown): string => {
   }
   return "";
 };
+
+/**
+ * แปล error เชิงเทคนิค (timeout/selector/Playwright) → ภาษาที่ลูกค้าเข้าใจ + บอกว่าต้องทำอะไร
+ * คืน null ถ้าไม่ match pattern ไหน (ใช้ข้อความเดิม)
+ *   { text } = ข้อความอ่านง่าย, { fields } = ช่องข้อมูลที่ควรไปแก้ (frontend เด้งแดง)
+ */
+export function humanizeError(raw: string): { text: string; hint?: string; fields?: string[] } | null {
+  const s = (raw || "").toLowerCase();
+
+  // 1) login / portfolio ไม่ขึ้น = ระบบ DCTK ช้าหรือล่ม (ไม่ใช่ข้อมูลผิด)
+  if (s.includes("portfolio") || s.includes("login เกิน") || (s.includes("login") && s.includes("timeout"))) {
+    return {
+      text: "เข้าระบบกรมศุลฯ (DCTK) ไม่สำเร็จ — เว็บกรมฯ ตอบช้าหรือไม่ตอบในขณะนั้น",
+      hint: "ไม่ใช่ปัญหาข้อมูลของคุณ ลองกด \"รัน\" ใหม่อีกครั้ง (ระบบจะลองเข้าใหม่อัตโนมัติ) — ถ้ายังไม่ได้ แปลว่าเว็บกรมฯ ล่มชั่วคราว รอสักครู่แล้วลองใหม่",
+    };
+  }
+
+  // 2) รหัสสินค้า/พิกัด ไม่อยู่ใน master = ข้อมูลในใบไม่ตรงกับระบบกรมฯ
+  if (s.includes("ไม่อยู่ใน master") || s.includes("รหัสสินค้า") || s.includes("พิกัด")) {
+    return {
+      text: "รหัสสินค้า/พิกัดศุลกากร ไม่ตรงกับฐานข้อมูลกรมฯ — กรอกไม่ได้",
+      hint: "ตรวจสอบ \"รหัสสินค้า\" และ \"พิกัดศุลกากร\" ในตารางรายการสินค้าด้านล่างให้ตรงกับที่กรมฯ มี แล้วกดบันทึก",
+      fields: ["รายการสินค้า"],
+    };
+  }
+
+  // 3) หน่วยปริมาณ / combo เลือกไม่ได้ = หน่วยในใบไม่ตรงรายการที่กรมฯ ให้เลือก
+  if (s.includes("ไม่เจอผลลัพธ์") || s.includes("หน่วย") || s.includes("unitcode") || s.includes("packageunit")) {
+    return {
+      text: "หน่วยปริมาณ/หน่วยบรรจุ บางรายการกรอกไม่ได้ (ไม่ตรงตัวเลือกของกรมฯ)",
+      hint: "ตรวจสอบ \"หน่วยปริมาณ\" และ \"หน่วยบรรจุ\" ของแต่ละรายการสินค้าให้ถูกต้อง แล้วกดบันทึก หรือลองรันใหม่",
+      fields: ["รายการสินค้า"],
+    };
+  }
+
+  // 4) รหัสประเทศ
+  if (s.includes("รหัสประเทศ") || s.includes("country")) {
+    return {
+      text: "รหัสประเทศกรอกไม่ถูกต้อง",
+      hint: "ตรวจสอบช่อง \"ประเทศผู้ซื้อ\" และ \"ประเทศปลายทาง\" (ต้องเป็นรหัส 2 ตัว เช่น BR, VN)",
+      fields: ["buyer_country_code", "destination_country_code"],
+    };
+  }
+
+  // 5) save / grid ค้าง = ใบสร้างแล้วแต่บันทึก/พิมพ์ไม่ครบ
+  if (s.includes("grid ไม่ขึ้น") || s.includes("btnsave") || s.includes("save&close") || s.includes("ค้างหน้า edit")) {
+    return {
+      text: "บันทึกใบขนขั้นสุดท้ายไม่สำเร็จ — เว็บกรมฯ ตอบช้าตอนบันทึก",
+      hint: "ใบอาจถูกสร้างในระบบกรมฯ แล้ว ลองกด \"พิมพ์ใบขนซ้ำ\" ในช่องดูไฟล์ หรือรันใหม่อีกครั้ง",
+    };
+  }
+
+  // 6) timeout ทั่วไป (ยังไม่ match ข้างบน) = เว็บกรมฯ ช้า
+  if (s.includes("timeout") || s.includes("exceeded")) {
+    return {
+      text: "เว็บกรมศุลฯ (DCTK) ตอบช้าเกินกำหนด ทำให้ทำรายการไม่สำเร็จ",
+      hint: "ไม่ใช่ปัญหาข้อมูลของคุณ ลองกด \"รัน\" ใหม่อีกครั้ง — ระบบจะลองใหม่ให้อัตโนมัติ",
+    };
+  }
+
+  return null;
+}
 
 /**
  * จับ "ตำแหน่ง" จากบรรทัด log เช่น
@@ -176,17 +242,28 @@ export function summarizeJobError(logs: JobLogRow[]): JobErrorSummary {
   //   แล้วตัด prefix เชิงเทคนิค ("Record N error:", "ใบที่ N:") เพื่อให้อ่านง่าย
   const cleanHeadline = (t: string) =>
     t.replace(/^(Record\s*\d+\s*error)\s*[:：]\s*/i, "").trim();
+  // หา error ที่เป็นเนื้อหาจริง (สำหรับ humanize) — ข้ามบรรทัดหัวข้อ
+  const meaningfulError = errorIssues.find((i) => !/:\s*$/.test(i.text)) || errorIssues[0];
+  const rawForHuman = meaningfulError ? meaningfulError.text : (rawError || "");
+  const human = failed ? humanizeError(rawForHuman) : null;
+
   let headline: string;
+  let humanHint: string | undefined;
+  let affectedFields: string[] | undefined;
   if (!failed) {
     headline = "ไม่พบข้อผิดพลาด";
-  } else if (errorIssues.length) {
-    const meaningful = errorIssues.find((i) => !/:\s*$/.test(i.text)) || errorIssues[0];
-    const text = cleanHeadline(meaningful.text);
-    headline = meaningful.where ? `${text} (${meaningful.where})` : text;
+  } else if (human) {
+    // ✅ แปลเป็นภาษาคนได้ — ใช้ข้อความอ่านง่าย + คำแนะนำ + ช่องที่ต้องแก้
+    headline = stuckAt ? `${human.text} (${stuckAt})` : human.text;
+    humanHint = human.hint;
+    affectedFields = human.fields;
+  } else if (errorIssues.length && meaningfulError) {
+    const text = cleanHeadline(meaningfulError.text);
+    headline = meaningfulError.where ? `${text} (${meaningfulError.where})` : text;
   } else if (rawError) {
     headline = rawError.length > 120 ? rawError.slice(0, 120) + "…" : rawError;
   } else {
-    headline = "RPA ไม่สำเร็จ — ดู log เพื่อหาสาเหตุ";
+    headline = "ทำรายการไม่สำเร็จ — ลองรันใหม่อีกครั้ง";
   }
 
   return {
@@ -196,6 +273,8 @@ export function summarizeJobError(logs: JobLogRow[]): JobErrorSummary {
     issues: uniqueIssues,
     failedRows: [...failedRows].sort((a, b) => a - b),
     rawError,
+    humanHint,
+    affectedFields,
   };
 }
 

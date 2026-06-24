@@ -605,11 +605,22 @@ function bridgeJobLog(row: JobLogRow): void {
           if (declId) {
             const r = state.result;
             const ok = r ? (r.errors ?? 0) === 0 : true;
-            // สำเร็จ: edit → "edited", create → "done"
-            const status = ok ? (isEdit ? "edited" : "done") : "error";
-            const msg = ok
-              ? (isEdit ? "แก้ไขใบขนเสร็จ" : "กรอก + พิมพ์ PDF เสร็จ")
-              : "RPA มีข้อผิดพลาด — ดูประวัติงาน";
+            // status สะท้อนผลจริง:
+            //   ok           → edit:"edited" / create:"done" (ได้ใบขนจริง)
+            //   ไม่ ok แต่สร้างใบใน DCTK แล้ว (declarationCreated) → "partial" (รอพิมพ์ใบขนซ้ำ)
+            //   ไม่ ok และไม่ได้สร้างใบ → "error"
+            let status: string;
+            let msg: string;
+            if (ok) {
+              status = isEdit ? "edited" : "done";
+              msg = isEdit ? "แก้ไขใบขนเสร็จ" : "กรอก + พิมพ์ใบขนเสร็จ";
+            } else if (r?.declarationCreated && !isEdit) {
+              status = "partial";
+              msg = "สร้างใบใน DCTK แล้ว แต่ยังไม่ได้ไฟล์ใบขนจริง — กดพิมพ์ใบขนซ้ำในเว็บ";
+            } else {
+              status = "error";
+              msg = "RPA มีข้อผิดพลาด — ดูประวัติงาน";
+            }
             void setDeclarationStatus(declId, status, msg, row.job_id);
             broadcast("decl-status", { id: declId, status, message: msg });
             jobToDeclaration.delete(row.job_id);
