@@ -255,25 +255,25 @@ export async function login(
   await clickThenType(page, S.SEL_PASSWORD, password);
   await page.click(S.SEL_BTN_SUBMIT);
   // รอ "จนกว่า login สำเร็จจริง" = เมนู portfolio (หน้าหลัง login) ปรากฏ
-  //   DCTK ช้าไม่แน่นอน (บางรอบ >30s) → รอจนเห็นเมนูจริง ไม่ใช่รอเวลาคงที่แล้วเดาว่าเสร็จ
-  //   ทนได้นานสุด ~90s + retry กดปุ่ม login 1 ครั้งถ้ายังไม่เข้า (เผื่อคลิกแรกหลุด)
-  const LOGIN_TOTAL_MS = 90000;
+  //   DCTK ช้าไม่แน่นอน (บางรอบ >30s, บน VM บางรอบ >90s) → รอจนเห็นเมนูจริง ไม่ใช่รอเวลาคงที่แล้วเดาว่าเสร็จ
+  //   ทนได้นานสุด ~150s + retry กดปุ่ม login 1 ครั้งถ้ายังไม่เข้า (เผื่อคลิกแรกหลุด)
+  const LOGIN_TOTAL_MS = 150000;
   const start = Date.now();
   let loggedIn = false;
-  let retried = false;
+  let retried = 0;
   while (Date.now() - start < LOGIN_TOTAL_MS) {
     // เมนู portfolio โผล่ = เข้าระบบสำเร็จ
     if (await page.locator(S.SEL_PORTFOLIO_MENU).count().catch(() => 0)) {
       loggedIn = true;
       break;
     }
-    // ยังอยู่หน้า login (ช่อง user ยังอยู่) + ผ่านไป >25s → ลองกดปุ่มอีกครั้ง (ครั้งเดียว)
-    if (!retried && Date.now() - start > 25000) {
+    // ยังอยู่หน้า login (ช่อง user ยังอยู่) + ผ่านไป >25s → ลองกดปุ่มอีกครั้ง (สูงสุด 2 ครั้ง เผื่อ DCTK ช้ามาก)
+    if (retried < 2 && Date.now() - start > 25000 + retried * 45000) {
       const stillLogin = await page.locator(S.SEL_USER_ID).count().catch(() => 0);
       if (stillLogin) {
-        log("  ↻ ยังไม่เข้าระบบหลัง 25s — ลองกดปุ่ม login ซ้ำ");
+        log(`  ↻ ยังไม่เข้าระบบหลัง ${Math.round((Date.now() - start) / 1000)}s — ลองกดปุ่ม login ซ้ำ (ครั้งที่ ${retried + 1})`);
         await page.click(S.SEL_BTN_SUBMIT).catch(() => { /* */ });
-        retried = true;
+        retried++;
       }
     }
     await sleep(1500);
@@ -281,15 +281,16 @@ export async function login(
   if (loggedIn) {
     log(`  ✓ login สำเร็จ (${Math.round((Date.now() - start) / 1000)}s) — เมนู portfolio ปรากฏ`);
   } else {
-    log("  ⚠ รอ login เกิน 90s — เมนู portfolio ยังไม่ปรากฏ (DCTK ช้ามาก/ล่ม) — ลองทำต่อ");
+    log("  ⚠ รอ login เกิน 150s — เมนู portfolio ยังไม่ปรากฏ (DCTK ช้ามาก/ล่ม) — ลองทำต่อ");
   }
 }
 
 export async function openPortfolioAndAdd(page: Page): Promise<void> {
   log("portfolio → Add");
-  await page.click(S.SEL_PORTFOLIO_MENU);
+  // DCTK ช้า → ให้ click รอเมนูได้นาน (เดิม default 30s บางรอบไม่พอเมื่อ login เพิ่งผ่าน)
+  await page.click(S.SEL_PORTFOLIO_MENU, { timeout: 30000 });
   await sleep(5000);
-  await page.click(S.SEL_BTN_ADD);
+  await page.click(S.SEL_BTN_ADD, { timeout: 30000 });
   await sleep(5000);
 }
 
