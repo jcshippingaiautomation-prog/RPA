@@ -313,6 +313,16 @@ async function clickRowAndPrint(
     log(`  · diag error: ${ex}`);
   }
 
+  const dest = await savePdfFromReportPage(reportPage, downloadDir);
+  return { pdf: dest, declarationNo };
+}
+
+/**
+ * จาก report page (Stimulsoft viewer ที่เปิดอยู่แล้ว) → save เป็น PDF.
+ * ใช้ร่วมกัน: clickRowAndPrint (ผ่าน grid) + reprintDeclaration (goto URL ตรง).
+ * คืน path ไฟล์ ถ้าสำเร็จ, null ถ้าไม่ได้.
+ */
+async function savePdfFromReportPage(reportPage: Page, downloadDir: string): Promise<string | null> {
   await mkdir(downloadDir, { recursive: true });
   const dest = path.join(downloadDir, `declaration_${nowStamp()}.pdf`);
 
@@ -364,14 +374,15 @@ async function clickRowAndPrint(
     }
   }
 
-  return { pdf: captured ? dest : null, declarationNo };
+  return captured ? dest : null;
 }
 
 /**
  * พิมพ์ใบขนซ้ำ (reprint) — ไม่สร้างใบใหม่/ไม่กรอกฟอร์ม.
- * Precondition: login DCTK สำเร็จแล้ว (page อยู่หน้าหลัง login).
- * Flow: เปิดเมนูรายการใบขน (portfolio) → ค้นด้วย declarationNo → เลือกแถว → คลิกพิมพ์ → save PDF.
- * ใช้ตอน finalize ตอนสร้างใบล้มเหลว (DCTK ค้าง) แต่ใบถูกสร้างใน DCTK แล้ว — มาพิมพ์ทีหลัง.
+ * Precondition: login DCTK สำเร็จแล้ว.
+ * วิธีหลัก: goto URL report viewer ตรง ๆ (ExportReport/RptExDec?selectedRecord=DCTKxxx)
+ *   → ข้ามหน้ารายการ/grid ทั้งหมด (ที่ headless บน VM มักค้าง) → save PDF.
+ * fallback: ถ้า goto ไม่ได้ report → กลับไป flow เดิม (portfolio → ค้น → grid → พิมพ์).
  */
 export async function reprintDeclaration(
   page: Page,
@@ -386,14 +397,36 @@ export async function reprintDeclaration(
     return { pdf: null, declarationNo: null };
   }
 
-  // 1) เปิดเมนูรายการใบขน (portfolio)
+  // ---- วิธีหลัก: เปิด report URL ตรง (ยืนยันจาก log จริง: ExportReport/RptExDec?selectedRecord=DCTKxxx)
+  //   base = origin ของหน้าปัจจุบัน (เช่น http://203.154.140.105/DCTK)
+  try {
+    const cur = page.url();
+    const m = cur.match(/^(https?:\/\/[^/]+\/[^/]+)\//i); // http://host/DCTK
+    const base = m ? m[1] : cur.replace(/\/[^/]*$/, "");
+    // pattern ยืนยันจาก log จริง: ...?selectedRecord=DCTKxxx&pagesText=&printFirstPage=false&printLastPage=false
+    const reportUrl = `${base}/ExportReport/RptExDec?selectedRecord=${encodeURIComponent(declNo)}&pagesText=&printFirstPage=false&printLastPage=false`;
+    log(`  🔗 เปิด report URL ตรง: ${reportUrl}`);
+    await page.goto(reportUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+    // ให้ Stimulsoft viewer โหลด (รอ panel หลัก)
+    try { await page.waitForSelector("#Report_JsViewerMainPanel, .stiJsViewerMainPanel", { timeout: 25000 }); } catch { /* */ }
+    await page.waitForTimeout(2000);
+    // ถ้าหน้าไม่ใช่ report (redirect ไป login/error) → ข้ามไป fallback
+    if (/RptExDec|ExportReport/i.test(page.url())) {
+      const pdf = await savePdfFromReportPage(page, downloadDir);
+      if (pdf) { log("  ✓ reprint จาก URL ตรงสำเร็จ"); return { pdf, declarationNo: declNo }; }
+      log("  ⚠ เปิด report URL ได้ แต่ save PDF ไม่สำเร็จ — ลอง fallback grid");
+    } else {
+      log(`  ⚠ goto report URL แล้วไม่ใช่หน้า report (${page.url().slice(0, 60)}) — ลอง fallback grid`);
+    }
+  } catch (e) {
+    log(`  ⚠ เปิด report URL ตรงไม่สำเร็จ: ${e instanceof Error ? e.message.slice(0, 80) : ""} — ลอง fallback grid`);
+  }
+
+  // ---- fallback: flow เดิม (portfolio → ค้น → grid → พิมพ์)
   await page.click(S.SEL_PORTFOLIO_MENU, { timeout: 10000 }).catch((e) => {
     log(`  ⚠ เปิดเมนู portfolio ไม่สำเร็จ: ${e instanceof Error ? e.message.slice(0, 60) : ""}`);
   });
   await sleep(5000);
-
-  // 2) ค้นด้วยเลขใบขน (filter cell คอลัมน์ "เลขที่ใบขนฯ") — best-effort
-  //    ถ้าหาช่องค้นไม่เจอ ยังไปต่อได้ (clickRowAndPrint จะหาแถวตาม declNo เอง)
   try {
     const search = page.locator(S.SEL_DECL_SEARCH_INPUT).first();
     if (await search.count().catch(() => 0)) {
@@ -402,14 +435,8 @@ export async function reprintDeclaration(
       await page.keyboard.press("Enter");
       log(`  🔎 ค้นใบเลข ${declNo}`);
       await sleep(4000);
-    } else {
-      log("  ℹ ไม่เจอช่องค้น (filter) — ใช้การหาแถวตามเลขใบใน grid แทน");
     }
-  } catch (e) {
-    log(`  ⚠ ค้นใบไม่สำเร็จ: ${e instanceof Error ? e.message.slice(0, 60) : ""} — ลองหาแถวใน grid ต่อ`);
-  }
-
-  // 3) รอ grid โหลดแถว แล้วเลือกแถว + พิมพ์ (reuse logic เดียวกับ finalize)
+  } catch { /* */ }
   try {
     await page.waitForSelector(S.SEL_GRID_ANY_ROW, { timeout: 30000 });
   } catch {
