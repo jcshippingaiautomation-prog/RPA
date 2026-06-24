@@ -252,6 +252,11 @@ export const SEL_DIALOG_OK = "#dialogboxfoot:visible > button:visible";
 export const SEL_GRID_FIRST_ROW =
   "#grid > div.k-grid-content.k-auto-scrollable > table > tbody > " +
   "tr:nth-child(1) > td:nth-child(2)";
+// gate ที่ทนกว่า (ไม่อิง #grid+nth-child ที่เปราะ/เลื่อนตาม locked columns + viewport)
+//   ใช้รอ "มีแถวข้อมูลในตารางรายการใบขนแล้ว" — ครอบทั้ง Kendo grid ทุกแบบ
+export const SEL_GRID_ANY_ROW =
+  "table tbody tr.k-master-row, table tbody tr[role='row'] td[role='gridcell'], " +
+  "td[data-field='DeclarationNo'], #grid table tbody tr td";
 export const SEL_BTN_PRINT = "#BtnPrint";
 export const SEL_REPORT_SAVE_BTN =
   "#Report_JsViewerMainPanel > div:nth-child(4) > div > table > tbody > " +

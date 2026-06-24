@@ -646,7 +646,13 @@ async function runBrowser(
     headless,
     slowMo: cfg.slow_mo_ms ?? 0,
   });
-  const context: BrowserContext = await browser.newContext({ acceptDownloads: true });
+  // ⚠ viewport ใหญ่สำคัญมากบน VM (headless): ถ้าไม่ตั้ง = default 1280×720 → Kendo Grid
+  //   ของ DCTK render ไม่ครบ/virtualize แถวหาย → เลือกแถวเพื่อพิมพ์ใบขนไม่ได้ → ได้แค่ capture
+  //   (บน Mac headed จอกว้าง grid ขึ้นครบ → ผ่าน; นี่คือเหตุ "localhost ผ่าน VM ไม่ผ่าน")
+  const context: BrowserContext = await browser.newContext({
+    acceptDownloads: true,
+    viewport: { width: 1920, height: 1080 },
+  });
   let page: Page = await context.newPage();
   page.setDefaultTimeout(cfg.default_timeout_ms ?? 30000);
 

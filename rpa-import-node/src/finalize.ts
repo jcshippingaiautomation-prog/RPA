@@ -107,9 +107,10 @@ export async function finalizeAndPrint(
   } catch { /* */ }
 
   // รอ grid รายการขึ้น (หลังบันทึกและปิด DCTK ควรกลับมาหน้า portfolio/grid)
+  //   ใช้ gate ที่ทน (SEL_GRID_ANY_ROW) ไม่อิง nth-child ที่เปราะ
   let gridReady = false;
   try {
-    await page.waitForSelector(S.SEL_GRID_FIRST_ROW, { timeout: 30000 });
+    await page.waitForSelector(S.SEL_GRID_ANY_ROW, { timeout: 30000 });
     gridReady = true;
   } catch {
     log("  ⚠ รอ grid แถวแรกไม่ขึ้น — DCTK ค้างหน้า Edit");
@@ -144,7 +145,7 @@ export async function finalizeAndPrint(
   // คลิกแถวแรกใน grid = ใบที่เพิ่งสร้าง (DCTK เรียงใบล่าสุดขึ้นบนสุด)
   //   DCTK ช้า: ลองรอ grid → ถ้าไม่ขึ้น เปิดเมนู portfolio เอง แล้วรออีกครั้ง (รวมทนได้นาน)
   const waitGrid = async (ms: number): Promise<boolean> => {
-    try { await page.waitForSelector(S.SEL_GRID_FIRST_ROW, { timeout: ms }); return true; }
+    try { await page.waitForSelector(S.SEL_GRID_ANY_ROW, { timeout: ms }); return true; }
     catch { return false; }
   };
   let rowReady = await waitGrid(40000);
@@ -157,7 +158,19 @@ export async function finalizeAndPrint(
     rowReady = await waitGrid(40000);
   }
   if (!rowReady) {
-    log("  ✗ เลือกแถวใบเพื่อพิมพ์ไม่สำเร็จ: grid ไม่ขึ้นหลังรอ ~50s");
+    // diagnostic: page อยู่หน้าไหน + มี grid element ไหม (แยก "ผิดหน้า" vs "DOM ต่าง")
+    try {
+      const diag = await page.evaluate(() => ({
+        url: location.href,
+        hasGrid: !!document.querySelector("#grid"),
+        kGridContent: document.querySelectorAll(".k-grid-content").length,
+        anyRow: document.querySelectorAll("table tbody tr").length,
+        declCell: document.querySelectorAll("td[data-field='DeclarationNo']").length,
+      }));
+      log(`  🔬 grid diag: ${JSON.stringify(diag)}`);
+      await page.screenshot({ path: path.join(downloadDir, "..", "debug_grid_notfound.png"), fullPage: true }).catch(() => {});
+    } catch { /* */ }
+    log("  ✗ เลือกแถวใบเพื่อพิมพ์ไม่สำเร็จ: grid ไม่ขึ้นหลังรอ ~80s");
     return { pdf: null, declarationNo };
   }
 
@@ -281,7 +294,8 @@ async function clickRowAndPrint(
     log("  ✗ report tab ปิดไปแล้ว — หาไฟล์ PDF ไม่ได้ (ใบขนสร้างเสร็จแล้ว)");
     return { pdf: null, declarationNo };
   }
-  log(`  · report tab: ${reportPage.url()}`);
+  // log URL ของ report tab — เด่นชัด (🔗) เพื่อเก็บ pattern ไว้ทำ direct-print (goto ตรง ข้าม grid) ในอนาคต
+  log(`  🔗 REPORT URL: ${reportPage.url()}`);
 
   // diagnostic: dump id ของปุ่มที่เกี่ยวข้อง
   try {
@@ -397,7 +411,7 @@ export async function reprintDeclaration(
 
   // 3) รอ grid โหลดแถว แล้วเลือกแถว + พิมพ์ (reuse logic เดียวกับ finalize)
   try {
-    await page.waitForSelector(S.SEL_GRID_FIRST_ROW, { timeout: 30000 });
+    await page.waitForSelector(S.SEL_GRID_ANY_ROW, { timeout: 30000 });
   } catch {
     log("  ✗ grid รายการใบขนไม่ขึ้น — พิมพ์ซ้ำไม่สำเร็จ");
     return { pdf: null, declarationNo: declNo };
