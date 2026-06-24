@@ -245,8 +245,8 @@ function rowLabel(r: Record): { customer: string; invoice: string } {
  *   2) Google Sheet (ถ้า enabled)
  *   3) Excel
  */
-async function loadAllRecords(cfg: AppConfig): Promise<Record[]> {
-  const fromSupabase = await loadRecordsFromSupabase();
+async function loadAllRecords(cfg: AppConfig, onlyDeclId?: string): Promise<Record[]> {
+  const fromSupabase = await loadRecordsFromSupabase(onlyDeclId);
   if (fromSupabase.length > 0) return fromSupabase;
 
   const gs = cfg.google_sheet;
@@ -342,9 +342,14 @@ export async function runImport(opts: RunOptions = {}): Promise<RunResult> {
   try {
     const cfg: AppConfig = { ...(await loadConfig()), ...(opts.configOverrides ?? {}) };
 
-    const records = await loadAllRecords(cfg);
+    // edit/reprint: โหลดเฉพาะใบที่ระบุ (แม้ doc_status=true เพราะทำเอกสารไปแล้ว)
+    //   create/run: โหลดใบที่ยังไม่ทำ (doc_status=false) ตามปกติ
+    const onlyDeclId = (opts.mode === "edit" || opts.mode === "reprint")
+      ? (opts.editDeclarationId || undefined)
+      : undefined;
+    const records = await loadAllRecords(cfg, onlyDeclId);
     if (records.length === 0) {
-      log("ไม่มีข้อมูลให้ประมวลผล");
+      log(onlyDeclId ? `ไม่พบใบขน id=${onlyDeclId} ใน Supabase` : "ไม่มีข้อมูลให้ประมวลผล");
       return result;
     }
     await attachRules(

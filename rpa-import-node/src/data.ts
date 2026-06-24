@@ -259,16 +259,19 @@ export async function loadRecordsFromSheet(
  * map DB columns → internal keys ผ่าน SHEET_HEADER_MAP เหมือน Google Sheet
  * คืน [] ถ้าไม่ได้ตั้งค่า env หรือ error (ให้ caller fallback)
  */
-export async function loadRecordsFromSupabase(): Promise<Record[]> {
+export async function loadRecordsFromSupabase(onlyDeclId?: string): Promise<Record[]> {
   const url = (process.env.SUPABASE_URL ?? "").trim();
   const key = (process.env.SUPABASE_SERVICE_KEY ?? "").trim();
   if (!url || !key) return [];
 
-  log("โหลดจาก Supabase: declarations (doc_status=false)");
+  // onlyDeclId: โหลดเฉพาะใบนั้น (ไม่สน doc_status) — สำหรับ edit/reprint ใบที่ทำเอกสารไปแล้ว
+  //   (ปกติ default โหลด doc_status=false = ใบที่ยังไม่ทำ สำหรับ create/run ทั้งหมด)
+  const filter = onlyDeclId
+    ? `?select=*&id=eq.${encodeURIComponent(onlyDeclId)}`
+    : `?select=*&doc_status=eq.false&order=created_at.asc`;
+  log(onlyDeclId ? `โหลดจาก Supabase: declaration id=${onlyDeclId} (เฉพาะใบนี้)` : "โหลดจาก Supabase: declarations (doc_status=false)");
   try {
-    const endpoint =
-      `${url}/rest/v1/declarations` +
-      `?select=*&doc_status=eq.false&order=created_at.asc`;
+    const endpoint = `${url}/rest/v1/declarations` + filter;
     const resp = await fetch(endpoint, {
       headers: { apikey: key, Authorization: `Bearer ${key}` },
       signal: AbortSignal.timeout(30000),

@@ -397,13 +397,13 @@ app.post("/api/declarations/:id/reprint", async (req, res) => {
       res.status(400).json({ error: "ยังไม่มีเลขใบขน DCTK — ต้องมีเลขใบขนก่อนถึงพิมพ์ซ้ำได้" });
       return;
     }
-    const rows = await buildPreviewRows();
-    const row = rows.find((r) => String(r.declarationId) === String(id));
-    if (!row) { res.status(404).json({ error: "ไม่พบใบขนนี้ในรายการที่ดึงมา" }); return; }
+    // reprint ค้นใบใน DCTK ด้วย declaration_no โดยตรง — ไม่ต้องพึ่ง previewRows (ที่ filter doc_status=false)
+    //   ⚠ ใบที่ได้แค่ capture จะมี doc_status=true → previewRows ตัดออก → reprint หาไม่เจอ (บั๊กเดิม)
+    //   ส่ง declId + declaration_no ให้ worker พอ (onlyRows ไม่จำเป็นกับ reprint mode)
     const headless = (req.body && (req.body as { headless?: boolean }).headless) ?? true;
     const jobId = await enqueueJob(
       "rpa_print",
-      { onlyRows: [row.index], headless, declId: id, declaration_no: declarationNo },
+      { headless, declId: id, declaration_no: declarationNo },
       { dryRun: false, triggeredBy: req.user?.id ?? null, triggerSource: "manual" },
     );
     if (!jobId) { res.status(409).json({ error: "คิวไม่พร้อม" }); return; }
