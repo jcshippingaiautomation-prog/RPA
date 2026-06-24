@@ -815,13 +815,14 @@ async function fillOneGoodsItem(
   //      → กรอก "0" ทับค่า 81.25 ที่ DCTK เติมอัตโนมัติ → detail ประกัน=0 ≠ control → "Message Validate"
   //      บล็อก save → goods ไม่บันทึก → ใบไม่สมบูรณ์ → report ไม่เปิด → พิมพ์ใบขนไม่ออก!
   //   แก้: ใช้ค่า >0 ของ item ก่อน ไม่งั้นค่าหัวรายการ (single-item) — ถ้าไม่มีค่า >0 = ข้าม (คง DCTK auto)
+  //   ใช้ "ค่าเฉพาะของ item" เท่านั้น (>0) — ถ้า item ไม่มีค่าเฉพาะ = ข้าม ไม่กรอกทับ
+  //   เพราะ DCTK เติมค่าประกันให้แต่ละ item อัตโนมัติแล้ว (single-item=ทั้งก้อน, multi-item=เฉลี่ยตามสัดส่วน)
+  //   ⚠ ห้าม fallback เป็นค่า header ทั้งก้อนมาใส่ทุก item — multi-item จะรวมเกิน → validate fail
   const insItem = stripZeroDecimals(item.insurance ?? "");
-  const insHead = stripZeroDecimals(r.insurance ?? "");
-  const insVal = (insItem && insItem !== "0") ? insItem : ((insHead && insHead !== "0") ? insHead : "");
-  if (insVal) {
-    await put(page, r, "insurance_charge", S.SEL_TERM_INSURANCE, insVal);
+  if (insItem && insItem !== "0") {
+    await put(page, r, "insurance_charge", S.SEL_TERM_INSURANCE, insItem);
   } else {
-    log("  ⏭ ข้ามกรอกค่าประกันต่อ item (ไม่มีค่า >0) — คงค่าที่ DCTK เติมอัตโนมัติ (กัน 0 ทับ)");
+    log("  ⏭ ข้ามกรอกค่าประกันต่อ item (item ไม่มีค่าเฉพาะ) — คงค่าที่ DCTK เติมอัตโนมัติ (กัน 0 ทับ + กัน multi-item เกิน)");
   }
 
   // FOC (รายการของแถม) — Kendo DropDownList #NatureTrans (ปกติ "11-ไม่ใช่ของแถม")
