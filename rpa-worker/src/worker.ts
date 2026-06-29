@@ -12,15 +12,17 @@ import {
   markError,
   type JobRow,
 } from "./queue.js";
-import { listCustomerSettings, uploadDocument } from "./supa.js";
+import { listCustomerSettings, uploadDocument, setDeclarationStatus } from "./supa.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** รันงาน rpa_import 1 งาน (เทียบเท่า startRun ใน server.ts แต่ log → job_logs) */
 async function runRpaImport(job: JobRow): Promise<void> {
-  const payload = job.payload as { onlyRows?: number[]; headless?: boolean };
+  const payload = job.payload as { onlyRows?: number[]; headless?: boolean; declId?: string };
   const dryRun = !!job.dry_run;
   const onlyRows = Array.isArray(payload.onlyRows) ? payload.onlyRows : undefined;
+  const declId = payload.declId;
+  let declDocUploaded = false; // ได้ไฟล์ใบขนจริง (kind=declaration) ไหม — ใช้ตัดสินสถานะ
 
   const configOverrides: Partial<AppConfig> = {};
   if (typeof payload.headless === "boolean") configOverrides.headless = payload.headless;
@@ -77,10 +79,13 @@ async function runRpaImport(job: JobRow): Promise<void> {
       });
       if (rec) await appendLog(job.id, "document", rec);
       else await appendLog(job.id, "log", { line: "[WORKER] ⚠ อัปเอกสารไม่สำเร็จ" });
+      if (doc.kind === "declaration") declDocUploaded = true; // ได้ใบขนจริงแล้ว
     },
     onCaptureMeta: async (meta) => {
       await appendLog(job.id, "log", { line: `[WORKER] 🧾 เลขใบขน DCTK: ${meta.declarationNo}` });
       await appendLog(job.id, "capture-meta", meta);
+      // อัปเดตเลขใบขนลง declaration ตรง ๆ (worker ทำเอง — เว็บ Render อาจหลับ)
+      if (declId && meta.declarationNo) await setDeclarationStatus(declId, { declaration_no: meta.declarationNo });
     },
     shouldStop: () => cancelFlag,
   });
@@ -101,6 +106,15 @@ async function runRpaImport(job: JobRow): Promise<void> {
   }
 
   await appendLog(job.id, "lifecycle", { event: "run-done", result });
+  // อัปเดตสถานะ declaration ตรง ๆ จาก worker (ไม่พึ่งเว็บ bridge ที่หลับ):
+  //   ได้ใบขนจริง → done · สร้างใบแล้วแต่ไม่ได้ไฟล์จริง → partial · ไม่ได้เลย → error
+  if (declId && !dryRun) {
+    const st = declDocUploaded ? "done" : (result.declarationCreated ? "partial" : "error");
+    const msg = declDocUploaded ? "กรอก + พิมพ์ใบขนเสร็จ"
+      : result.declarationCreated ? "สร้างใบใน DCTK แล้ว แต่ยังไม่ได้ไฟล์ใบขนจริง — กดพิมพ์ใบขนซ้ำในเว็บ"
+      : "RPA มีข้อผิดพลาด — ดูประวัติงาน";
+    await setDeclarationStatus(declId, { status: st, status_message: msg });
+  }
   await markDone(job.id, result as unknown as Record<string, unknown>);
 }
 
