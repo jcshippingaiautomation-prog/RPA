@@ -259,6 +259,29 @@ export async function loadRecordsFromSheet(
  * map DB columns → internal keys ผ่าน SHEET_HEADER_MAP เหมือน Google Sheet
  * คืน [] ถ้าไม่ได้ตั้งค่า env หรือ error (ให้ caller fallback)
  */
+/**
+ * คำนวณ "สถานที่รับบรรทุก" (loading) จาก "สถานที่ตรวจปล่อย" (release)
+ * กฎ (แก้ได้ผ่าน env LOADING_PORT_RULES = JSON เช่น {"28":"2801","01":"0113"}):
+ *   - จับคู่ด้วย "prefix ที่ยาวสุด" ก่อน → ถ้าไม่เจอ prefix ใด = ใช้ค่า release เดิม (loading = release)
+ * ดีฟอลต์: ขึ้นต้น "28" → "2801"; อื่น ๆ → เท่ากับ release (เช่น 0113 → 0113)
+ */
+const DEFAULT_LOADING_RULES: { [prefix: string]: string } = { "28": "2801" };
+export function deriveLoadingPort(release: string): string {
+  const rel = (release ?? "").trim();
+  if (!rel) return "";
+  let rules = DEFAULT_LOADING_RULES;
+  try {
+    const env = (process.env.LOADING_PORT_RULES ?? "").trim();
+    if (env) rules = JSON.parse(env);
+  } catch { /* ใช้ default ถ้า parse env ไม่ได้ */ }
+  // จับ prefix ที่ยาวสุดก่อน (เจาะจงกว่า)
+  const prefixes = Object.keys(rules).sort((a, b) => b.length - a.length);
+  for (const p of prefixes) {
+    if (rel.startsWith(p)) return rules[p];
+  }
+  return rel; // ไม่ match กฎ → loading = release (เช่น 0113 → 0113)
+}
+
 export async function loadRecordsFromSupabase(onlyDeclId?: string): Promise<Record[]> {
   const url = (process.env.SUPABASE_URL ?? "").trim();
   const key = (process.env.SUPABASE_SERVICE_KEY ?? "").trim();
@@ -290,6 +313,12 @@ export async function loadRecordsFromSupabase(onlyDeclId?: string): Promise<Reco
           Object.entries(raw).map(([k, v]) => [k, v == null ? "" : String(v)]),
         ),
       );
+      // สถานที่รับบรรทุก (loading) มักไม่มีในเอกสาร → คำนวณจากสถานที่ตรวจปล่อย (release)
+      //   ตามกฎ config (เช่น 0113→0113, ขึ้นต้น 28→2801). เติมเฉพาะเมื่อ loading ว่าง
+      if (!String(rec.loading_code ?? "").trim()) {
+        const derived = deriveLoadingPort(String(rec.paperless_code ?? "").trim());
+        if (derived) rec.loading_code = derived;
+      }
       rec.__raw_row__ = Object.fromEntries(
         Object.entries(raw).map(([k, v]) => [k, v == null ? "" : String(v)]),
       );
