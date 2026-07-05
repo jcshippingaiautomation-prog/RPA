@@ -248,7 +248,10 @@ body {
 .modal { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
 .modal-box { background: var(--card); border-radius: 14px; box-shadow: var(--shadow-lg); width: 560px; max-width: 100%; max-height: 90vh; display: flex; flex-direction: column; }
 .modal-lg { width: 860px; }
-.modal-xl { width: 1180px; }
+.modal-xl { width: min(1320px, 96vw); }
+/* modal ตรวจสอบ: สูงเต็มจอ + ให้แต่ละแผงเลื่อนเอง (body ไม่เลื่อน) */
+#modalDetail .modal-box { height: 92vh; }
+#modalDetail .modal-body { padding: 0; overflow: hidden; flex: 1; min-height: 0; }
 
 /* ===== Wizard steps (ตัวบอกขั้นตอน ① → ② → ③) ===== */
 .wizard-steps { display: flex; align-items: center; gap: 6px; padding: 14px 22px 4px; }
@@ -267,18 +270,27 @@ body {
 .wz-spinner { width: 42px; height: 42px; border: 4px solid #dbe3f5; border-top-color: var(--primary); border-radius: 50%; margin: 0 auto 16px; animation: wz-spin .8s linear infinite; }
 @keyframes wz-spin { to { transform: rotate(360deg); } }
 
-/* ===== ขั้นตรวจสอบ: ฟอร์มซ้าย + เอกสารขวา ===== */
-.md-review { display: grid; grid-template-columns: 1fr 460px; gap: 20px; align-items: start; }
-@media (max-width: 980px) { .md-review { grid-template-columns: 1fr; } }
-.md-docs-pane { position: sticky; top: 0; }
-.md-docs-pane .md-section-title { display: flex; align-items: center; gap: 6px; }
-.doc-viewer { display: flex; flex-direction: column; gap: 14px; max-height: 66vh; overflow-y: auto; padding: 4px; background: #f7f9fc; border: 1px solid var(--border); border-radius: 10px; }
-.doc-file { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #fff; }
-.doc-file-name { font-size: 12px; color: var(--muted2); padding: 6px 10px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; background: #fbfcfe; }
+/* ===== ขั้นตรวจสอบ: เอกสารซ้าย / ข้อมูลที่สกัดขวา (2 แผงเลื่อนอิสระ) ===== */
+.md-review { display: grid; grid-template-columns: minmax(0,1.05fr) minmax(0,1fr); height: 100%; min-height: 0; }
+@media (max-width: 900px) { .md-review { grid-template-columns: 1fr; overflow-y: auto; } }
+.md-pane { overflow-y: auto; min-height: 0; padding: 16px 20px; }
+.md-docs-col { background: #eef1f6; border-right: 1px solid var(--border); }
+.md-form-col { background: var(--card); }
+@media (max-width: 900px) { .md-pane { overflow: visible; } .md-docs-col { border-right: 0; border-bottom: 1px solid var(--border); } }
+.md-pane-title { font-size: 13px; font-weight: 700; color: var(--text); margin: 0 0 12px; display: flex; align-items: center; gap: 6px; position: sticky; top: -16px; background: inherit; padding: 6px 0; z-index: 2; }
+
+/* วิวเอกสารต่อเนื่อง (รวมทุกไฟล์ทุกหน้าเป็นวิวเดียว) */
+.doc-viewer { display: flex; flex-direction: column; gap: 14px; }
+.doc-file { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #fff; box-shadow: var(--shadow); }
+.doc-file-name { font-size: 12px; color: var(--muted2); padding: 7px 11px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; background: #fbfcfe; }
 .doc-img { width: 100%; display: block; }
-.doc-frame { width: 100%; height: 560px; border: 0; display: block; background: #fff; }
+.doc-frame { width: 100%; height: 78vh; border: 0; display: block; background: #fff; }
 .doc-other { padding: 16px; text-align: center; font-size: 13px; color: var(--muted2); }
 .doc-empty { padding: 24px; text-align: center; color: var(--muted); font-size: 13px; }
+
+/* ฟิลด์ในแผงข้อมูล */
+.fld-full { grid-column: 1 / -1; }
+textarea.md-edit { resize: vertical; min-height: 62px; font-family: inherit; line-height: 1.55; }
 .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px; border-bottom: 1px solid var(--border); }
 .modal-head h3 { margin: 0; font-size: 17px; font-weight: 700; }
 .modal-x { background: none; border: none; cursor: pointer; color: var(--muted2); padding: 4px; border-radius: 8px; }
@@ -287,9 +299,9 @@ body {
 .modal-body { padding: 20px 22px; overflow-y: auto; }
 .modal-foot { display: flex; align-items: center; gap: 10px; padding: 16px 22px; border-top: 1px solid var(--border); }
 
-.md-status { margin-bottom: 14px; font-size: 13px; color: var(--muted2); display: flex; align-items: center; gap: 8px; }
-.md-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px 16px; }
-@media (max-width: 760px) { .md-grid { grid-template-columns: 1fr 1fr; } }
+.md-status { margin-bottom: 14px; font-size: 13px; color: var(--muted2); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.md-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+@media (max-width: 560px) { .md-grid { grid-template-columns: 1fr; } }
 .fld { display: flex; flex-direction: column; gap: 4px; }
 .fld label { font-size: 12px; color: var(--muted2); }
 .md-section { margin-top: 18px; }

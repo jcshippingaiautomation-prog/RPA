@@ -428,22 +428,40 @@ async function saveItems() {
   finally { $("itSave").disabled = false; }
 }
 
-function renderDetailForm(d, errorSummary, validation) {
-  const cells = DECL_FIELDS.map(([k, label]) =>
-    `<div class="fld">
+// ช่องที่ต้องกรอกได้หลายบรรทัด (textarea) — ให้ตรงกับเอกสารจริง เช่น เลขหมายหีบห่อ
+const MULTILINE_FIELDS = { shipping_mark: 4, description_eng: 2 };
+function renderFieldCell(k, label, d) {
+  const val = d[k] != null ? String(d[k]) : "";
+  const rows = MULTILINE_FIELDS[k];
+  if (rows) {
+    return `<div class="fld fld-full">
       <label>${escapeHtml(label)}</label>
-      <input class="inp md-edit" data-key="${k}" value="${escapeHtml(d[k] != null ? String(d[k]) : "")}" />
-    </div>`).join("");
+      <textarea class="inp md-edit" data-key="${k}" rows="${rows}" placeholder="ใส่ได้หลายบรรทัดตามเอกสาร">${escapeHtml(val)}</textarea>
+    </div>`;
+  }
+  return `<div class="fld">
+    <label>${escapeHtml(label)}</label>
+    <input class="inp md-edit" data-key="${k}" value="${escapeHtml(val)}" />
+  </div>`;
+}
+function renderDetailForm(d, errorSummary, validation) {
+  const cells = DECL_FIELDS.map(([k, label]) => renderFieldCell(k, label, d)).join("");
   editItems = Array.isArray(d._items) ? d._items.map((it) => ({ ...it })) : [];
   // แบนเนอร์ขั้น wizard (แสดงเฉพาะตอนเข้ามาจากการอัปโหลด → ขั้นที่ 3 ตรวจสอบ)
   const wizardBanner = detailWizard
     ? `<div class="eta-note" style="width:100%;box-sizing:border-box;margin-bottom:14px">
-         ✓ AI สกัดข้อมูลเสร็จแล้ว — <b>&nbsp;ขั้นที่ 3/3: ตรวจสอบข้อมูลเทียบกับเอกสารทางขวา</b>&nbsp; แล้วกด "บันทึก" → "รัน RPA"
+         ✓ AI สกัดข้อมูลเสร็จแล้ว — <b>&nbsp;ขั้นที่ 3/3: ตรวจข้อมูลขวาให้ตรงกับเอกสารซ้าย</b>&nbsp; แล้วกด "บันทึก" → "รัน RPA"
        </div>`
     : "";
+  // ซ้าย = เอกสารต้นฉบับ (ภาพ) · ขวา = ข้อมูลที่สกัด (ตรวจ/แก้)
   $("mdBody").innerHTML = `
     <div class="md-review">
-      <div class="md-form-col">
+      <div class="md-pane md-docs-col">
+        <div class="md-pane-title">📄 เอกสารต้นฉบับ <span class="muted" style="font-weight:400">— เลื่อนดูทุกไฟล์ทุกหน้า</span></div>
+        <div id="mdDocsPane" class="doc-viewer"><div class="doc-empty">กำลังโหลดเอกสาร…</div></div>
+      </div>
+      <div class="md-pane md-form-col">
+        <div class="md-pane-title">✏️ ข้อมูลที่สกัดได้ <span class="muted" style="font-weight:400">— ตรวจ/แก้ก่อนรัน</span></div>
         ${wizardBanner}
         <div class="md-status">สถานะ: ${statusBadge(d.status, d.status_message, d.doc_status)} ${d.status_message ? `<span class="muted">${escapeHtml(d.status_message)}</span>` : ""}</div>
         ${renderValidationBox(validation)}
@@ -451,10 +469,6 @@ function renderDetailForm(d, errorSummary, validation) {
         <div class="md-grid">${cells}</div>
         ${renderItemsTable()}
         <div class="md-section"><div class="md-section-title">📎 ไฟล์ผลลัพธ์ (ใบขน/แคปหน้าจอ)</div><div id="mdDocs" class="att-list muted">กำลังโหลด…</div></div>
-      </div>
-      <div class="md-docs-pane">
-        <div class="md-section-title">🖼 เอกสารต้นฉบับ <span class="muted" style="font-weight:400">(ใช้ตรวจเทียบข้อมูล)</span></div>
-        <div id="mdDocsPane" class="doc-viewer"><div class="doc-empty">กำลังโหลดเอกสาร…</div></div>
       </div>
     </div>
   `;
@@ -579,7 +593,15 @@ async function loadDetailDocImages(customer, invoice) {
   if (!pane) return;
   try {
     const res = await api(`/api/declaration-documents?customer=${encodeURIComponent(customer || "")}&invoice=${encodeURIComponent(invoice || "")}`);
-    const sources = (res.documents || []).filter((doc) => doc.kind === "source");
+    let sources = (res.documents || []).filter((doc) => doc.kind === "source");
+    // dedupe ตามชื่อไฟล์ — เก็บอันล่าสุด (กันซ้ำจากการอัปโหลด invoice เดิมหลายรอบ)
+    const byName = new Map();
+    for (const doc of sources) {
+      const key = (doc.filename || "").trim().toLowerCase();
+      const prev = byName.get(key);
+      if (!prev || String(doc.created_at || "") > String(prev.created_at || "")) byName.set(key, doc);
+    }
+    sources = [...byName.values()];
     if (!sources.length) { pane.innerHTML = '<div class="doc-empty">ไม่มีเอกสารต้นฉบับแนบมากับใบนี้</div>'; return; }
     pane.innerHTML = sources.map((doc) => {
       const url = dlUrl(doc.storage_path, doc.public_url);
@@ -589,12 +611,13 @@ async function loadDetailDocImages(customer, invoice) {
       if (/\.(png|jpe?g|gif|webp)$/i.test(lower)) {
         inner = `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" class="doc-img" alt="${escapeHtml(name)}" loading="lazy"></a>`;
       } else if (lower.endsWith(".pdf")) {
-        inner = `<iframe class="doc-frame" src="${url}#toolbar=1&view=FitH" title="${escapeHtml(name)}" loading="lazy"></iframe>`;
+        // ซ่อน toolbar/navpane ของ PDF viewer ให้สะอาด + fit ความกว้าง (เลื่อนดูทุกหน้าในเฟรม)
+        inner = `<iframe class="doc-frame" src="${url}#toolbar=0&navpanes=0&statusbar=0&view=FitH" title="${escapeHtml(name)}" loading="lazy"></iframe>`;
       } else {
         inner = `<div class="doc-other">${svgIcon("file", 28)}<div style="margin:8px 0">ไฟล์นี้เปิดดูเป็นภาพไม่ได้ (${escapeHtml(name.split(".").pop() || "")})</div>
           <a class="btn btn-ghost btn-xs" href="${url}" target="_blank" rel="noopener">${svgIcon("file", 13)} เปิด/ดาวน์โหลด</a></div>`;
       }
-      return `<div class="doc-file"><div class="doc-file-name">${svgIcon("file", 13)} ${escapeHtml(name)}</div>${inner}</div>`;
+      return `<div class="doc-file"><div class="doc-file-name">${svgIcon("file", 13)} ${escapeHtml(name)} <a href="${url}" target="_blank" rel="noopener" class="muted" style="margin-left:auto;text-decoration:none" title="เปิดเต็มจอ">↗</a></div>${inner}</div>`;
     }).join("");
   } catch (e) {
     pane.innerHTML = `<div class="doc-empty">โหลดเอกสารต้นฉบับไม่ได้: ${escapeHtml(e.message)}</div>`;
@@ -845,8 +868,12 @@ $("upSubmit").onclick = async () => {
 //  Modal: สร้างรายการเอง
 // ============================================================
 function openCreate() {
-  $("crBody").innerHTML = `<div class="md-grid">${DECL_FIELDS.map(([k, label]) =>
-    `<div class="fld"><label>${escapeHtml(label)}</label><input class="inp cr-edit" data-key="${k}" /></div>`).join("")}</div>`;
+  $("crBody").innerHTML = `<div class="md-grid">${DECL_FIELDS.map(([k, label]) => {
+    const rows = MULTILINE_FIELDS[k];
+    return rows
+      ? `<div class="fld fld-full"><label>${escapeHtml(label)}</label><textarea class="inp cr-edit" data-key="${k}" rows="${rows}" placeholder="ใส่ได้หลายบรรทัดตามเอกสาร"></textarea></div>`
+      : `<div class="fld"><label>${escapeHtml(label)}</label><input class="inp cr-edit" data-key="${k}" /></div>`;
+  }).join("")}</div>`;
   $("modalCreate").style.display = "flex";
 }
 function closeCreate() { $("modalCreate").style.display = "none"; }
