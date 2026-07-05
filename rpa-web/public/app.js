@@ -115,20 +115,20 @@ function sourceBadge(src) {
 //  หน้ารายการใบขน
 // ============================================================
 // ช่องที่แสดง/แก้ไขในรายละเอียด (key, label) — ครอบคลุมช่องหลัก RPA กรอก
-// ป้ายชื่อฟิลด์ = คำที่ปรากฏจริงบนเว็บ DCTK (ให้ user เทียบง่าย). วงเล็บ = โค้ด/อังกฤษกำกับ
+// ป้ายชื่อฟิลด์ = คำที่ปรากฏจริงบนเว็บ DCTK (ยืนยันจากภาพแคปหน้าจอ page 1/2/3). วงเล็บ = อังกฤษกำกับ
 const DECL_FIELDS = [
   ["declaration_no", "เลขที่ใบขนฯ (ใช้ค้นเพื่อแก้)"],
-  ["customer_name", "ผู้ส่งของออก (ลูกค้า)"], ["consignee_name", "ผู้ซื้อ / ผู้รับตราส่ง"],
-  ["buyer_country_code", "ประเทศผู้ซื้อ"], ["destination_country_code", "ประเทศปลายทาง"],
-  ["invoice_number", "เลขที่บัญชีราคาสินค้า (Invoice)"], ["invoice_date", "วันที่ Invoice"],
+  ["customer_name", "ผู้ส่งออก (ลูกค้า)"], ["consignee_name", "ชื่อผู้ซื้อ"],
+  ["buyer_country_code", "รหัสประเทศผู้ซื้อ"], ["destination_country_code", "รหัสประเทศปลายทาง"],
+  ["invoice_number", "เลขที่ใบกำกับฯ (Invoice)"], ["invoice_date", "วันที่ใบกำกับฯ"],
   ["vessel_name", "ชื่อยานพาหนะ"], ["voyage_number", "เที่ยวเรือ"],
-  ["etd", "วันที่ส่งออก (ETD)"], ["release_port_code", "ท่าที่ตรวจปล่อย"], ["loading_port_code", "ท่าที่บรรทุก"],
-  ["incoterms", "เทอมการค้า (Incoterms)"], ["currency", "สกุลเงิน"], ["total_goods_amount", "ราคา FOB (มูลค่าสินค้า)"],
-  ["freight_charge", "ค่าขนส่ง (Freight)"], ["insurance_charge", "ค่าประกันภัย (Insurance)"],
-  ["shipping_mark", "เครื่องหมายและเลขหีบห่อ"], ["description_eng", "รายละเอียดสินค้า"],
-  ["net_weight_kg", "น้ำหนักสุทธิ (KGM)"], ["gross_weight_kg", "น้ำหนักรวม (KGM)"],
-  ["net_weight_ton", "น้ำหนักสุทธิ (ตัน)"], ["container_or_volume_qty", "จำนวนหีบห่อ / ปริมาณ"],
-  ["container_unit_code", "หน่วยหีบห่อ"], ["tax_payment_method_code", "วิธีการชำระภาษีอากร"],
+  ["etd", "วันที่ส่งออก (ETD)"], ["release_port_code", "สถานที่ตรวจปล่อย"], ["loading_port_code", "สถานที่รับบรรทุก"],
+  ["incoterms", "เงื่อนไข (Incoterms)"], ["currency", "สกุลเงิน"], ["total_goods_amount", "ราคา FOB รวม"],
+  ["freight_charge", "ค่าระวาง"], ["insurance_charge", "ค่าประกัน"],
+  ["shipping_mark", "เลขหมายหีบห่อ"], ["description_eng", "รายละเอียดสินค้า"],
+  ["net_weight_kg", "น้ำหนักสุทธิรวม"], ["gross_weight_kg", "น้ำหนักรวมหีบห่อรวม"],
+  ["net_weight_ton", "น้ำหนักสุทธิ (ตัน)"], ["container_or_volume_qty", "จำนวนหีบห่อรวม"],
+  ["container_unit_code", "หน่วยหีบห่อรวม"], ["tax_payment_method_code", "รหัสวิธีการชำระภาษีอากร"],
 ];
 
 let DECLS = [];      // รายการทั้งหมด (จาก /api/declarations)
@@ -365,22 +365,22 @@ async function openDetail(id, opts) {
 }
 
 // คอลัมน์รายการสินค้า (items) ที่แก้ได้ในตาราง [key, label, width]
-// ป้ายชื่อคอลัมน์รายการสินค้า = ตามหน้ากรอกรายการ (Page 3) ของ DCTK
+// ป้ายชื่อคอลัมน์รายการสินค้า = ตามหน้า "ส่วนรายละเอียด" (Page 3) ของ DCTK (ยืนยันจากภาพแคป)
 const ITEM_FIELDS = [
-  ["description_eng", "รหัสสินค้า (master)", "150"],
-  ["description_eng_field", "รายละเอียด (อังกฤษ)", "180"],
-  ["product_description_thai", "รายละเอียด (ไทย)", "130"],
-  ["brand_name", "ยี่ห้อ (Brand)", "90"],
+  ["description_eng", "รหัสสถิติสินค้า", "150"],
+  ["description_eng_field", "คำอธิบายสินค้าภาษาอังกฤษ", "200"],
+  ["product_description_thai", "คำอธิบายสินค้าภาษาไทย", "150"],
+  ["brand_name", "ยี่ห้อสินค้า", "90"],
   ["export_tariff", "พิกัดศุลกากร", "90"],
-  ["customs_unit_code", "หน่วยตามพิกัด", "80"],
-  ["container_or_volume_qty", "ปริมาณ", "70"],
+  ["customs_unit_code", "หน่วยหลังพิกัด", "90"],
+  ["container_or_volume_qty", "ปริมาณในใบขน", "80"],
   ["container_unit_code", "หน่วยหีบห่อ", "80"],
-  ["net_weight_kg", "น้ำหนักสุทธิ (KGM)", "90"],
-  ["gross_weight_kg", "น้ำหนักรวม (KGM)", "90"],
+  ["net_weight_kg", "น้ำหนักสุทธิ", "90"],
+  ["gross_weight_kg", "น้ำหนักรวมหีบห่อ", "100"],
   ["net_weight_ton", "น้ำหนักสุทธิ (ตัน)", "80"],
   ["net_weight_unit_code", "หน่วยน้ำหนัก", "80"],
-  ["amount", "ราคา FOB", "90"],
-  ["insurance", "ค่าประกันภัย", "80"],
+  ["amount", "ราคา (FOB)", "90"],
+  ["insurance", "ค่าประกัน", "80"],
 ];
 
 // state ของ items ที่กำลังแก้ (mutable) — sync กับตารางในหน้า detail
