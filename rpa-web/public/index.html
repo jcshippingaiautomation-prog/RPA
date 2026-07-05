@@ -285,7 +285,7 @@
 
   <!-- ===== Modal: รายละเอียด/แก้ไขใบขน ===== -->
   <div id="modalDetail" class="modal" style="display:none">
-    <div class="modal-box modal-lg">
+    <div class="modal-box modal-xl">
       <div class="modal-head">
         <h3 id="mdTitle">รายละเอียดใบขน</h3>
         <button class="modal-x" id="mdClose"><i data-icon="x"></i></button>
@@ -352,8 +352,17 @@
   <!-- ===== Modal: อัปโหลดไฟล์ ===== -->
   <div id="modalUpload" class="modal" style="display:none">
     <div class="modal-box">
-      <div class="modal-head"><h3>อัปโหลดไฟล์ให้ AI สกัดข้อมูล</h3><button class="modal-x" id="upClose"><i data-icon="x"></i></button></div>
-      <div class="modal-body">
+      <div class="modal-head"><h3>เพิ่มใบขนจากเอกสาร</h3><button class="modal-x" id="upClose"><i data-icon="x"></i></button></div>
+      <!-- ตัวบอกขั้นตอน wizard -->
+      <div class="wizard-steps" id="upSteps">
+        <div class="wz-step active" data-step="1"><span class="wz-dot">1</span><span class="wz-label">เลือกไฟล์</span></div>
+        <span class="wz-line"></span>
+        <div class="wz-step" data-step="2"><span class="wz-dot">2</span><span class="wz-label">AI สกัดข้อมูล</span></div>
+        <span class="wz-line"></span>
+        <div class="wz-step" data-step="3"><span class="wz-dot">3</span><span class="wz-label">ตรวจสอบ</span></div>
+      </div>
+      <!-- ขั้นที่ 1: เลือกไฟล์ -->
+      <div class="modal-body" id="upStep1">
         <p class="muted">เลือกลูกค้า + ไฟล์เอกสาร (PDF / รูป / Excel / Word) ระบบจะให้ AI อ่านตามกฎของลูกค้าแล้วสร้างรายการให้</p>
         <div class="fld" style="margin-bottom:14px">
           <label>ลูกค้า</label>
@@ -367,12 +376,22 @@
           <input type="file" id="fileInput" multiple accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,.docx,.doc" hidden />
         </div>
         <div id="fileList" class="file-list"></div>
-        <div id="upProgress" class="note"></div>
+        <div class="eta-note" id="upEta" style="display:none">⏱ AI ใช้เวลาสกัดข้อมูลประมาณ <b>&nbsp;1–2 นาที</b></div>
+        <div id="upErr" class="note"></div>
       </div>
-      <div class="modal-foot">
+      <!-- ขั้นที่ 2: กำลังประมวลผล -->
+      <div class="modal-body" id="upStep2" style="display:none">
+        <div class="wz-processing">
+          <div class="wz-spinner"></div>
+          <div style="font-weight:600;margin-bottom:6px" id="upProcTitle">AI กำลังอ่านและสกัดข้อมูลจากเอกสาร…</div>
+          <div class="eta-note" style="display:inline-flex">⏱ ประมาณ <b>&nbsp;1–2 นาที</b> — กรุณาอย่าปิดหน้านี้</div>
+          <div id="upProgress" class="note" style="margin-top:12px"></div>
+        </div>
+      </div>
+      <div class="modal-foot" id="upFoot1">
         <div style="flex:1"></div>
         <button class="btn btn-ghost" id="upCancel">ยกเลิก</button>
-        <button class="btn btn-primary" id="upSubmit"><i data-icon="upload"></i> ประมวลผล</button>
+        <button class="btn btn-primary" id="upSubmit"><i data-icon="upload"></i> ถัดไป — ให้ AI สกัด</button>
       </div>
     </div>
   </div>

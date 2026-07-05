@@ -115,19 +115,20 @@ function sourceBadge(src) {
 //  หน้ารายการใบขน
 // ============================================================
 // ช่องที่แสดง/แก้ไขในรายละเอียด (key, label) — ครอบคลุมช่องหลัก RPA กรอก
+// ป้ายชื่อฟิลด์ = คำที่ปรากฏจริงบนเว็บ DCTK (ให้ user เทียบง่าย). วงเล็บ = โค้ด/อังกฤษกำกับ
 const DECL_FIELDS = [
-  ["declaration_no", "เลขใบขน DCTK (ใช้ค้นเพื่อแก้)"],
-  ["customer_name", "ลูกค้า"], ["consignee_name", "Consignee"],
+  ["declaration_no", "เลขที่ใบขนฯ (ใช้ค้นเพื่อแก้)"],
+  ["customer_name", "ผู้ส่งของออก (ลูกค้า)"], ["consignee_name", "ผู้ซื้อ / ผู้รับตราส่ง"],
   ["buyer_country_code", "ประเทศผู้ซื้อ"], ["destination_country_code", "ประเทศปลายทาง"],
-  ["invoice_number", "เลขที่ Invoice"], ["invoice_date", "วันที่ Invoice"],
-  ["vessel_name", "ชื่อเรือ"], ["voyage_number", "เที่ยวเรือ"],
-  ["etd", "ETD"], ["release_port_code", "ท่าตรวจปล่อย"], ["loading_port_code", "ท่ารับบรรทุก"],
-  ["incoterms", "Incoterms"], ["currency", "สกุลเงิน"], ["total_goods_amount", "มูลค่าสินค้า"],
-  ["freight_charge", "ค่าระวาง"], ["insurance_charge", "ค่าประกัน"],
-  ["shipping_mark", "Shipping mark"], ["description_eng", "รายละเอียดสินค้า"],
-  ["net_weight_kg", "น้ำหนักสุทธิ (kg)"], ["gross_weight_kg", "น้ำหนักรวม (kg)"],
-  ["net_weight_ton", "น้ำหนักสุทธิ (ton)"], ["container_or_volume_qty", "จำนวน/ปริมาณตู้"],
-  ["container_unit_code", "หน่วยตู้"], ["tax_payment_method_code", "วิธีชำระภาษี"],
+  ["invoice_number", "เลขที่บัญชีราคาสินค้า (Invoice)"], ["invoice_date", "วันที่ Invoice"],
+  ["vessel_name", "ชื่อยานพาหนะ"], ["voyage_number", "เที่ยวเรือ"],
+  ["etd", "วันที่ส่งออก (ETD)"], ["release_port_code", "ท่าที่ตรวจปล่อย"], ["loading_port_code", "ท่าที่บรรทุก"],
+  ["incoterms", "เทอมการค้า (Incoterms)"], ["currency", "สกุลเงิน"], ["total_goods_amount", "ราคา FOB (มูลค่าสินค้า)"],
+  ["freight_charge", "ค่าขนส่ง (Freight)"], ["insurance_charge", "ค่าประกันภัย (Insurance)"],
+  ["shipping_mark", "เครื่องหมายและเลขหีบห่อ"], ["description_eng", "รายละเอียดสินค้า"],
+  ["net_weight_kg", "น้ำหนักสุทธิ (KGM)"], ["gross_weight_kg", "น้ำหนักรวม (KGM)"],
+  ["net_weight_ton", "น้ำหนักสุทธิ (ตัน)"], ["container_or_volume_qty", "จำนวนหีบห่อ / ปริมาณ"],
+  ["container_unit_code", "หน่วยหีบห่อ"], ["tax_payment_method_code", "วิธีการชำระภาษีอากร"],
 ];
 
 let DECLS = [];      // รายการทั้งหมด (จาก /api/declarations)
@@ -245,12 +246,22 @@ async function loadDecls() {
 async function runDeclaration(id) {
   const d = DECLS.find((x) => x.id === id);
   const name = d ? `${d.customer_name || ""} / ${d.invoice_number || ""}` : "";
-  if (!confirm(`รัน RPA กรอกใบขนนี้เข้าระบบ DCTK?\n\n${name}`)) return;
+  const est = estImportMinutes(d);
+  if (!confirm(`รัน RPA กรอกใบขนนี้เข้าระบบ DCTK?\n\n${name}\n\n⏱ ใช้เวลาประมาณ ${est} — ระบบจะกรอกให้อัตโนมัติ (ถ้ามีงานในคิวก่อนหน้าอาจนานกว่านี้)`)) return;
   try {
     await api(`/api/declarations/${encodeURIComponent(id)}/run`, "POST", {});
-    toast("ส่งเข้าคิว RPA แล้ว — กำลังรัน", "info");
-    setDeclStatusLocal(id, "queued", "ส่งเข้าคิว RPA แล้ว");
+    toast(`ส่งเข้าคิว RPA แล้ว — กำลังรัน (⏱ ประมาณ ${est})`, "info");
+    setDeclStatusLocal(id, "queued", `ส่งเข้าคิว RPA แล้ว (⏱ ประมาณ ${est})`);
   } catch (e) { toast("รันไม่สำเร็จ: " + e.message, "error"); }
+}
+
+// ประเมินเวลานำเข้า (RPA) คร่าว ๆ — ฐาน ~3 นาที + ~1 นาที/รายการสินค้าเพิ่ม
+function estImportMinutes(d) {
+  const items = Array.isArray(d && d._items) ? d._items.length : 1;
+  if (items <= 1) return "3–5 นาที";
+  const lo = Math.max(3, Math.round(3 + (items - 1) * 0.7));
+  const hi = lo + 2;
+  return `${lo}–${hi} นาที`;
 }
 
 // สร้างสำเนาใบขน
@@ -299,7 +310,8 @@ async function deleteSelected() {
 async function runSelected() {
   const ids = [...selected];
   if (!ids.length) return;
-  if (!confirm(`รัน RPA ${ids.length} รายการที่เลือก?`)) return;
+  const totalEst = `${ids.length * 3}–${ids.length * 5} นาที`;
+  if (!confirm(`รัน RPA ${ids.length} รายการที่เลือก?\n\n⏱ ใช้เวลารวมประมาณ ${totalEst} (ทำทีละใบต่อกัน)`)) return;
   for (const id of ids) {
     try {
       await api(`/api/declarations/${encodeURIComponent(id)}/run`, "POST", {});
@@ -307,7 +319,7 @@ async function runSelected() {
     } catch (e) { /* ต่อ */ }
   }
   selected.clear();
-  toast(`ส่ง ${ids.length} รายการเข้าคิวแล้ว`, "info");
+  toast(`ส่ง ${ids.length} รายการเข้าคิวแล้ว (⏱ ประมาณ ${totalEst})`, "info");
   renderList();
 }
 
@@ -323,8 +335,10 @@ function setDeclStatusLocal(id, status, message) {
 let detailId = null;
 let detailJobId = null;   // job ล่าสุดของใบที่เปิดอยู่ (ใช้ดู log เต็ม)
 let detailValidation = null;   // ผลตรวจข้อมูลก่อนรัน (validateDeclaration)
-async function openDetail(id) {
+let detailWizard = false;      // true = เปิดจากการอัปโหลด (ขั้นที่ 3 ตรวจสอบ) → โชว์แบนเนอร์ wizard
+async function openDetail(id, opts) {
   detailId = id;
+  detailWizard = !!(opts && opts.wizard);
   const box = $("mdBody");
   box.innerHTML = '<p class="muted">กำลังโหลด…</p>';
   $("modalDetail").style.display = "flex";
@@ -332,10 +346,11 @@ async function openDetail(id) {
     const r = await api(`/api/declarations/${encodeURIComponent(id)}`);
     const d = r.declaration || {};
     detailJobId = d.last_job_id || null;        // เก็บไว้ให้ปุ่ม "ดู log เต็ม" ใช้
-    $("mdTitle").textContent = `${d.customer_name || "ใบขน"} ${d.invoice_number ? "/ " + d.invoice_number : ""}`;
+    $("mdTitle").textContent = `${detailWizard ? "ตรวจสอบ — " : ""}${d.customer_name || "ใบขน"} ${d.invoice_number ? "/ " + d.invoice_number : ""}`;
     detailValidation = r.validation || null;     // เก็บผลตรวจข้อมูลก่อนรัน
     renderDetailForm(d, r.errorSummary, r.validation);
     loadDetailDocs(d.customer_name, d.invoice_number);
+    loadDetailDocImages(d.customer_name, d.invoice_number);   // โชว์เอกสารต้นฉบับเป็นภาพ (ตรวจเทียบ)
     // ปุ่มรันใน modal — disable ถ้าข้อมูลไม่ครบ (validation.ok=false) เพื่อกันรันแล้วไม่ผ่าน
     const running = d.status === "running" || d.status === "queued";
     const invalid = r.validation && r.validation.ok === false;
@@ -350,21 +365,22 @@ async function openDetail(id) {
 }
 
 // คอลัมน์รายการสินค้า (items) ที่แก้ได้ในตาราง [key, label, width]
+// ป้ายชื่อคอลัมน์รายการสินค้า = ตามหน้ากรอกรายการ (Page 3) ของ DCTK
 const ITEM_FIELDS = [
   ["description_eng", "รหัสสินค้า (master)", "150"],
-  ["description_eng_field", "คำอธิบายอังกฤษ", "180"],
-  ["product_description_thai", "คำอธิบายไทย", "130"],
-  ["brand_name", "ยี่ห้อ", "90"],
-  ["export_tariff", "พิกัด", "90"],
-  ["customs_unit_code", "หน่วยพิกัด", "80"],
-  ["container_or_volume_qty", "จำนวน", "70"],
+  ["description_eng_field", "รายละเอียด (อังกฤษ)", "180"],
+  ["product_description_thai", "รายละเอียด (ไทย)", "130"],
+  ["brand_name", "ยี่ห้อ (Brand)", "90"],
+  ["export_tariff", "พิกัดศุลกากร", "90"],
+  ["customs_unit_code", "หน่วยตามพิกัด", "80"],
+  ["container_or_volume_qty", "ปริมาณ", "70"],
   ["container_unit_code", "หน่วยหีบห่อ", "80"],
-  ["net_weight_kg", "น้ำหนักสุทธิ", "90"],
-  ["gross_weight_kg", "น้ำหนักรวม", "90"],
-  ["net_weight_ton", "น้ำหนัก(ตัน)", "80"],
+  ["net_weight_kg", "น้ำหนักสุทธิ (KGM)", "90"],
+  ["gross_weight_kg", "น้ำหนักรวม (KGM)", "90"],
+  ["net_weight_ton", "น้ำหนักสุทธิ (ตัน)", "80"],
   ["net_weight_unit_code", "หน่วยน้ำหนัก", "80"],
-  ["amount", "มูลค่า", "90"],
-  ["insurance", "ค่าประกัน", "80"],
+  ["amount", "ราคา FOB", "90"],
+  ["insurance", "ค่าประกันภัย", "80"],
 ];
 
 // state ของ items ที่กำลังแก้ (mutable) — sync กับตารางในหน้า detail
@@ -419,13 +435,28 @@ function renderDetailForm(d, errorSummary, validation) {
       <input class="inp md-edit" data-key="${k}" value="${escapeHtml(d[k] != null ? String(d[k]) : "")}" />
     </div>`).join("");
   editItems = Array.isArray(d._items) ? d._items.map((it) => ({ ...it })) : [];
+  // แบนเนอร์ขั้น wizard (แสดงเฉพาะตอนเข้ามาจากการอัปโหลด → ขั้นที่ 3 ตรวจสอบ)
+  const wizardBanner = detailWizard
+    ? `<div class="eta-note" style="width:100%;box-sizing:border-box;margin-bottom:14px">
+         ✓ AI สกัดข้อมูลเสร็จแล้ว — <b>&nbsp;ขั้นที่ 3/3: ตรวจสอบข้อมูลเทียบกับเอกสารทางขวา</b>&nbsp; แล้วกด "บันทึก" → "รัน RPA"
+       </div>`
+    : "";
   $("mdBody").innerHTML = `
-    <div class="md-status">สถานะ: ${statusBadge(d.status, d.status_message, d.doc_status)} ${d.status_message ? `<span class="muted">${escapeHtml(d.status_message)}</span>` : ""}</div>
-    ${renderValidationBox(validation)}
-    ${renderErrorBox(errorSummary, detailJobId)}
-    <div class="md-grid">${cells}</div>
-    ${renderItemsTable()}
-    <div class="md-section"><div class="md-section-title">📎 เอกสารแนบ</div><div id="mdDocs" class="att-list muted">กำลังโหลด…</div></div>
+    <div class="md-review">
+      <div class="md-form-col">
+        ${wizardBanner}
+        <div class="md-status">สถานะ: ${statusBadge(d.status, d.status_message, d.doc_status)} ${d.status_message ? `<span class="muted">${escapeHtml(d.status_message)}</span>` : ""}</div>
+        ${renderValidationBox(validation)}
+        ${renderErrorBox(errorSummary, detailJobId)}
+        <div class="md-grid">${cells}</div>
+        ${renderItemsTable()}
+        <div class="md-section"><div class="md-section-title">📎 ไฟล์ผลลัพธ์ (ใบขน/แคปหน้าจอ)</div><div id="mdDocs" class="att-list muted">กำลังโหลด…</div></div>
+      </div>
+      <div class="md-docs-pane">
+        <div class="md-section-title">🖼 เอกสารต้นฉบับ <span class="muted" style="font-weight:400">(ใช้ตรวจเทียบข้อมูล)</span></div>
+        <div id="mdDocsPane" class="doc-viewer"><div class="doc-empty">กำลังโหลดเอกสาร…</div></div>
+      </div>
+    </div>
   `;
   bindItemsEvents();
   bindErrorBox(detailJobId);
@@ -533,10 +564,41 @@ async function loadDetailDocs(customer, invoice) {
   try {
     const res = await api(`/api/declaration-documents?customer=${encodeURIComponent(customer || "")}&invoice=${encodeURIComponent(invoice || "")}`);
     const docs = res.documents || [];
-    box.innerHTML = docs.length
-      ? docs.map((doc) => `<a href="${dlUrl(doc.storage_path, doc.public_url)}" target="_blank" rel="noopener" class="att">${svgIcon("file", 14)} ${escapeHtml(doc.filename)}</a>`).join("")
-      : '<span class="muted">ไม่มีเอกสารแนบ</span>';
+    // ไฟล์ผลลัพธ์เท่านั้น (ใบขน/แคป) — ไม่รวม source (source โชว์เป็นภาพในแผงขวาแล้ว)
+    const out = docs.filter((doc) => doc.kind !== "source");
+    box.innerHTML = out.length
+      ? out.map((doc) => `<a href="${dlUrl(doc.storage_path, doc.public_url)}" target="_blank" rel="noopener" class="att">${svgIcon("file", 14)} ${escapeHtml(doc.filename)}</a>`).join("")
+      : '<span class="muted">ยังไม่มีไฟล์ผลลัพธ์ (รัน RPA เพื่อสร้างใบขน)</span>';
   } catch { box.textContent = "โหลดเอกสารไม่ได้"; }
+}
+
+// โชว์ "เอกสารต้นฉบับ" (kind=source) เป็นภาพ/PDF ทุกไฟล์ทุกหน้า — ให้ user ตรวจเทียบข้อมูลที่ AI สกัด
+//   รูป → <img>, PDF → <iframe> (เบราว์เซอร์เรนเดอร์ทุกหน้าให้เอง), อื่น ๆ → ลิงก์เปิด/ดาวน์โหลด
+async function loadDetailDocImages(customer, invoice) {
+  const pane = $("mdDocsPane");
+  if (!pane) return;
+  try {
+    const res = await api(`/api/declaration-documents?customer=${encodeURIComponent(customer || "")}&invoice=${encodeURIComponent(invoice || "")}`);
+    const sources = (res.documents || []).filter((doc) => doc.kind === "source");
+    if (!sources.length) { pane.innerHTML = '<div class="doc-empty">ไม่มีเอกสารต้นฉบับแนบมากับใบนี้</div>'; return; }
+    pane.innerHTML = sources.map((doc) => {
+      const url = dlUrl(doc.storage_path, doc.public_url);
+      const name = doc.filename || "เอกสาร";
+      const lower = name.toLowerCase();
+      let inner;
+      if (/\.(png|jpe?g|gif|webp)$/i.test(lower)) {
+        inner = `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" class="doc-img" alt="${escapeHtml(name)}" loading="lazy"></a>`;
+      } else if (lower.endsWith(".pdf")) {
+        inner = `<iframe class="doc-frame" src="${url}#toolbar=1&view=FitH" title="${escapeHtml(name)}" loading="lazy"></iframe>`;
+      } else {
+        inner = `<div class="doc-other">${svgIcon("file", 28)}<div style="margin:8px 0">ไฟล์นี้เปิดดูเป็นภาพไม่ได้ (${escapeHtml(name.split(".").pop() || "")})</div>
+          <a class="btn btn-ghost btn-xs" href="${url}" target="_blank" rel="noopener">${svgIcon("file", 13)} เปิด/ดาวน์โหลด</a></div>`;
+      }
+      return `<div class="doc-file"><div class="doc-file-name">${svgIcon("file", 13)} ${escapeHtml(name)}</div>${inner}</div>`;
+    }).join("");
+  } catch (e) {
+    pane.innerHTML = `<div class="doc-empty">โหลดเอกสารต้นฉบับไม่ได้: ${escapeHtml(e.message)}</div>`;
+  }
 }
 
 function closeDetail() { $("modalDetail").style.display = "none"; detailId = null; }
@@ -699,7 +761,23 @@ async function loadCustomerNames() {
   if (sel) sel.innerHTML = '<option value="">— ให้ AI ระบุเอง —</option>' +
     customerNames.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
 }
-function openUpload() { uploadFiles = []; renderFileList(); $("upProgress").textContent = ""; loadCustomerNames(); $("modalUpload").style.display = "flex"; }
+// ---- จัดการขั้นตอน wizard ของ modal อัปโหลด ----
+function setUploadStep(n) {
+  // สลับหน้า step 1/2
+  $("upStep1").style.display = n === 1 ? "" : "none";
+  $("upStep2").style.display = n === 2 ? "" : "none";
+  $("upFoot1").style.display = n === 1 ? "" : "none";
+  // ไฮไลต์ตัวบอกขั้นตอน
+  document.querySelectorAll("#upSteps .wz-step").forEach((el) => {
+    const s = Number(el.dataset.step);
+    el.classList.toggle("active", s === n);
+    el.classList.toggle("done", s < n);
+  });
+}
+function openUpload() {
+  uploadFiles = []; renderFileList(); $("upProgress").textContent = "";
+  setUploadStep(1); loadCustomerNames(); $("modalUpload").style.display = "flex";
+}
 function closeUpload() { $("modalUpload").style.display = "none"; }
 $("btnUpload").onclick = openUpload;
 $("upClose").onclick = closeUpload;
@@ -719,6 +797,9 @@ function renderFileList() {
     `<div class="file-item">${svgIcon("file", 14)} <span>${escapeHtml(f.name)}</span> <span class="muted">(${(f.size / 1024).toFixed(0)} KB)</span>
      <button class="fi-del" data-i="${i}">${svgIcon("x", 13)}</button></div>`).join("");
   $("fileList").querySelectorAll(".fi-del").forEach((b) => (b.onclick = () => { uploadFiles.splice(Number(b.dataset.i), 1); renderFileList(); }));
+  // โชว์ ETA เมื่อมีไฟล์แล้ว (เวลาสกัดคร่าว ๆ)
+  const eta = $("upEta");
+  if (eta) eta.style.display = uploadFiles.length ? "inline-flex" : "none";
 }
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -731,20 +812,33 @@ function fileToBase64(file) {
 $("upSubmit").onclick = async () => {
   if (!uploadFiles.length) { toast("เลือกไฟล์ก่อน", "error"); return; }
   $("upSubmit").disabled = true;
-  $("upProgress").textContent = "กำลังอ่านไฟล์…";
+  // → ขั้นที่ 2: กำลังประมวลผล
+  setUploadStep(2);
+  $("upProcTitle").textContent = "กำลังอ่านไฟล์…";
+  $("upProgress").textContent = "";
+  $("upErr").textContent = "";
   try {
     const files = [];
     for (const f of uploadFiles) {
       files.push({ filename: f.name, mimeType: f.type, dataBase64: await fileToBase64(f) });
     }
-    $("upProgress").textContent = "AI กำลังสกัดข้อมูล… (อาจใช้เวลาสักครู่)";
+    $("upProcTitle").textContent = "AI กำลังอ่านและสกัดข้อมูลจากเอกสาร…";
     const customer = $("upCustomer").value || "";
     const r = await api("/api/upload", "POST", { files, customer });
-    closeUpload();
-    toast(`สร้างรายการแล้ว: ${r.customer || ""} ${r.invoice ? "/ " + r.invoice : ""}`, "success");
     await loadDecls();
-  } catch (e) { $("upProgress").innerHTML = `<span class="note">✗ ${escapeHtml(e.message)}</span>`; }
-  finally { $("upSubmit").disabled = false; }
+    closeUpload();
+    // → ขั้นที่ 3: เปิดหน้าตรวจสอบ (detail modal + เอกสารต้นฉบับเป็นภาพ)
+    if (r && r.id) {
+      openDetail(r.id, { wizard: true });
+    } else {
+      toast(`สร้างรายการแล้ว: ${r.customer || ""} ${r.invoice ? "/ " + r.invoice : ""}`, "success");
+    }
+  } catch (e) {
+    // กลับไปขั้นที่ 1 ให้แก้ไฟล์/ลองใหม่ พร้อมข้อความ error
+    setUploadStep(1);
+    $("upErr").textContent = "✗ " + e.message;
+    toast("สกัดข้อมูลไม่สำเร็จ: " + e.message, "error");
+  } finally { $("upSubmit").disabled = false; }
 };
 
 // ============================================================
