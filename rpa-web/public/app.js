@@ -349,7 +349,11 @@ async function openDetail(id, opts) {
     $("mdTitle").textContent = `${detailWizard ? "ตรวจสอบ — " : ""}${d.customer_name || "ใบขน"} ${d.invoice_number ? "/ " + d.invoice_number : ""}`;
     detailValidation = r.validation || null;     // เก็บผลตรวจข้อมูลก่อนรัน
     renderDetailForm(d, r.errorSummary, r.validation);
-    loadDetailDocs(d.customer_name, d.invoice_number);
+    // ไฟล์ผลลัพธ์ = ของ "ใบนี้" เท่านั้น → โชว์ก็ต่อเมื่อใบนี้รันแล้วจริง
+    // (documents match ด้วย customer+invoice → ใบใหม่ที่ invoice ซ้ำจะไม่ดึงไฟล์ของใบเก่ามาโชว์)
+    const declRan = !!(d.doc_status || String(d.declaration_no ?? "").trim()
+      || ["done", "partial", "running", "edited"].includes(d.status));
+    loadDetailDocs(d.customer_name, d.invoice_number, declRan);
     loadDetailDocImages(d.customer_name, d.invoice_number);   // โชว์เอกสารต้นฉบับเป็นภาพ (ตรวจเทียบ)
     // ปุ่มรันใน modal — disable ถ้าข้อมูลไม่ครบ (validation.ok=false) เพื่อกันรันแล้วไม่ผ่าน
     const running = d.status === "running" || d.status === "queued";
@@ -386,20 +390,32 @@ const ITEM_FIELDS = [
 // state ของ items ที่กำลังแก้ (mutable) — sync กับตารางในหน้า detail
 let editItems = [];
 
-function renderItemRow(it, idx) {
-  const cells = ITEM_FIELDS.map(([k, , w]) =>
-    `<td><input class="inp inp-xs it-edit" data-i="${idx}" data-key="${k}" style="width:${w}px" value="${escapeHtml(it[k] != null ? String(it[k]) : "")}" /></td>`).join("");
-  const foc = `<td class="ta-center"><input type="checkbox" class="it-foc" data-i="${idx}" ${it.is_foc ? "checked" : ""} title="ของแถม FOC" /></td>`;
-  return `<tr><td class="muted-cell">${idx + 1}</td>${cells}${foc}<td><button class="btn btn-ghost btn-xs icon-only it-del" data-i="${idx}" title="ลบรายการ">${svgIcon("trash", 13)}</button></td></tr>`;
+// ช่องในการ์ดสินค้าที่ต้องกว้างเต็มแถว (ข้อความยาว)
+const ITEM_FULL_FIELDS = new Set(["description_eng_field", "product_description_thai"]);
+function renderItemCard(it, idx) {
+  const fields = ITEM_FIELDS.map(([k, label]) =>
+    `<div class="fld ${ITEM_FULL_FIELDS.has(k) ? "fld-full" : ""}">
+       <label>${escapeHtml(label)}</label>
+       <input class="inp it-edit" data-i="${idx}" data-key="${k}" value="${escapeHtml(it[k] != null ? String(it[k]) : "")}" />
+     </div>`).join("");
+  return `<div class="item-card">
+    <div class="item-card-head">
+      <span class="item-card-no">รายการ ${idx + 1}</span>
+      <label class="item-foc-lbl"><input type="checkbox" class="it-foc" data-i="${idx}" ${it.is_foc ? "checked" : ""}> ของแถม (FOC)</label>
+      <div style="flex:1"></div>
+      <button class="btn btn-ghost btn-xs it-del" data-i="${idx}" title="ลบรายการ">${svgIcon("trash", 13)} ลบ</button>
+    </div>
+    <div class="item-grid">${fields}</div>
+  </div>`;
 }
 
 function renderItemsTable() {
-  const head = `<th>#</th>${ITEM_FIELDS.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join("")}<th>FOC</th><th></th>`;
-  const rows = editItems.map((it, i) => renderItemRow(it, i)).join("");
+  const cards = editItems.map((it, i) => renderItemCard(it, i)).join("")
+    || '<div class="muted" style="padding:6px 0">ยังไม่มีรายการสินค้า — กด "เพิ่มรายการ"</div>';
   return `<div class="md-section">
     <div class="md-section-title">รายการสินค้า (${editItems.length}) <button class="btn btn-ghost btn-xs" id="itAdd">${svgIcon("plus", 12)} เพิ่มรายการ</button></div>
-    <div class="items-scroll"><table class="dt sub items-edit"><thead><tr>${head}</tr></thead><tbody id="itBody">${rows}</tbody></table></div>
-    <button class="btn btn-primary btn-sm" id="itSave" style="margin-top:8px">${svgIcon("save", 13)} บันทึกรายการสินค้า</button>
+    <div class="item-cards" id="itBody">${cards}</div>
+    <button class="btn btn-primary btn-sm" id="itSave" style="margin-top:10px">${svgIcon("save", 13)} บันทึกรายการสินค้า</button>
     <span id="itSaved" class="saved" style="display:none">${svgIcon("check", 13)} บันทึกแล้ว</span>
   </div>`;
 }
@@ -414,7 +430,7 @@ function bindItemsEvents() {
   if ($("itSave")) $("itSave").onclick = saveItems;
 }
 function refreshItemsTable() {
-  const sec = document.querySelector(".items-edit")?.closest(".md-section");
+  const sec = $("itBody")?.closest(".md-section");
   if (sec) { sec.outerHTML = renderItemsTable(); bindItemsEvents(); }
 }
 async function saveItems() {
@@ -540,9 +556,9 @@ function highlightFields(fields) {
   document.querySelectorAll(".fld-error").forEach((el) => el.classList.remove("fld-error"));
   for (const f of fields) {
     if (f === "รายการสินค้า") {
-      // เด้งแดงตารางรายการสินค้าทั้งบล็อก
-      const tbl = document.querySelector("table.items-edit");
-      if (tbl) tbl.classList.add("fld-error");
+      // เด้งแดงบล็อกการ์ดรายการสินค้าทั้งหมด
+      const box = $("itBody");
+      if (box) box.classList.add("fld-error");
       continue;
     }
     // เด้งแดง input ที่ data-key ตรงกับ field
@@ -572,13 +588,15 @@ function bindErrorBox(jobId) {
   };
 }
 
-async function loadDetailDocs(customer, invoice) {
+async function loadDetailDocs(customer, invoice, declRan) {
   const box = $("mdDocs");
   if (!box) return;
+  // ใบนี้ยังไม่รัน → ไม่ต้องดึงไฟล์ (กันเอาไฟล์ของใบอื่นที่ invoice ซ้ำมาโชว์)
+  if (!declRan) { box.innerHTML = '<span class="muted">ยังไม่มีไฟล์ผลลัพธ์ — ใบนี้ยังไม่ได้รัน (ไฟล์จะปรากฏหลังรัน RPA)</span>'; return; }
   try {
     const res = await api(`/api/declaration-documents?customer=${encodeURIComponent(customer || "")}&invoice=${encodeURIComponent(invoice || "")}`);
     const docs = res.documents || [];
-    // ไฟล์ผลลัพธ์เท่านั้น (ใบขน/แคป) — ไม่รวม source (source โชว์เป็นภาพในแผงขวาแล้ว)
+    // ไฟล์ผลลัพธ์เท่านั้น (ใบขน/แคป) — ไม่รวม source (source โชว์เป็นภาพในแผงซ้ายแล้ว)
     const out = docs.filter((doc) => doc.kind !== "source");
     box.innerHTML = out.length
       ? out.map((doc) => `<a href="${dlUrl(doc.storage_path, doc.public_url)}" target="_blank" rel="noopener" class="att">${svgIcon("file", 14)} ${escapeHtml(doc.filename)}</a>`).join("")
