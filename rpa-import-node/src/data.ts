@@ -266,20 +266,36 @@ export async function loadRecordsFromSheet(
  * ดีฟอลต์: ขึ้นต้น "28" → "2801"; อื่น ๆ → เท่ากับ release (เช่น 0113 → 0113)
  */
 const DEFAULT_LOADING_RULES: { [prefix: string]: string } = { "28": "2801" };
-export function deriveLoadingPort(release: string): string {
+export function deriveLoadingPort(release: string, rules?: { [prefix: string]: string }): string {
   const rel = (release ?? "").trim();
   if (!rel) return "";
-  let rules = DEFAULT_LOADING_RULES;
-  try {
-    const env = (process.env.LOADING_PORT_RULES ?? "").trim();
-    if (env) rules = JSON.parse(env);
-  } catch { /* ใช้ default ถ้า parse env ไม่ได้ */ }
+  let useRules = rules && Object.keys(rules).length ? rules : DEFAULT_LOADING_RULES;
+  if (!rules) {
+    try {
+      const env = (process.env.LOADING_PORT_RULES ?? "").trim();
+      if (env) useRules = JSON.parse(env);
+    } catch { /* ใช้ default ถ้า parse env ไม่ได้ */ }
+  }
   // จับ prefix ที่ยาวสุดก่อน (เจาะจงกว่า)
-  const prefixes = Object.keys(rules).sort((a, b) => b.length - a.length);
+  const prefixes = Object.keys(useRules).sort((a, b) => b.length - a.length);
   for (const p of prefixes) {
-    if (rel.startsWith(p)) return rules[p];
+    if (rel.startsWith(p)) return useRules[p];
   }
   return rel; // ไม่ match กฎ → loading = release (เช่น 0113 → 0113)
+}
+
+/** อ่านกฎ loading จาก app_config (แก้ได้จากหน้าตั้งค่าเว็บ) — คืน undefined ถ้าไม่มี → ใช้ default/env */
+async function fetchLoadingRules(url: string, key: string): Promise<{ [prefix: string]: string } | undefined> {
+  try {
+    const resp = await fetch(
+      `${url}/rest/v1/app_config?key=eq.loading_port_rules&select=value`,
+      { headers: { apikey: key, Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15000) },
+    );
+    if (!resp.ok) return undefined;
+    const rows = (await resp.json()) as { value?: { [k: string]: string } }[];
+    const v = rows?.[0]?.value;
+    return v && typeof v === "object" ? v : undefined;
+  } catch { return undefined; }
 }
 
 export async function loadRecordsFromSupabase(onlyDeclId?: string): Promise<Record[]> {
@@ -304,6 +320,7 @@ export async function loadRecordsFromSupabase(onlyDeclId?: string): Promise<Reco
       return [];
     }
     const rows = (await resp.json()) as { [k: string]: unknown }[];
+    const loadingRules = await fetchLoadingRules(url, key); // กฎจากหน้าตั้งค่า (ถ้ามี)
     const out: Record[] = [];
     for (const raw of rows) {
       // ต้องมี customer_name
@@ -316,7 +333,7 @@ export async function loadRecordsFromSupabase(onlyDeclId?: string): Promise<Reco
       // สถานที่รับบรรทุก (loading) มักไม่มีในเอกสาร → คำนวณจากสถานที่ตรวจปล่อย (release)
       //   ตามกฎ config (เช่น 0113→0113, ขึ้นต้น 28→2801). เติมเฉพาะเมื่อ loading ว่าง
       if (!String(rec.loading_code ?? "").trim()) {
-        const derived = deriveLoadingPort(String(rec.paperless_code ?? "").trim());
+        const derived = deriveLoadingPort(String(rec.paperless_code ?? "").trim(), loadingRules);
         if (derived) rec.loading_code = derived;
       }
       rec.__raw_row__ = Object.fromEntries(

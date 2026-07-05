@@ -1048,9 +1048,49 @@ function showPage(page) {
   $("pageTitle").textContent = meta.title; $("pageSubtitle").textContent = meta.sub;
   if (page === "list") loadDecls();
   if (page === "history") { loadJobs(); }
-  if (page === "settings") { loadRules(); loadEmailSchedule(); loadModel(); loadEmailRules(); loadConfig(); }
+  if (page === "settings") { loadRules(); loadEmailSchedule(); loadModel(); loadEmailRules(); loadConfig(); loadLoadingRules(); }
 }
 document.querySelectorAll(".nav-item[data-page]").forEach((n) => (n.onclick = (e) => { e.preventDefault(); showPage(n.dataset.page); }));
+
+// ---- กฎสถานที่รับบรรทุก (loading) — คำนวณจากสถานที่ตรวจปล่อย (release) ----
+let loadingRulesState = []; // [{prefix, port}]
+function renderLoadingRules() {
+  const box = $("loadingRules");
+  if (!box) return;
+  box.innerHTML = loadingRulesState.length
+    ? loadingRulesState.map((r, i) => `
+      <div class="lr-row">
+        <span class="muted">ตรวจปล่อยขึ้นต้นด้วย</span>
+        <input class="inp lr-prefix" data-i="${i}" value="${escapeHtml(r.prefix)}" placeholder="28" style="width:90px" />
+        <span class="muted">→ รับบรรทุก</span>
+        <input class="inp lr-port" data-i="${i}" value="${escapeHtml(r.port)}" placeholder="2801" style="width:110px" />
+        <button class="btn btn-ghost btn-xs lr-del" data-i="${i}" title="ลบกฎ">${svgIcon("trash", 13)}</button>
+      </div>`).join("")
+    : '<p class="muted" style="margin:0">ยังไม่มีกฎพิเศษ — ทุกใบจะใช้รับบรรทุก = ตรวจปล่อย</p>';
+  box.querySelectorAll(".lr-prefix").forEach((el) => (el.oninput = () => (loadingRulesState[+el.dataset.i].prefix = el.value.trim())));
+  box.querySelectorAll(".lr-port").forEach((el) => (el.oninput = () => (loadingRulesState[+el.dataset.i].port = el.value.trim())));
+  box.querySelectorAll(".lr-del").forEach((b) => (b.onclick = () => { loadingRulesState.splice(+b.dataset.i, 1); renderLoadingRules(); }));
+}
+async function loadLoadingRules() {
+  try {
+    const r = await api("/api/config/loading-rules");
+    loadingRulesState = Object.entries(r.rules || {}).map(([prefix, port]) => ({ prefix, port: String(port) }));
+  } catch { loadingRulesState = []; }
+  renderLoadingRules();
+}
+if ($("btnAddLoadRule")) $("btnAddLoadRule").onclick = () => { loadingRulesState.push({ prefix: "", port: "" }); renderLoadingRules(); };
+if ($("btnSaveLoadRules")) $("btnSaveLoadRules").onclick = async () => {
+  const rules = {};
+  for (const r of loadingRulesState) {
+    const p = String(r.prefix || "").trim(), v = String(r.port || "").trim();
+    if (/^\d{1,6}$/.test(p) && /^\d{1,6}$/.test(v)) rules[p] = v;
+  }
+  try {
+    await api("/api/config/loading-rules", "POST", { rules });
+    const sv = $("loadRulesSaved"); if (sv) { sv.style.display = "inline"; setTimeout(() => (sv.style.display = "none"), 2000); }
+    toast("บันทึกกฎสถานที่รับบรรทุกแล้ว", "success");
+  } catch (e) { toast("บันทึกไม่สำเร็จ: " + e.message, "error"); }
+};
 
 // ---- Settings sub-tabs ----
 function showTab(tab) {

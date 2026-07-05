@@ -46,6 +46,8 @@ import {
   getJob,
   getJobLogs,
   subscribeJobLogs,
+  getAppConfig,
+  setAppConfig,
   type JobLogRow,
   type JobRow,
 } from "./supabase.js";
@@ -754,6 +756,26 @@ async function getFieldCatalog() {
 }
 app.get("/api/field-catalog", async (_req, res) => {
   res.json({ fields: await getFieldCatalog() });
+});
+
+// ---- กฎสถานที่รับบรรทุก (loading) คำนวณจากสถานที่ตรวจปล่อย (release) — global config ----
+app.get("/api/config/loading-rules", async (_req, res) => {
+  const rules = (await getAppConfig<{ [prefix: string]: string }>("loading_port_rules")) ?? { "28": "2801" };
+  res.json({ enabled: supabaseEnabled(), rules });
+});
+app.post("/api/config/loading-rules", requireAdmin, async (req, res) => {
+  if (!supabaseEnabled()) { res.status(400).json({ error: "ยังไม่ได้ตั้งค่า Supabase" }); return; }
+  const body = (req.body || {}) as { rules?: { [prefix: string]: string } };
+  const raw = body.rules && typeof body.rules === "object" ? body.rules : {};
+  // sanitize: prefix/port เป็นสตริงตัวเลขล้วน (กันค่าเพี้ยน)
+  const clean: { [prefix: string]: string } = {};
+  for (const [p, v] of Object.entries(raw)) {
+    const pk = String(p).trim(), pv = String(v).trim();
+    if (/^\d{1,6}$/.test(pk) && /^\d{1,6}$/.test(pv)) clean[pk] = pv;
+  }
+  const ok = await setAppConfig("loading_port_rules", clean);
+  if (!ok) { res.status(500).json({ error: "บันทึกไม่สำเร็จ" }); return; }
+  res.json({ ok: true, rules: clean });
 });
 
 // ---- Customer settings (field rules + presets) -------------

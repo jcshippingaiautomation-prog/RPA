@@ -33,6 +33,35 @@ export function supabaseEnabled(): boolean {
   return config.supabase.enabled;
 }
 
+/** อ่านค่า global config (app_config) ตาม key — คืน null ถ้าไม่มี/ปิด Supabase */
+export async function getAppConfig<T = unknown>(key: string): Promise<T | null> {
+  const sb = getClient();
+  if (!sb) return null;
+  try {
+    const { data, error } = await sb.from("app_config").select("value").eq("key", key).maybeSingle();
+    if (error) throw error;
+    return (data?.value ?? null) as T | null;
+  } catch (err) {
+    console.error("[web] getAppConfig error:", err);
+    return null;
+  }
+}
+
+/** เขียนค่า global config (upsert) */
+export async function setAppConfig(key: string, value: unknown): Promise<boolean> {
+  const sb = getClient();
+  if (!sb) return false;
+  try {
+    const { error } = await sb.from("app_config")
+      .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    if (error) throw error;
+    return true;
+  } catch (err) {
+    console.error("[web] setAppConfig error:", err);
+    return false;
+  }
+}
+
 /** ดึงข้อความ error ที่อ่านง่ายจาก error object ของ Supabase */
 function errMsg(err: unknown): string {
   if (err && typeof err === "object") {

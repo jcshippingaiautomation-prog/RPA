@@ -213,6 +213,23 @@
             <span id="cfgSaved" class="saved" style="display:none"><i data-icon="check"></i> บันทึกแล้ว</span>
           </div>
         </section>
+
+        <!-- กฎสถานที่รับบรรทุก (loading) คำนวณจากสถานที่ตรวจปล่อย (release) -->
+        <section class="card">
+          <div class="card-head"><h2><i data-icon="settings"></i> กฎสถานที่รับบรรทุก</h2></div>
+          <p class="muted" style="margin:0 0 12px">
+            สถานที่รับบรรทุกมักไม่มีในเอกสาร → ระบบคำนวณจาก "สถานที่ตรวจปล่อย" ตามกฎนี้:
+            ถ้ารหัสตรวจปล่อย <b>ขึ้นต้นด้วย</b> ค่าซ้าย → ใช้รหัสรับบรรทุกค่าขวา
+            (ที่ไม่เข้ากฎ = รับบรรทุกเท่ากับตรวจปล่อย เช่น 0113 → 0113)
+          </p>
+          <div id="loadingRules" class="loading-rules"></div>
+          <div class="row-flex" style="margin-top:12px">
+            <button class="btn btn-ghost btn-sm" id="btnAddLoadRule"><i data-icon="plus"></i> เพิ่มกฎ</button>
+            <div style="flex:1"></div>
+            <button class="btn btn-primary" id="btnSaveLoadRules"><i data-icon="save"></i> บันทึกกฎ</button>
+            <span id="loadRulesSaved" class="saved" style="display:none"><i data-icon="check"></i> บันทึกแล้ว</span>
+          </div>
+        </section>
         </div><!-- /panel airpa -->
 
         <!-- ===== TAB: ลูกค้า ===== -->

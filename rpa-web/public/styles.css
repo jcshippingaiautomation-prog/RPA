@@ -364,6 +364,11 @@ textarea.md-edit { resize: vertical; min-height: 62px; font-family: inherit; lin
 .fld-auto { font-size: 10px; font-weight: 600; color: var(--muted); background: #eef2f7; padding: 1px 6px; border-radius: 999px; vertical-align: middle; }
 .inp-auto { background: #f4f6f9; color: var(--muted2); cursor: default; border-style: dashed; }
 
+/* กฎสถานที่รับบรรทุก (settings) */
+.loading-rules { display: flex; flex-direction: column; gap: 8px; }
+.lr-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.lr-row .muted { font-size: 13px; }
+
 /* ===== Field label (form) ===== */
 .field-label { display: block; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
 
