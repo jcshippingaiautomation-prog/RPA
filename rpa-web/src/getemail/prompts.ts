@@ -74,7 +74,7 @@ export const EXTRACTOR_SYSTEM_PROMPT =
   '  "customs_unit_code":        "หน่วยปริมาณในใบขน (หลังพิกัด เช่น KGM, TNE, C62)",\n' +
   '  "items": [\n' +
   "    {\n" +
-  '      "description_eng":         "รหัสสินค้า/ชื่อสินค้าหลักที่ต้องตรงกับ master ใน DCTK (เช่น FROZEN ORGANIC COCONUT WATER) — รายการที่เป็นสินค้าชนิดเดียวกันใช้รหัสนี้เหมือนกันได้",\n' +
+  '      "description_eng":         "คำค้นสั้นที่สุดที่ระบุชนิดสินค้าได้ (2-4 คำ) สำหรับค้น master ใน DCTK เช่น \\"REFINED BLEACHED\\", \\"FROZEN COCONUT WATER\\" — ห้ามใส่คำอธิบายเต็มประโยค/รุ่น/ขนาด/ยี่ห้อ (พวกนั้นไปที่ description_eng_field); สินค้าชนิดเดียวกันใช้ค่านี้เหมือนกัน",\n' +
   '      "description_eng_field":   "คำอธิบายสินค้าภาษาอังกฤษแบบละเอียดของรายการนี้ (อิสระ ต่างกันได้ต่อรายการ เช่น ORGANIC RAW COCONUT CREAM SMOOTHIE BRAND ORGANIC SOURCE 250ML) ตัวพิมพ์ใหญ่ทั้งหมด",\n' +
   '      "product_description_thai": "คำอธิบายสินค้าภาษาไทยของรายการนี้ (เช่น น้ำมะพร้าวแช่แข็ง)",\n' +
   '      "brand_name":             "ยี่ห้อ (ถ้าไม่มีใส่ NO BRAND)",\n' +
@@ -95,7 +95,7 @@ export const EXTRACTOR_SYSTEM_PROMPT =
   "[หมายเหตุ items]\n" +
   "- \"items\" = รายการสินค้าทุกบรรทัดใน Invoice/Packing (1 บรรทัด = 1 item) — ต้องครบทุกรายการ\n" +
   "- ฟิลด์ระดับบน (net_weight_kg, gross_weight_kg, total_goods_amount) = ยอดรวมทั้งใบขน (TOTAL)\n" +
-  '- "description_eng" (รหัสสินค้า) ต้องเป็นชื่อหลักที่ตรง master — หลายรายการที่เป็นสินค้าชนิดเดียวกันใช้ค่านี้เหมือนกันได้; ส่วนรายละเอียดแยกไปที่ "description_eng_field"\n' +
+  '- "description_eng" (รหัสสินค้า) = คำค้นสั้น 2-4 คำเท่านั้น (ใช้ค้น master combo ใน DCTK) ยิ่งสั้นยิ่งดีถ้ายังระบุชนิดสินค้าได้ — ห้ามยาวเป็นประโยค; รายละเอียดเต็มไปที่ "description_eng_field"\n' +
   '- รายการที่ขึ้นต้น "Sample" หรือมี FOC = ของแถม: ตั้ง is_foc=true\n\n' +
   "[หมายเหตุ ประเทศผู้ซื้อ vs ปลายทาง]\n" +
   "- buyer_country_code (ประเทศผู้ซื้อ/ขายไปยังประเทศ) กับ destination_country_code (ประเทศปลายทาง) อาจ \"ต่างกัน\" ได้ เช่น ขายให้บริษัทญี่ปุ่น (JP) แต่ส่งของไปเกาหลี (KR)\n" +
