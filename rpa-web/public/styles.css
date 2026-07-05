@@ -358,6 +358,11 @@ textarea.md-edit { resize: vertical; min-height: 62px; font-family: inherit; lin
 .item-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
 .item-grid .fld-full { grid-column: 1 / -1; }
 @media (max-width: 560px) { .item-grid { grid-template-columns: 1fr; } }
+.item-sec-title { font-size: 11px; font-weight: 700; color: var(--muted2); text-transform: none; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--border); letter-spacing: .3px; }
+
+/* ช่องคำนวณอัตโนมัติ (read-only) — สกุลเงิน/หน่วย/ราคาต่อหน่วย */
+.fld-auto { font-size: 10px; font-weight: 600; color: var(--muted); background: #eef2f7; padding: 1px 6px; border-radius: 999px; vertical-align: middle; }
+.inp-auto { background: #f4f6f9; color: var(--muted2); cursor: default; border-style: dashed; }
 
 /* ===== Field label (form) ===== */
 .field-label { display: block; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 6px; }

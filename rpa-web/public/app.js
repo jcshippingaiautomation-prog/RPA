@@ -143,17 +143,21 @@ const PAGE_FIELDS = {
       ["incoterms", "เงื่อนไข (Incoterms)"],
       ["currency", "ราคา — สกุลเงิน"],
       ["total_goods_amount", "ราคา — จำนวน"],
+      ["__freight_cur", "ค่าระวาง — สกุลเงิน", { derived: (d) => d.currency || "" }],
       ["freight_charge", "ค่าระวาง — จำนวน"],
+      ["__insurance_cur", "ค่าประกัน — สกุลเงิน", { derived: (d) => d.currency || "" }],
       ["insurance_charge", "ค่าประกัน — จำนวน"],
-      ["net_weight_kg", "น้ำหนักสุทธิรวม (KGM)"],
-      ["gross_weight_kg", "น้ำหนักรวมหีบห่อรวม (KGM)"],
+      ["net_weight_kg", "น้ำหนักสุทธิรวม — จำนวน"],
+      ["__net_unit", "น้ำหนักสุทธิรวม — หน่วย", { derived: () => "KGM" }],
+      ["gross_weight_kg", "น้ำหนักรวมหีบห่อรวม — จำนวน"],
+      ["__gross_unit", "น้ำหนักรวมหีบห่อรวม — หน่วย", { derived: () => "KGM" }],
       ["net_weight_ton", "ปริมาณ (ตัน)"],
       ["description_eng", "รายละเอียดสินค้า"],
     ],
   },
 };
-// รายการ flat (ใช้กับ modal สร้างใหม่ + highlightFields) = ทุกช่องหัวใบรวมกัน
-const DECL_FIELDS = [...PAGE_FIELDS[1].fields, ...PAGE_FIELDS[2].fields];
+// รายการ flat (ใช้กับ modal สร้างใหม่ + highlightFields) = ช่องหัวใบจริง (ตัด derived ที่คำนวณอัตโนมัติออก)
+const DECL_FIELDS = [...PAGE_FIELDS[1].fields, ...PAGE_FIELDS[2].fields].filter(([, , o]) => !(o && o.derived));
 
 let DECLS = [];      // รายการทั้งหมด (จาก /api/declarations)
 let selected = new Set();
@@ -392,36 +396,57 @@ async function openDetail(id, opts) {
   } catch (e) { box.innerHTML = `<p class="note">โหลดไม่ได้: ${escapeHtml(e.message)}</p>`; }
 }
 
-// คอลัมน์รายการสินค้า (items) ที่แก้ได้ในตาราง [key, label, width]
-// ป้ายชื่อคอลัมน์รายการสินค้า = ตามหน้า "ส่วนรายละเอียด" (Page 3) ของ DCTK (ยืนยันจากภาพแคป)
+// รายการสินค้า (Page 3 "ส่วนรายละเอียด") จัดกลุ่มตาม DCTK: สินค้า → ปริมาณ → น้ำหนัก → หีบห่อ → ราคา
+//   entry: [key, label] | [key, label, {full}] | [label, {derived, section}] (derived = คำนวณอัตโนมัติ read-only)
+//   {section:"..."} = ขึ้นหัวข้อกลุ่มก่อนช่องนี้; {full} = กว้างเต็มแถว
 const ITEM_FIELDS = [
-  ["description_eng", "รหัสสถิติสินค้า", "150"],
-  ["description_eng_field", "คำอธิบายสินค้าภาษาอังกฤษ", "200"],
-  ["product_description_thai", "คำอธิบายสินค้าภาษาไทย", "150"],
-  ["brand_name", "ยี่ห้อสินค้า", "90"],
-  ["export_tariff", "พิกัดศุลกากร", "90"],
-  ["customs_unit_code", "หน่วยหลังพิกัด", "90"],
-  ["container_or_volume_qty", "ปริมาณในใบขน", "80"],
-  ["container_unit_code", "หน่วยหีบห่อ", "80"],
-  ["net_weight_kg", "น้ำหนักสุทธิ", "90"],
-  ["gross_weight_kg", "น้ำหนักรวมหีบห่อ", "100"],
-  ["net_weight_ton", "น้ำหนักสุทธิ (ตัน)", "80"],
-  ["net_weight_unit_code", "หน่วยน้ำหนัก", "80"],
-  ["amount", "ราคา (FOB)", "90"],
-  ["insurance", "ค่าประกัน", "80"],
+  ["description_eng", "รหัสสินค้า (คำค้น master)", { full: true }],
+  ["description_eng_field", "คำอธิบายสินค้าภาษาอังกฤษ", { full: true }],
+  ["product_description_thai", "คำอธิบายสินค้าภาษาไทย", { full: true }],
+  ["brand_name", "ยี่ห้อสินค้า"],
+  ["export_tariff", "พิกัดศุลกากร"],
+  // --- ปริมาณ (ใบกำกับ = TO, ใบขน = TNE; จำนวนเท่ากัน) ---
+  ["net_weight_ton", "ปริมาณในใบกำกับ — จำนวน", { section: "ปริมาณ" }],
+  ["net_weight_unit_code", "ปริมาณในใบกำกับ — หน่วย"],
+  ["__qty_dec", "ปริมาณในใบขน — จำนวน", { derived: (it) => it.net_weight_ton != null ? String(it.net_weight_ton) : "" }],
+  ["customs_unit_code", "ปริมาณในใบขน — หน่วย"],
+  // --- น้ำหนัก ---
+  ["net_weight_kg", "น้ำหนักสุทธิ (KGM)", { section: "น้ำหนัก" }],
+  ["gross_weight_kg", "น้ำหนักรวมหีบห่อ (KGM)"],
+  // --- หีบห่อ ---
+  ["container_or_volume_qty", "จำนวนหีบห่อ", { section: "หีบห่อ" }],
+  ["container_unit_code", "หน่วยหีบห่อ"],
+  // --- ราคา (สกุลเงิน = สกุลหลัก; ราคา/หน่วย = ราคา ÷ ปริมาณ) ---
+  ["amount", "ราคา — จำนวน", { section: "ราคา" }],
+  ["__unit_price", "ราคา/หน่วย (auto)", { derived: (it) => {
+    const a = parseFloat(it.amount), q = parseFloat(it.net_weight_ton);
+    return (a && q) ? (a / q).toFixed(5) : "";
+  } }],
+  ["insurance", "ค่าประกัน — จำนวน"],
 ];
 
 // state ของ items ที่กำลังแก้ (mutable) — sync กับตารางในหน้า detail
 let editItems = [];
 
-// ช่องในการ์ดสินค้าที่ต้องกว้างเต็มแถว (ข้อความยาว)
-const ITEM_FULL_FIELDS = new Set(["description_eng_field", "product_description_thai"]);
+function renderItemFieldCell(it, idx, k, label, opts) {
+  const full = opts && opts.full ? "fld-full" : "";
+  if (opts && typeof opts.derived === "function") {
+    return `<div class="fld ${full}">
+       <label>${escapeHtml(label)} <span class="fld-auto">อัตโนมัติ</span></label>
+       <input class="inp inp-auto" value="${escapeHtml(opts.derived(it) || "")}" readonly tabindex="-1" />
+     </div>`;
+  }
+  return `<div class="fld ${full}">
+     <label>${escapeHtml(label)}</label>
+     <input class="inp it-edit" data-i="${idx}" data-key="${k}" value="${escapeHtml(it[k] != null ? String(it[k]) : "")}" />
+   </div>`;
+}
 function renderItemCard(it, idx) {
-  const fields = ITEM_FIELDS.map(([k, label]) =>
-    `<div class="fld ${ITEM_FULL_FIELDS.has(k) ? "fld-full" : ""}">
-       <label>${escapeHtml(label)}</label>
-       <input class="inp it-edit" data-i="${idx}" data-key="${k}" value="${escapeHtml(it[k] != null ? String(it[k]) : "")}" />
-     </div>`).join("");
+  let html = "";
+  for (const [k, label, opts] of ITEM_FIELDS) {
+    if (opts && opts.section) html += `<div class="item-sec-title fld-full">${escapeHtml(opts.section)}</div>`;
+    html += renderItemFieldCell(it, idx, k, label, opts);
+  }
   return `<div class="item-card">
     <div class="item-card-head">
       <span class="item-card-no">รายการ ${idx + 1}</span>
@@ -429,7 +454,7 @@ function renderItemCard(it, idx) {
       <div style="flex:1"></div>
       <button class="btn btn-ghost btn-xs it-del" data-i="${idx}" title="ลบรายการ">${svgIcon("trash", 13)} ลบ</button>
     </div>
-    <div class="item-grid">${fields}</div>
+    <div class="item-grid">${html}</div>
   </div>`;
 }
 
@@ -470,7 +495,16 @@ async function saveItems() {
 
 // ช่องที่ต้องกรอกได้หลายบรรทัด (textarea) — ให้ตรงกับเอกสารจริง เช่น เลขหมายหีบห่อ
 const MULTILINE_FIELDS = { shipping_mark: 4, description_eng: 2 };
-function renderFieldCell(k, label, d) {
+// entry รูปแบบ [key, label] หรือ [key, label, opts] — opts.derived(d)=ค่าคำนวณอัตโนมัติ (read-only ไม่บันทึก)
+function renderFieldCell(k, label, d, opts) {
+  // ช่องคำนวณอัตโนมัติ (สกุลเงินตามหลัก, หน่วย KGM ฯลฯ) — read-only ไม่บันทึก
+  if (opts && typeof opts.derived === "function") {
+    const dv = opts.derived(d) || "";
+    return `<div class="fld">
+      <label>${escapeHtml(label)} <span class="fld-auto">อัตโนมัติ</span></label>
+      <input class="inp inp-auto" value="${escapeHtml(dv)}" readonly tabindex="-1" />
+    </div>`;
+  }
   const val = d[k] != null ? String(d[k]) : "";
   const rows = MULTILINE_FIELDS[k];
   if (rows) {
@@ -486,7 +520,7 @@ function renderFieldCell(k, label, d) {
 }
 let detailPage = 1;   // แท็บหน้าที่เปิดอยู่ใน modal รายละเอียด (1/2/3)
 function renderPageFields(pageNo, d) {
-  return PAGE_FIELDS[pageNo].fields.map(([k, label]) => renderFieldCell(k, label, d)).join("");
+  return PAGE_FIELDS[pageNo].fields.map(([k, label, opts]) => renderFieldCell(k, label, d, opts)).join("");
 }
 function renderDetailForm(d, errorSummary, validation) {
   editItems = Array.isArray(d._items) ? d._items.map((it) => ({ ...it })) : [];
