@@ -137,8 +137,7 @@ const PAGE_FIELDS = {
   2: { // ใบกำกับสินค้า
     title: "ใบกำกับสินค้า",
     fields: [
-      ["invoice_number", "เลขที่ใบกำกับฯ (Invoice)"],
-      ["invoice_date", "วันที่ใบกำกับฯ"],
+      // เลขที่/วันที่ใบกำกับ = AI สกัดจากเอกสารอัตโนมัติ ไม่ต้องกรอก/แก้ในฟอร์มตรวจสอบ (ไม่อยู่ใน list กรอกเอง)
       ["consignee_name", "ชื่อผู้ซื้อ"],
       ["incoterms", "เงื่อนไข (Incoterms)"],
       ["currency", "ราคา — สกุลเงิน"],
@@ -966,8 +965,14 @@ $("upSubmit").onclick = async () => {
 // ============================================================
 //  Modal: สร้างรายการเอง
 // ============================================================
+// ฟอร์มสร้างรายการเอง = ทุกช่องหัวใบ + เลขที่/วันที่ใบกำกับ (ที่เอาออกจากฟอร์มตรวจสอบ แต่ยังจำเป็นตอนสร้าง)
+const CREATE_FIELDS = [
+  ["invoice_number", "เลขที่ใบกำกับฯ (Invoice)"],
+  ["invoice_date", "วันที่ใบกำกับฯ"],
+  ...DECL_FIELDS,
+];
 function openCreate() {
-  $("crBody").innerHTML = `<div class="md-grid">${DECL_FIELDS.map(([k, label]) => {
+  $("crBody").innerHTML = `<div class="md-grid">${CREATE_FIELDS.map(([k, label]) => {
     const rows = MULTILINE_FIELDS[k];
     return rows
       ? `<div class="fld fld-full"><label>${escapeHtml(label)}</label><textarea class="inp cr-edit" data-key="${k}" rows="${rows}" placeholder="ใส่ได้หลายบรรทัดตามเอกสาร"></textarea></div>`
