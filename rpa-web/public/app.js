@@ -114,22 +114,46 @@ function sourceBadge(src) {
 // ============================================================
 //  หน้ารายการใบขน
 // ============================================================
-// ช่องที่แสดง/แก้ไขในรายละเอียด (key, label) — ครอบคลุมช่องหลัก RPA กรอก
-// ป้ายชื่อฟิลด์ = คำที่ปรากฏจริงบนเว็บ DCTK (ยืนยันจากภาพแคปหน้าจอ page 1/2/3). วงเล็บ = อังกฤษกำกับ
-const DECL_FIELDS = [
-  ["declaration_no", "เลขที่ใบขนฯ (ใช้ค้นเพื่อแก้)"],
-  ["customer_name", "ผู้ส่งออก (ลูกค้า)"], ["consignee_name", "ชื่อผู้ซื้อ"],
-  ["buyer_country_code", "รหัสประเทศผู้ซื้อ"], ["destination_country_code", "รหัสประเทศปลายทาง"],
-  ["invoice_number", "เลขที่ใบกำกับฯ (Invoice)"], ["invoice_date", "วันที่ใบกำกับฯ"],
-  ["vessel_name", "ชื่อยานพาหนะ"], ["voyage_number", "เที่ยวเรือ"],
-  ["etd", "วันที่ส่งออก (ETD)"], ["release_port_code", "สถานที่ตรวจปล่อย"], ["loading_port_code", "สถานที่รับบรรทุก"],
-  ["incoterms", "เงื่อนไข (Incoterms)"], ["currency", "สกุลเงิน"], ["total_goods_amount", "ราคา FOB รวม"],
-  ["freight_charge", "ค่าระวาง"], ["insurance_charge", "ค่าประกัน"],
-  ["shipping_mark", "เลขหมายหีบห่อ"], ["description_eng", "รายละเอียดสินค้า"],
-  ["net_weight_kg", "น้ำหนักสุทธิรวม"], ["gross_weight_kg", "น้ำหนักรวมหีบห่อรวม"],
-  ["net_weight_ton", "น้ำหนักสุทธิ (ตัน)"], ["container_or_volume_qty", "จำนวนหีบห่อรวม"],
-  ["container_unit_code", "หน่วยหีบห่อรวม"], ["tax_payment_method_code", "รหัสวิธีการชำระภาษีอากร"],
-];
+// ช่องหัวใบ จัดกลุ่มตาม "หน้า" ของ DCTK (แท็บใน modal) — ชื่อ = คำจริงบนเว็บ (ยืนยันจากภาพแคป page 1/2/3)
+// รายการสินค้า (Page 3) = การ์ด item แยกต่างหาก (ITEM_FIELDS)
+const PAGE_FIELDS = {
+  1: { // ใบขนสินค้าขาออก (หัวใบ)
+    title: "ใบขนสินค้าขาออก",
+    fields: [
+      ["declaration_no", "เลขที่ใบขนฯ (ใช้ค้นเพื่อแก้)"],
+      ["customer_name", "ผู้ส่งออก (ลูกค้า)"],
+      ["buyer_country_code", "รหัสประเทศผู้ซื้อ"],
+      ["destination_country_code", "รหัสประเทศปลายทาง"],
+      ["vessel_name", "ชื่อยานพาหนะ"],
+      ["voyage_number", "เที่ยวเรือ"],
+      ["release_port_code", "สถานที่ตรวจปล่อย"],
+      ["loading_port_code", "สถานที่รับบรรทุก"],
+      ["container_or_volume_qty", "จำนวนหีบห่อรวม"],
+      ["container_unit_code", "หน่วยหีบห่อรวม"],
+      ["tax_payment_method_code", "รหัสวิธีการชำระภาษีอากร"],
+      ["shipping_mark", "เลขหมายหีบห่อ"],
+    ],
+  },
+  2: { // ใบกำกับสินค้า
+    title: "ใบกำกับสินค้า",
+    fields: [
+      ["invoice_number", "เลขที่ใบกำกับฯ (Invoice)"],
+      ["invoice_date", "วันที่ใบกำกับฯ"],
+      ["consignee_name", "ชื่อผู้ซื้อ"],
+      ["incoterms", "เงื่อนไข (Incoterms)"],
+      ["currency", "ราคา — สกุลเงิน"],
+      ["total_goods_amount", "ราคา — จำนวน"],
+      ["freight_charge", "ค่าระวาง — จำนวน"],
+      ["insurance_charge", "ค่าประกัน — จำนวน"],
+      ["net_weight_kg", "น้ำหนักสุทธิรวม (KGM)"],
+      ["gross_weight_kg", "น้ำหนักรวมหีบห่อรวม (KGM)"],
+      ["net_weight_ton", "ปริมาณ (ตัน)"],
+      ["description_eng", "รายละเอียดสินค้า"],
+    ],
+  },
+};
+// รายการ flat (ใช้กับ modal สร้างใหม่ + highlightFields) = ทุกช่องหัวใบรวมกัน
+const DECL_FIELDS = [...PAGE_FIELDS[1].fields, ...PAGE_FIELDS[2].fields];
 
 let DECLS = [];      // รายการทั้งหมด (จาก /api/declarations)
 let selected = new Set();
@@ -460,16 +484,26 @@ function renderFieldCell(k, label, d) {
     <input class="inp md-edit" data-key="${k}" value="${escapeHtml(val)}" />
   </div>`;
 }
+let detailPage = 1;   // แท็บหน้าที่เปิดอยู่ใน modal รายละเอียด (1/2/3)
+function renderPageFields(pageNo, d) {
+  return PAGE_FIELDS[pageNo].fields.map(([k, label]) => renderFieldCell(k, label, d)).join("");
+}
 function renderDetailForm(d, errorSummary, validation) {
-  const cells = DECL_FIELDS.map(([k, label]) => renderFieldCell(k, label, d)).join("");
   editItems = Array.isArray(d._items) ? d._items.map((it) => ({ ...it })) : [];
   // แบนเนอร์ขั้น wizard (แสดงเฉพาะตอนเข้ามาจากการอัปโหลด → ขั้นที่ 3 ตรวจสอบ)
   const wizardBanner = detailWizard
     ? `<div class="eta-note" style="width:100%;box-sizing:border-box;margin-bottom:14px">
-         ✓ AI สกัดข้อมูลเสร็จแล้ว — <b>&nbsp;ขั้นที่ 3/3: ตรวจข้อมูลขวาให้ตรงกับเอกสารซ้าย</b>&nbsp; แล้วกด "บันทึก" → "รัน RPA"
+         ✓ AI สกัดข้อมูลเสร็จแล้ว — <b>&nbsp;ตรวจข้อมูล 3 หน้า (แท็บด้านล่าง) ให้ตรงกับเอกสารซ้าย</b>&nbsp; แล้วกด "บันทึก" → "รัน RPA"
        </div>`
     : "";
-  // ซ้าย = เอกสารต้นฉบับ (ภาพ) · ขวา = ข้อมูลที่สกัด (ตรวจ/แก้)
+  // แท็บ 3 หน้า ตาม DCTK (Page 1/2/3)
+  const tabs = `
+    <div class="md-tabs">
+      <button class="md-tab" data-page="1">หน้า 1 · ${escapeHtml(PAGE_FIELDS[1].title)}</button>
+      <button class="md-tab" data-page="2">หน้า 2 · ${escapeHtml(PAGE_FIELDS[2].title)}</button>
+      <button class="md-tab" data-page="3">หน้า 3 · รายการสินค้า (${editItems.length})</button>
+    </div>`;
+  // ซ้าย = เอกสารต้นฉบับ (ภาพ) · ขวา = ข้อมูลที่สกัด (ตรวจ/แก้) แบ่งเป็น 3 แท็บ
   $("mdBody").innerHTML = `
     <div class="md-review">
       <div class="md-pane md-docs-col">
@@ -482,14 +516,27 @@ function renderDetailForm(d, errorSummary, validation) {
         <div class="md-status">สถานะ: ${statusBadge(d.status, d.status_message, d.doc_status)} ${d.status_message ? `<span class="muted">${escapeHtml(d.status_message)}</span>` : ""}</div>
         ${renderValidationBox(validation)}
         ${renderErrorBox(errorSummary, detailJobId)}
-        <div class="md-grid">${cells}</div>
-        ${renderItemsTable()}
+        ${tabs}
+        <div class="md-tabpanel" data-page="1"><div class="md-grid">${renderPageFields(1, d)}</div></div>
+        <div class="md-tabpanel" data-page="2"><div class="md-grid">${renderPageFields(2, d)}</div></div>
+        <div class="md-tabpanel" data-page="3">${renderItemsTable()}</div>
         <div class="md-section"><div class="md-section-title">📎 ไฟล์ผลลัพธ์ (ใบขน/แคปหน้าจอ)</div><div id="mdDocs" class="att-list muted">กำลังโหลด…</div></div>
       </div>
     </div>
   `;
   bindItemsEvents();
   bindErrorBox(detailJobId);
+  bindDetailTabs();
+}
+// สลับแท็บหน้า 1/2/3 (โชว์ทีละหน้า) — ฟิลด์ทุกหน้ายังอยู่ใน DOM จึงบันทึกครบทุกหน้า
+function bindDetailTabs() {
+  const setPage = (n) => {
+    detailPage = n;
+    $("mdBody").querySelectorAll(".md-tab").forEach((t) => t.classList.toggle("active", +t.dataset.page === n));
+    $("mdBody").querySelectorAll(".md-tabpanel").forEach((p) => (p.style.display = +p.dataset.page === n ? "" : "none"));
+  };
+  $("mdBody").querySelectorAll(".md-tab").forEach((t) => (t.onclick = () => setPage(+t.dataset.page)));
+  setPage(detailPage);
 }
 
 // ---- กล่อง "ข้อมูลที่ต้องแก้ก่อนรัน" (ตรวจก่อนรัน — กันรันแล้วไม่ผ่าน) ----
