@@ -222,7 +222,11 @@ function renderList() {
           <button class="btn btn-ghost btn-xs icon-only actDelete" data-id="${d.id}" title="ลบรายการ">${svgIcon("trash", 14)}</button>
           <span class="row-actions-sep"></span>
           <button class="btn btn-dark btn-xs actRun" data-id="${d.id}" ${running ? "disabled" : ""}>${svgIcon("play", 13)} รัน</button>
-          <button class="btn btn-ghost btn-xs actFiles ${d.doc_status ? "" : "is-empty"}" data-id="${d.id}" ${d.doc_status ? "" : "disabled"} title="${d.doc_status ? "ดูไฟล์ใบขน PDF + แคปหน้าจอ" : "ยังไม่มีไฟล์ (ต้องรัน RPA ก่อน)"}">${svgIcon("file", 13)} ดูไฟล์</button>
+          ${(() => {
+            // เปิดดูไฟล์ได้เมื่อ: มีไฟล์ (doc_status) หรือ รันเสร็จแล้ว/มีเลขใบขน (กันเคส doc_status ยังไม่ sync)
+            const canView = d.doc_status || effStatus(d) === "done" || effStatus(d) === "partial" || !!String(d.declaration_no ?? "").trim();
+            return `<button class="btn btn-ghost btn-xs actFiles ${canView ? "" : "is-empty"}" data-id="${d.id}" ${canView ? "" : "disabled"} title="${canView ? "ดูไฟล์ใบขน PDF + แคปหน้าจอ" : "ยังไม่มีไฟล์ (ต้องรัน RPA ก่อน)"}">${svgIcon("file", 13)} ดูไฟล์</button>`;
+          })()}
         </div>
       </td>
     </tr>`;
@@ -523,6 +527,8 @@ function renderPageFields(pageNo, d) {
 }
 function renderDetailForm(d, errorSummary, validation) {
   editItems = Array.isArray(d._items) ? d._items.map((it) => ({ ...it })) : [];
+  // ใบนี้มีไฟล์ใบขน (ผลลัพธ์) ให้เปิดดูไหม — done/partial/มีเลขใบขน
+  const declHasFile = !!(d.doc_status || d.status === "done" || d.status === "partial" || String(d.declaration_no ?? "").trim());
   // แบนเนอร์ขั้น wizard (แสดงเฉพาะตอนเข้ามาจากการอัปโหลด → ขั้นที่ 3 ตรวจสอบ)
   const wizardBanner = detailWizard
     ? `<div class="eta-note" style="width:100%;box-sizing:border-box;margin-bottom:14px">
@@ -540,7 +546,10 @@ function renderDetailForm(d, errorSummary, validation) {
   $("mdBody").innerHTML = `
     <div class="md-review">
       <div class="md-pane md-docs-col">
-        <div class="md-pane-title">📄 เอกสารต้นฉบับ <span class="muted" style="font-weight:400">— เลื่อนดูทุกไฟล์ทุกหน้า</span></div>
+        <div class="md-pane-title" style="justify-content:space-between">
+          <span>📄 เอกสารต้นฉบับ <span class="muted" style="font-weight:400">— เลื่อนดูทุกไฟล์ทุกหน้า</span></span>
+          ${declHasFile ? `<button class="btn btn-dark btn-xs" id="mdViewDecl" title="เปิดไฟล์ใบขนสินค้า (PDF) ที่ได้จาก DCTK">${svgIcon("file", 13)} ดูใบขน PDF</button>` : ""}
+        </div>
         <div id="mdDocsPane" class="doc-viewer"><div class="doc-empty">กำลังโหลดเอกสาร…</div></div>
       </div>
       <div class="md-pane md-form-col">
@@ -570,6 +579,8 @@ function bindDetailTabs() {
   };
   $("mdBody").querySelectorAll(".md-tab").forEach((t) => (t.onclick = () => setPage(+t.dataset.page)));
   setPage(detailPage);
+  // ปุ่มดูใบขน PDF ในแผงเอกสาร (เปิดไฟล์ผลลัพธ์ของใบนี้)
+  if ($("mdViewDecl")) $("mdViewDecl").onclick = () => openLatestPdf(detailId);
 }
 
 // ---- กล่อง "ข้อมูลที่ต้องแก้ก่อนรัน" (ตรวจก่อนรัน — กันรันแล้วไม่ผ่าน) ----
