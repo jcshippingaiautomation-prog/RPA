@@ -685,7 +685,8 @@ async function loadDetailDocs(customer, invoice, declRan) {
   // ใบนี้ยังไม่รัน → ไม่ต้องดึงไฟล์ (กันเอาไฟล์ของใบอื่นที่ invoice ซ้ำมาโชว์)
   if (!declRan) { box.innerHTML = '<span class="muted">ยังไม่มีไฟล์ผลลัพธ์ — ใบนี้ยังไม่ได้รัน (ไฟล์จะปรากฏหลังรัน RPA)</span>'; return; }
   try {
-    const res = await api(`/api/declaration-documents?customer=${encodeURIComponent(customer || "")}&invoice=${encodeURIComponent(invoice || "")}`);
+    // ผูก declId → ดึงเฉพาะไฟล์ผลลัพธ์ของใบนี้ (กันไฟล์ปนใบ invoice ซ้ำ)
+    const res = await api(`/api/declaration-documents?customer=${encodeURIComponent(customer || "")}&invoice=${encodeURIComponent(invoice || "")}&declId=${encodeURIComponent(detailId || "")}`);
     const docs = res.documents || [];
     // ไฟล์ผลลัพธ์เท่านั้น (ใบขน/แคป) — ไม่รวม source (source โชว์เป็นภาพในแผงซ้ายแล้ว)
     const out = docs.filter((doc) => doc.kind !== "source");
@@ -747,7 +748,7 @@ async function openLatestPdf(id) {
   const d = DECLS.find((x) => x.id === id);
   if (!d) return;
   try {
-    const res = await api(`/api/declaration-documents?customer=${encodeURIComponent(d.customer_name || "")}&invoice=${encodeURIComponent(d.invoice_number || "")}`);
+    const res = await api(`/api/declaration-documents?customer=${encodeURIComponent(d.customer_name || "")}&invoice=${encodeURIComponent(d.invoice_number || "")}&declId=${encodeURIComponent(id || "")}`);
     const docs = res.documents || [];
     // เลือกใบขน PDF (declaration) ล่าสุด; ถ้าไม่มีก็ใบล่าสุดอะไรก็ได้
     const pdf = docs.find((x) => x.kind === "declaration") || docs[0];
@@ -766,7 +767,7 @@ async function openFiles(id) {
   body.innerHTML = '<p class="muted">กำลังโหลด…</p>';
   $("modalFiles").style.display = "flex";
   try {
-    const res = await api(`/api/declaration-documents?customer=${encodeURIComponent(d.customer_name || "")}&invoice=${encodeURIComponent(d.invoice_number || "")}`);
+    const res = await api(`/api/declaration-documents?customer=${encodeURIComponent(d.customer_name || "")}&invoice=${encodeURIComponent(d.invoice_number || "")}&declId=${encodeURIComponent(id || "")}`);
     const docs = res.documents || [];
     if (!docs.length) { body.innerHTML = '<p class="muted">ยังไม่มีไฟล์เอกสารสำหรับใบนี้</p>'; return; }
     // แยก 2 กลุ่ม: ใบขน PDF (declaration) · แคปหน้าจอ PDF รวม (capture)

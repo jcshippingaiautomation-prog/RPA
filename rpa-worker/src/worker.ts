@@ -76,6 +76,7 @@ async function runRpaImport(job: JobRow): Promise<void> {
         customer: doc.customer,
         invoice: doc.invoice,
         kind: doc.kind,
+        declarationId: declId ?? null,
       });
       if (rec) await appendLog(job.id, "document", rec);
       else await appendLog(job.id, "log", { line: "[WORKER] ⚠ อัปเอกสารไม่สำเร็จ" });
@@ -159,7 +160,7 @@ async function runRpaEdit(job: JobRow): Promise<void> {
     onRows: (rows: RowInfo[]) => void appendLog(job.id, "row", { rows }),
     onRowStatus: (row) => void appendLog(job.id, "row-status", row),
     onDocument: async (doc) => {
-      const rec = await uploadDocument(doc.filePath, { customer: doc.customer, invoice: doc.invoice, kind: doc.kind });
+      const rec = await uploadDocument(doc.filePath, { customer: doc.customer, invoice: doc.invoice, kind: doc.kind, declarationId: payload.declId ?? null });
       if (rec) await appendLog(job.id, "document", rec);
     },
     shouldStop: () => cancelFlag,
@@ -193,7 +194,7 @@ async function runRpaPrint(job: JobRow): Promise<void> {
     onRows: (rows: RowInfo[]) => void appendLog(job.id, "row", { rows }),
     onRowStatus: (row) => void appendLog(job.id, "row-status", row),
     onDocument: async (doc) => {
-      const rec = await uploadDocument(doc.filePath, { customer: doc.customer, invoice: doc.invoice, kind: doc.kind });
+      const rec = await uploadDocument(doc.filePath, { customer: doc.customer, invoice: doc.invoice, kind: doc.kind, declarationId: payload.declId ?? null });
       if (rec) await appendLog(job.id, "document", rec);
     },
     onCaptureMeta: async (meta) => void appendLog(job.id, "capture-meta", meta),

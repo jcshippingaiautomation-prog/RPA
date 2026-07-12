@@ -160,10 +160,28 @@ export async function uploadBytes(
 }
 
 /** list เอกสารของ declaration (จับคู่ด้วย customer+invoice) */
-export async function listDocumentsFor(customer: string, invoice: string): Promise<DocumentRecord[]> {
+export async function listDocumentsFor(
+  customer: string,
+  invoice: string,
+  declId?: string,
+): Promise<DocumentRecord[]> {
   const sb = getClient();
   if (!sb) return [];
   try {
+    // ผูกไฟล์กับใบเจาะจง (declaration_id) — ดึงเฉพาะไฟล์ของใบนี้ กันไฟล์ปนใบ invoice ซ้ำ
+    if (declId) {
+      try {
+        const { data, error } = await sb.from("documents").select("*")
+          .eq("declaration_id", declId).order("created_at", { ascending: false });
+        if (error) throw error;
+        // ถ้ามีไฟล์ผูก declaration_id แล้ว (ใบที่รันหลัง migration) → คืนเฉพาะของใบนี้
+        if (data && data.length) return data as DocumentRecord[];
+        // ไม่มี → ใบเก่าที่ยังไม่ผูก id → fallback ไป customer+invoice (พฤติกรรมเดิม)
+      } catch (e) {
+        // คอลัมน์ declaration_id ยังไม่มี (ยังไม่รัน sql/09) → fallback ไป customer+invoice
+        console.error("[supabase] declaration_id query fallback:", errMsg(e));
+      }
+    }
     let q = sb.from("documents").select("*").order("created_at", { ascending: false });
     if (customer) q = q.eq("customer", customer);
     if (invoice) q = q.eq("invoice", invoice);

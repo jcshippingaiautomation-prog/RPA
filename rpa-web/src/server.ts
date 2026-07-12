@@ -235,7 +235,8 @@ app.post("/api/config", requireAdmin, async (req, res) => {
 app.get("/api/declaration-documents", async (req, res) => {
   const customer = String(req.query.customer ?? "");
   const invoice = String(req.query.invoice ?? "");
-  res.json({ documents: await listDocumentsFor(customer, invoice) });
+  const declId = req.query.declId ? String(req.query.declId) : undefined;
+  res.json({ documents: await listDocumentsFor(customer, invoice, declId) });
 });
 
 // แก้ไข declaration จากหน้า preview (บันทึกลง Supabase)

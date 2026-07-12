@@ -36,7 +36,7 @@ export async function listCustomerSettings(): Promise<CustomerSetting[]> {
 /** อัป PDF → Storage + insert documents (mirror rpa-web uploadDocument) */
 export async function uploadDocument(
   filePath: string,
-  meta: { customer?: string | null; invoice?: string | null; kind: string },
+  meta: { customer?: string | null; invoice?: string | null; kind: string; declarationId?: string | null },
 ): Promise<{ filename: string } | null> {
   try {
     const sb = workerSupabase();
@@ -57,16 +57,22 @@ export async function uploadDocument(
     if (up.error) throw up.error;
 
     const { data: pub } = sb.storage.from(config.supabase.bucket).getPublicUrl(storagePath);
-    const record = {
+    const record: Record<string, unknown> = {
       customer: meta.customer ?? null,
       invoice: meta.invoice ?? null,
       kind: meta.kind,
       filename,
       storage_path: storagePath,
       public_url: pub?.publicUrl ?? null,
+      declaration_id: meta.declarationId ?? null, // ผูกไฟล์กับใบเจาะจง (กันไฟล์ปนใบ invoice ซ้ำ)
     };
-    const ins = await sb.from("documents").insert(record).select().single();
-    if (ins.error) throw ins.error;
+    let ins = await sb.from("documents").insert(record).select().single();
+    if (ins.error) {
+      // คอลัมน์ declaration_id ยังไม่มี (ยังไม่รัน sql/09) → ลองใหม่โดยตัดคอลัมน์นั้นออก (กัน upload พัง)
+      const { declaration_id, ...legacy } = record;
+      ins = await sb.from("documents").insert(legacy).select().single();
+      if (ins.error) throw ins.error;
+    }
     return { filename };
   } catch (err) {
     console.error("[worker] uploadDocument error:", err);
