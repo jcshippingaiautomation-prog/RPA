@@ -799,18 +799,36 @@ app.post("/api/customer-settings", requireAdmin, async (req, res) => {
     presets?: { [k: string]: string };
     extraction_rules?: string;
     request_screenshot?: boolean;
+    split_field?: string;
+    cases?: unknown[];
   };
   const name = (body.customer_name ?? "").trim();
   if (!name) {
     res.status(400).json({ error: "ต้องระบุชื่อลูกค้า" });
     return;
   }
+  // sanitize cases (เก็บเฉพาะฟิลด์ที่รู้จัก)
+  const cases = Array.isArray(body.cases)
+    ? body.cases.map((raw) => {
+        const c = raw as Record<string, unknown>;
+        return {
+          name: String(c.name ?? ""),
+          match_value: String(c.match_value ?? ""),
+          allowed_fields: Array.isArray(c.allowed_fields) ? (c.allowed_fields as string[]) : [],
+          presets: (c.presets as { [k: string]: string }) ?? {},
+          extraction_rules: c.extraction_rules !== undefined ? String(c.extraction_rules) : "",
+          request_screenshot: !!c.request_screenshot,
+        };
+      })
+    : undefined;
   const ok = await upsertCustomerSetting({
     customer_name: name,
     allowed_fields: Array.isArray(body.allowed_fields) ? body.allowed_fields : [],
     presets: body.presets ?? {},
     extraction_rules: body.extraction_rules,
     request_screenshot: body.request_screenshot,
+    split_field: body.split_field,
+    cases,
   });
   res.json({ ok });
 });

@@ -1457,85 +1457,152 @@ function countActive(s, fields) {
   return `${on}/${fields.length}`;
 }
 
+// ช่องที่ใช้ "แยกกรณี" ได้ (split field)
+const SPLIT_FIELD_OPTIONS = [
+  ["", "— ไม่แยกกรณี —"],
+  ["consignee_name", "Consignee (ผู้ซื้อ)"],
+  ["destination_country_code", "ประเทศปลายทาง"],
+];
+// คืน config object ตาม caseIdx: -1 = default (customer), 0..N = s.cases[idx] — ทุกตัวมี allowed(Set)/presets/rules/capture
+function cfgOf(s, ci) { return ci < 0 ? s : s.cases[ci]; }
+
 function renderCustomerSettings() {
   const c = $("rulesContainer");
   if (!custSettings.length) { c.innerHTML = '<p class="empty" style="padding:20px">ยังไม่มีลูกค้า — เพิ่มด้านบน</p>'; return; }
-
-  const rowHtml = (f, si, s) => {
-    const mode = fieldMode(s, f.key);
-    const preset = (s.presets[f.key] != null) ? String(s.presets[f.key]) : "";
-    return `<div class="cs-row ${mode === "off" ? "is-off" : ""}">
-      <span class="cs-flabel">${escapeHtml(f.label)}</span>
-      <select class="csMode sel sel-sm" data-s="${si}" data-f="${f.key}">
-        <option value="ai" ${mode === "ai" ? "selected" : ""}>จาก AI</option>
-        <option value="config" ${mode === "config" ? "selected" : ""}>กำหนดเอง</option>
-        <option value="off" ${mode === "off" ? "selected" : ""}>ไม่ใช้งาน</option>
-      </select>
-      <input class="csPreset inp" data-s="${si}" data-f="${f.key}" placeholder="ค่าที่กำหนด" value="${escapeHtml(preset)}" style="display:${mode === "config" ? "" : "none"}" /></div>`;
-  };
 
   // จัดช่องเป็นกลุ่มตามหน้า
   const byPage = {};
   ruleFields.forEach((f) => { const pg = f.page || 0; (byPage[pg] = byPage[pg] || []).push(f); });
   const pages = Object.keys(byPage).sort();
 
-  c.innerHTML = custSettings.map((s, si) => {
+  // แถวช่อง (mode + preset) — cfg = default หรือ case; ci ระบุปลายทางการเก็บค่า
+  const rowHtml = (f, si, ci, cfg) => {
+    const mode = fieldMode(cfg, f.key);
+    const preset = (cfg.presets[f.key] != null) ? String(cfg.presets[f.key]) : "";
+    return `<div class="cs-row ${mode === "off" ? "is-off" : ""}">
+      <span class="cs-flabel">${escapeHtml(f.label)}</span>
+      <select class="csMode sel sel-sm" data-s="${si}" data-c="${ci}" data-f="${f.key}">
+        <option value="ai" ${mode === "ai" ? "selected" : ""}>จาก AI</option>
+        <option value="config" ${mode === "config" ? "selected" : ""}>กำหนดเอง</option>
+        <option value="off" ${mode === "off" ? "selected" : ""}>ไม่ใช้งาน</option>
+      </select>
+      <input class="csPreset inp" data-s="${si}" data-c="${ci}" data-f="${f.key}" placeholder="ค่าที่กำหนด" value="${escapeHtml(preset)}" style="display:${mode === "config" ? "" : "none"}" /></div>`;
+  };
+  // บล็อก config 1 ชุด (3 หน้า + กฎสกัด) — ใช้ทั้ง default และแต่ละกรณี
+  const configBlock = (si, ci, cfg) => {
     const pagesHtml = pages.map((pg) => {
       const fields = byPage[pg];
-      const rows = fields.map((f) => rowHtml(f, si, s)).join("");
+      const rows = fields.map((f) => rowHtml(f, si, ci, cfg)).join("");
       return `<details class="cs-page">
         <summary><span class="cs-page-name">${escapeHtml(PAGE_NAMES[pg] || (pg == 0 ? "ทั่วไป" : "หน้า " + pg))}</span>
-          <span class="cs-count">ใช้ ${countActive(s, fields)}</span></summary>
+          <span class="cs-count">ใช้ ${countActive(cfg, fields)}</span></summary>
         <div class="cs-grid">${rows}</div></details>`;
     }).join("");
+    return `${pagesHtml}
+      <details class="cs-rules"><summary>กฎสกัด AI (Extraction Rules)</summary>
+        <textarea class="csRules inp" data-s="${si}" data-c="${ci}" rows="5">${escapeHtml(cfg.extraction_rules || "")}</textarea></details>`;
+  };
+
+  c.innerHTML = custSettings.map((s, si) => {
+    const splitOpts = SPLIT_FIELD_OPTIONS.map(([v, l]) =>
+      `<option value="${v}" ${(s.split_field || "") === v ? "selected" : ""}>${escapeHtml(l)}</option>`).join("");
+    const cases = Array.isArray(s.cases) ? s.cases : [];
+    // ส่วนกรณีย่อย (แสดงเมื่อเลือก split_field)
+    const casesHtml = !s.split_field ? "" : `
+      <div class="cs-cases">
+        <div class="cs-cases-head">กรณีย่อย (${cases.length}) — เลือกจากค่า "${escapeHtml(SPLIT_FIELD_OPTIONS.find(o => o[0] === s.split_field)?.[1] || s.split_field)}"</div>
+        ${cases.map((cc, ci) => `
+          <details class="cs-case">
+            <summary class="cs-case-sum">
+              <span class="cs-case-badge">กรณี ${ci + 1}</span>
+              <span class="cs-name">${escapeHtml(cc.name || cc.match_value || "(ยังไม่ตั้งชื่อ)")}</span>
+              <span class="cs-cust-actions">
+                <label class="chk-inline" onclick="event.stopPropagation()"><input type="checkbox" class="csCapture" data-s="${si}" data-c="${ci}" ${cc.request_screenshot ? "checked" : ""}/> ขอภาพหน้าจอ</label>
+                <button class="btn btn-ghost btn-xs csCaseDel" data-s="${si}" data-c="${ci}" onclick="event.stopPropagation()">ลบกรณี</button>
+              </span>
+            </summary>
+            <div class="cs-case-body">
+              <div class="cs-case-match">
+                <div class="fld"><label>ชื่อกรณี</label><input class="csCaseName inp" data-s="${si}" data-c="${ci}" value="${escapeHtml(cc.name || "")}" placeholder="เช่น DK&N VIETNAM" /></div>
+                <div class="fld"><label>ค่าที่ต้องตรง (${escapeHtml(SPLIT_FIELD_OPTIONS.find(o => o[0] === s.split_field)?.[1] || "")})</label><input class="csCaseMatch inp" data-s="${si}" data-c="${ci}" value="${escapeHtml(cc.match_value || "")}" placeholder="เช่น DK&N" /></div>
+              </div>
+              ${configBlock(si, ci, cc)}
+            </div>
+          </details>`).join("")}
+        <button class="btn btn-ghost btn-sm csAddCase" data-s="${si}">${svgIcon("plus", 12)} เพิ่มกรณี</button>
+      </div>`;
     return `<details class="cs-cust">
       <summary class="cs-cust-sum">
         <span class="cs-name">${escapeHtml(s.customer_name)}</span>
-        <span class="cs-cust-meta">ใช้ ${countActive(s, ruleFields)} ช่อง</span>
+        <span class="cs-cust-meta">ใช้ ${countActive(s, ruleFields)} ช่อง${s.split_field ? ` · ${cases.length} กรณี` : ""}</span>
         <span class="cs-cust-actions">
-          <label class="chk-inline" onclick="event.stopPropagation()"><input type="checkbox" class="csCapture" data-s="${si}" ${s.request_screenshot ? "checked" : ""}/> ขอภาพหน้าจอ</label>
+          <label class="chk-inline" onclick="event.stopPropagation()"><input type="checkbox" class="csCapture" data-s="${si}" data-c="-1" ${s.request_screenshot ? "checked" : ""}/> ขอภาพหน้าจอ</label>
           <button class="btn btn-ghost btn-xs csDel" data-s="${si}" onclick="event.stopPropagation()">ลบ</button>
         </span>
       </summary>
       <div class="cs-cust-body">
-        ${pagesHtml}
-        <details class="cs-rules"><summary>กฎสกัด AI (Extraction Rules)</summary>
-          <textarea class="csRules inp" data-s="${si}" rows="5">${escapeHtml(s.extraction_rules || "")}</textarea></details>
+        <div class="cs-split">
+          <label>แยกกรณีตาม</label>
+          <select class="csSplit sel sel-sm" data-s="${si}">${splitOpts}</select>
+          <span class="muted" style="font-size:12px">${s.split_field ? "ตั้งค่าด้านล่าง = กรณีเริ่มต้น (ใช้เมื่อไม่เข้ากรณีไหน)" : "เลือกช่องเพื่อแยกเป็นหลายกรณี"}</span>
+        </div>
+        ${s.split_field ? '<div class="cs-default-label">⚙ กรณีเริ่มต้น (default)</div>' : ""}
+        ${configBlock(si, -1, s)}
+        ${casesHtml}
       </div>
     </details>`;
   }).join("");
 
-  // dropdown 3 ค่า: ai / config / off
+  // dropdown 3 ค่า: ai / config / off — เขียนลง cfg ที่ระบุด้วย data-c
   c.querySelectorAll(".csMode").forEach((sel) => (sel.onchange = () => {
-    const s = custSettings[+sel.dataset.s], f = sel.dataset.f;
+    const cfg = cfgOf(custSettings[+sel.dataset.s], +sel.dataset.c), f = sel.dataset.f;
     const row = sel.closest(".cs-row");
     const input = row.querySelector(".csPreset");
     if (sel.value === "off") {
-      // ปิดใช้งาน: ออกจาก allowed + ลบ preset → RPA ไม่แตะช่องนี้
-      s.allowed.delete(f); delete s.presets[f];
-      if (input) { input.style.display = "none"; }
+      cfg.allowed.delete(f); delete cfg.presets[f];
+      if (input) input.style.display = "none";
       row.classList.add("is-off");
     } else {
-      s.allowed.add(f);
+      cfg.allowed.add(f);
       row.classList.remove("is-off");
       if (sel.value === "config") {
-        // กำหนดเอง: ต้องมี key ใน presets (แม้ค่าว่าง = ตั้งใจให้ว่าง)
-        if (!Object.prototype.hasOwnProperty.call(s.presets, f)) s.presets[f] = "";
+        if (!Object.prototype.hasOwnProperty.call(cfg.presets, f)) cfg.presets[f] = "";
         if (input) input.style.display = "";
       } else {
-        // จาก AI: ลบ preset ออก
-        delete s.presets[f];
+        delete cfg.presets[f];
         if (input) { input.style.display = "none"; input.value = ""; }
       }
     }
   }));
-  // เก็บค่า preset (รวมค่าว่าง — "กำหนดเอง ว่าง" = ตั้งใจล้างช่อง, ไม่ลบ key)
   c.querySelectorAll(".csPreset").forEach((el) => (el.oninput = () => {
-    const s = custSettings[+el.dataset.s];
-    s.presets[el.dataset.f] = el.value;
+    cfgOf(custSettings[+el.dataset.s], +el.dataset.c).presets[el.dataset.f] = el.value;
   }));
-  c.querySelectorAll(".csRules").forEach((el) => (el.oninput = () => { custSettings[+el.dataset.s].extraction_rules = el.value; }));
-  c.querySelectorAll(".csCapture").forEach((el) => (el.onchange = () => { custSettings[+el.dataset.s].request_screenshot = el.checked; }));
+  c.querySelectorAll(".csRules").forEach((el) => (el.oninput = () => {
+    cfgOf(custSettings[+el.dataset.s], +el.dataset.c).extraction_rules = el.value;
+  }));
+  c.querySelectorAll(".csCapture").forEach((el) => (el.onchange = () => {
+    cfgOf(custSettings[+el.dataset.s], +el.dataset.c).request_screenshot = el.checked;
+  }));
+  // เปลี่ยน "แยกกรณีตาม"
+  c.querySelectorAll(".csSplit").forEach((sel) => (sel.onchange = () => {
+    const s = custSettings[+sel.dataset.s];
+    s.split_field = sel.value;
+    if (s.split_field && !Array.isArray(s.cases)) s.cases = [];
+    renderCustomerSettings();
+  }));
+  // เพิ่มกรณี
+  c.querySelectorAll(".csAddCase").forEach((b) => (b.onclick = () => {
+    const s = custSettings[+b.dataset.s];
+    (s.cases = s.cases || []).push({ name: "", match_value: "", allowed: new Set(ruleFields.map((f) => f.key)), presets: {}, extraction_rules: "", request_screenshot: false });
+    renderCustomerSettings();
+  }));
+  c.querySelectorAll(".csCaseName").forEach((el) => (el.oninput = () => { custSettings[+el.dataset.s].cases[+el.dataset.c].name = el.value; }));
+  c.querySelectorAll(".csCaseMatch").forEach((el) => (el.oninput = () => { custSettings[+el.dataset.s].cases[+el.dataset.c].match_value = el.value; }));
+  c.querySelectorAll(".csCaseDel").forEach((b) => (b.onclick = async () => {
+    const s = custSettings[+b.dataset.s];
+    if (!(await confirmDialog(`ลบกรณี <b>${escapeHtml(s.cases[+b.dataset.c].name || s.cases[+b.dataset.c].match_value || "")}</b>?`, "ลบกรณี"))) return;
+    s.cases.splice(+b.dataset.c, 1); renderCustomerSettings();
+  }));
   c.querySelectorAll(".csDel").forEach((b) => (b.onclick = async () => {
     const s = custSettings[+b.dataset.s];
     if (!(await confirmDialog(`ลบการตั้งค่าของ <b>${escapeHtml(s.customer_name)}</b>?`, "ลบลูกค้า"))) return;
@@ -1571,6 +1638,12 @@ async function loadRules() {
       // default = จาก AI: ถ้าลูกค้ายังไม่เคยตั้ง allowed_fields → เปิดทุกช่อง (จาก AI)
       allowed: new Set((s.allowed_fields && s.allowed_fields.length) ? s.allowed_fields : allKeys),
       presets: { ...(s.presets || {}) }, extraction_rules: s.extraction_rules || "", request_screenshot: !!s.request_screenshot,
+      split_field: s.split_field || "",
+      cases: (Array.isArray(s.cases) ? s.cases : []).map((cc) => ({
+        name: cc.name || "", match_value: cc.match_value || "",
+        allowed: new Set((cc.allowed_fields && cc.allowed_fields.length) ? cc.allowed_fields : allKeys),
+        presets: { ...(cc.presets || {}) }, extraction_rules: cc.extraction_rules || "", request_screenshot: !!cc.request_screenshot,
+      })),
     }));
     renderCustomerSettings();
   } catch (e) { note.textContent = "โหลดไม่ได้: " + e.message; }
@@ -1579,14 +1652,23 @@ $("btnAddCustomer").onclick = () => {
   const inp = $("newCustomer"), name = inp.value.trim();
   if (!name) { toast("ใส่ชื่อลูกค้าก่อน", "error"); return; }
   if (custSettings.some((s) => s.customer_name.toUpperCase() === name.toUpperCase())) { toast("มีลูกค้านี้แล้ว", "error"); return; }
-  custSettings.unshift({ customer_name: name, allowed: new Set(ruleFields.map((f) => f.key)), presets: {}, extraction_rules: "", request_screenshot: false });
+  custSettings.unshift({ customer_name: name, allowed: new Set(ruleFields.map((f) => f.key)), presets: {}, extraction_rules: "", request_screenshot: false, split_field: "", cases: [] });
   inp.value = ""; renderCustomerSettings();
 };
 $("btnReloadRules").onclick = loadRules;
 $("btnSaveRules").onclick = async () => {
   try {
     for (const s of custSettings)
-      await api("/api/customer-settings", "POST", { customer_name: s.customer_name, allowed_fields: [...s.allowed], presets: s.presets, extraction_rules: s.extraction_rules || "", request_screenshot: !!s.request_screenshot });
+      await api("/api/customer-settings", "POST", {
+        customer_name: s.customer_name, allowed_fields: [...s.allowed], presets: s.presets,
+        extraction_rules: s.extraction_rules || "", request_screenshot: !!s.request_screenshot,
+        split_field: s.split_field || "",
+        cases: (s.cases || []).map((cc) => ({
+          name: cc.name || "", match_value: cc.match_value || "",
+          allowed_fields: [...cc.allowed], presets: cc.presets,
+          extraction_rules: cc.extraction_rules || "", request_screenshot: !!cc.request_screenshot,
+        })),
+      });
     const sv = $("rulesSaved"); sv.style.display = "inline"; setTimeout(() => (sv.style.display = "none"), 2000);
     toast("บันทึกการตั้งค่าลูกค้าแล้ว", "success");
   } catch (e) { toast("บันทึกไม่สำเร็จ: " + e.message, "error"); }
