@@ -251,8 +251,10 @@ body {
 .cs-split { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; background: #f4f7fc; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; }
 .cs-split label { font-size: 13px; font-weight: 600; color: var(--text); }
 .cs-default-label { font-size: 12px; font-weight: 700; color: var(--muted2); margin: 4px 0 8px; }
+.cs-add-case-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
 .cs-cases { margin-top: 14px; border-top: 2px dashed var(--border); padding-top: 12px; }
-.cs-cases-head { font-size: 13px; font-weight: 700; color: var(--primary); margin-bottom: 10px; }
+.cs-cases-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; font-weight: 700; color: var(--primary); margin-bottom: 10px; }
+.cs-split-inline { font-size: 12px; font-weight: 500; color: var(--muted2); display: inline-flex; align-items: center; gap: 6px; }
 .cs-case { border: 1px solid #cdd9f3; border-radius: 8px; margin-bottom: 10px; overflow: hidden; background: #fbfcff; }
 .cs-case > summary { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; list-style: none; }
 .cs-case > summary::-webkit-details-marker { display: none; }

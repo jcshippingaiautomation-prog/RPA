@@ -1506,13 +1506,16 @@ function renderCustomerSettings() {
   };
 
   c.innerHTML = custSettings.map((s, si) => {
-    const splitOpts = SPLIT_FIELD_OPTIONS.map(([v, l]) =>
-      `<option value="${v}" ${(s.split_field || "") === v ? "selected" : ""}>${escapeHtml(l)}</option>`).join("");
     const cases = Array.isArray(s.cases) ? s.cases : [];
-    // ส่วนกรณีย่อย (แสดงเมื่อเลือก split_field)
-    const casesHtml = !s.split_field ? "" : `
+    const splitRealOpts = SPLIT_FIELD_OPTIONS.filter(o => o[0]).map(([v, l]) =>
+      `<option value="${v}" ${(s.split_field || "consignee_name") === v ? "selected" : ""}>${escapeHtml(l)}</option>`).join("");
+    // ส่วนกรณีย่อย (แสดงเมื่อมีอย่างน้อย 1 กรณี) — split dropdown อยู่ในหัวข้อ
+    const casesHtml = !cases.length ? "" : `
       <div class="cs-cases">
-        <div class="cs-cases-head">กรณีย่อย (${cases.length}) — เลือกจากค่า "${escapeHtml(SPLIT_FIELD_OPTIONS.find(o => o[0] === s.split_field)?.[1] || s.split_field)}"</div>
+        <div class="cs-cases-head">
+          <span>กรณีย่อย (${cases.length})</span>
+          <span class="cs-split-inline">แยกตาม <select class="csSplit sel sel-sm" data-s="${si}">${splitRealOpts}</select></span>
+        </div>
         ${cases.map((cc, ci) => `
           <details class="cs-case" data-key="${escapeHtml(s.customer_name)}::${ci}" ${csCaseOpen.has(s.customer_name + "::" + ci) ? "open" : ""}>
             <summary class="cs-case-sum">
@@ -1531,25 +1534,23 @@ function renderCustomerSettings() {
               ${configBlock(si, ci, cc)}
             </div>
           </details>`).join("")}
-        <button class="btn btn-ghost btn-sm csAddCase" data-s="${si}">${svgIcon("plus", 12)} เพิ่มกรณี</button>
       </div>`;
     return `<details class="cs-cust" data-cust="${escapeHtml(s.customer_name)}" ${csOpen.has(s.customer_name) ? "open" : ""}>
       <summary class="cs-cust-sum">
         <span class="cs-name">${escapeHtml(s.customer_name)}</span>
-        <span class="cs-cust-meta">ใช้ ${countActive(s, ruleFields)} ช่อง${s.split_field ? ` · ${cases.length} กรณี` : ""}</span>
+        <span class="cs-cust-meta">ใช้ ${countActive(s, ruleFields)} ช่อง${cases.length ? ` · ${cases.length} กรณี` : ""}</span>
         <span class="cs-cust-actions">
           <label class="chk-inline" onclick="event.stopPropagation()"><input type="checkbox" class="csCapture" data-s="${si}" data-c="-1" ${s.request_screenshot ? "checked" : ""}/> ขอภาพหน้าจอ</label>
           <button class="btn btn-ghost btn-xs csDel" data-s="${si}" onclick="event.stopPropagation()">ลบ</button>
         </span>
       </summary>
       <div class="cs-cust-body">
-        <div class="cs-split">
-          <label>แยกกรณีตาม</label>
-          <select class="csSplit sel sel-sm" data-s="${si}">${splitOpts}</select>
-          <span class="muted" style="font-size:12px">${s.split_field ? "ตั้งค่าด้านล่าง = กรณีเริ่มต้น (ใช้เมื่อไม่เข้ากรณีไหน)" : "เลือกช่องเพื่อแยกเป็นหลายกรณี"}</span>
-        </div>
-        ${s.split_field ? '<div class="cs-default-label">⚙ กรณีเริ่มต้น (default)</div>' : ""}
+        ${cases.length ? '<div class="cs-default-label">⚙ กรณีเริ่มต้น (default) — ใช้เมื่อไม่เข้ากรณีย่อยไหน</div>' : ""}
         ${configBlock(si, -1, s)}
+        <div class="cs-add-case-bar">
+          <button class="btn btn-primary btn-sm csAddCase" data-s="${si}">${svgIcon("plus", 13)} เพิ่มกรณี (ตั้งค่าเฉพาะเงื่อนไข)</button>
+          <span class="muted" style="font-size:12px">เช่น แยกตาม Consignee — บางผู้ซื้อใช้ preset/กฎต่างกัน</span>
+        </div>
         ${casesHtml}
       </div>
     </details>`;
@@ -1600,9 +1601,10 @@ function renderCustomerSettings() {
     csOpen.add(s.customer_name); // คงเปิดไว้
     renderCustomerSettings();
   }));
-  // เพิ่มกรณี — ลูกค้าเปิดค้าง + เปิดกรณีใหม่ให้กรอกต่อทันที
+  // เพิ่มกรณี — ตั้ง split เริ่มต้น (Consignee) ถ้ายังไม่มี + ลูกค้าเปิดค้าง + เปิดกรณีใหม่ให้กรอกต่อทันที
   c.querySelectorAll(".csAddCase").forEach((b) => (b.onclick = () => {
     const s = custSettings[+b.dataset.s];
+    if (!s.split_field) s.split_field = "consignee_name"; // default แยกตาม Consignee (เปลี่ยนได้ในหัวข้อกรณี)
     (s.cases = s.cases || []).push({ name: "", match_value: "", allowed: new Set(ruleFields.map((f) => f.key)), presets: {}, extraction_rules: "", request_screenshot: false });
     csOpen.add(s.customer_name);
     csCaseOpen.add(s.customer_name + "::" + (s.cases.length - 1)); // เปิดกรณีใหม่
