@@ -1443,6 +1443,8 @@ $("btnSaveCfg").onclick = async () => {
 
 // ---- Customer field rules (config/AI per field) ----
 let ruleFields = [], catalogFields = [], custSettings = [];
+let csOpen = new Set();       // ชื่อลูกค้าที่ accordion เปิดอยู่ (คงสถานะข้าม re-render)
+let csCaseOpen = new Set();   // "ลูกค้า::index" ของกรณีที่เปิดอยู่
 const PAGE_NAMES = { 1: "หน้า 1 — หัวใบขน", 2: "หน้า 2 — ใบกำกับ/Invoice", 3: "หน้า 3 — รายละเอียดสินค้า" };
 // โหมดของช่อง: ai = ใช้ค่า AI, config = กำหนดเอง, off = ไม่ใช้งาน(ไม่กรอก)
 function fieldMode(s, key) {
@@ -1512,7 +1514,7 @@ function renderCustomerSettings() {
       <div class="cs-cases">
         <div class="cs-cases-head">กรณีย่อย (${cases.length}) — เลือกจากค่า "${escapeHtml(SPLIT_FIELD_OPTIONS.find(o => o[0] === s.split_field)?.[1] || s.split_field)}"</div>
         ${cases.map((cc, ci) => `
-          <details class="cs-case">
+          <details class="cs-case" data-key="${escapeHtml(s.customer_name)}::${ci}" ${csCaseOpen.has(s.customer_name + "::" + ci) ? "open" : ""}>
             <summary class="cs-case-sum">
               <span class="cs-case-badge">กรณี ${ci + 1}</span>
               <span class="cs-name">${escapeHtml(cc.name || cc.match_value || "(ยังไม่ตั้งชื่อ)")}</span>
@@ -1531,7 +1533,7 @@ function renderCustomerSettings() {
           </details>`).join("")}
         <button class="btn btn-ghost btn-sm csAddCase" data-s="${si}">${svgIcon("plus", 12)} เพิ่มกรณี</button>
       </div>`;
-    return `<details class="cs-cust">
+    return `<details class="cs-cust" data-cust="${escapeHtml(s.customer_name)}" ${csOpen.has(s.customer_name) ? "open" : ""}>
       <summary class="cs-cust-sum">
         <span class="cs-name">${escapeHtml(s.customer_name)}</span>
         <span class="cs-cust-meta">ใช้ ${countActive(s, ruleFields)} ช่อง${s.split_field ? ` · ${cases.length} กรณี` : ""}</span>
@@ -1583,17 +1585,27 @@ function renderCustomerSettings() {
   c.querySelectorAll(".csCapture").forEach((el) => (el.onchange = () => {
     cfgOf(custSettings[+el.dataset.s], +el.dataset.c).request_screenshot = el.checked;
   }));
-  // เปลี่ยน "แยกกรณีตาม"
+  // จำสถานะเปิด/ปิด accordion (ลูกค้า + กรณี) ข้าม re-render — กัน "หน้าต่างยุบ" ตอนเลือก split/เพิ่มกรณี
+  c.querySelectorAll(".cs-cust").forEach((el) => (el.ontoggle = () => {
+    if (el.open) csOpen.add(el.dataset.cust); else csOpen.delete(el.dataset.cust);
+  }));
+  c.querySelectorAll(".cs-case").forEach((el) => (el.ontoggle = () => {
+    if (el.open) csCaseOpen.add(el.dataset.key); else csCaseOpen.delete(el.dataset.key);
+  }));
+  // เปลี่ยน "แยกกรณีตาม" — ลูกค้าเปิดค้างไว้ + กรณีย่อยโผล่ทันที
   c.querySelectorAll(".csSplit").forEach((sel) => (sel.onchange = () => {
     const s = custSettings[+sel.dataset.s];
     s.split_field = sel.value;
     if (s.split_field && !Array.isArray(s.cases)) s.cases = [];
+    csOpen.add(s.customer_name); // คงเปิดไว้
     renderCustomerSettings();
   }));
-  // เพิ่มกรณี
+  // เพิ่มกรณี — ลูกค้าเปิดค้าง + เปิดกรณีใหม่ให้กรอกต่อทันที
   c.querySelectorAll(".csAddCase").forEach((b) => (b.onclick = () => {
     const s = custSettings[+b.dataset.s];
     (s.cases = s.cases || []).push({ name: "", match_value: "", allowed: new Set(ruleFields.map((f) => f.key)), presets: {}, extraction_rules: "", request_screenshot: false });
+    csOpen.add(s.customer_name);
+    csCaseOpen.add(s.customer_name + "::" + (s.cases.length - 1)); // เปิดกรณีใหม่
     renderCustomerSettings();
   }));
   c.querySelectorAll(".csCaseName").forEach((el) => (el.oninput = () => { custSettings[+el.dataset.s].cases[+el.dataset.c].name = el.value; }));
@@ -1601,7 +1613,7 @@ function renderCustomerSettings() {
   c.querySelectorAll(".csCaseDel").forEach((b) => (b.onclick = async () => {
     const s = custSettings[+b.dataset.s];
     if (!(await confirmDialog(`ลบกรณี <b>${escapeHtml(s.cases[+b.dataset.c].name || s.cases[+b.dataset.c].match_value || "")}</b>?`, "ลบกรณี"))) return;
-    s.cases.splice(+b.dataset.c, 1); renderCustomerSettings();
+    s.cases.splice(+b.dataset.c, 1); csOpen.add(s.customer_name); renderCustomerSettings();
   }));
   c.querySelectorAll(".csDel").forEach((b) => (b.onclick = async () => {
     const s = custSettings[+b.dataset.s];
