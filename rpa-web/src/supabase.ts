@@ -253,12 +253,66 @@ export const RULE_FIELDS: { key: string; label: string }[] = [
   { key: "exdec_doc_type", label: "ชนิดเอกสารใบขนขาออก (Page 1)" },
 ];
 
-export interface CustomerSetting {
-  customer_name: string;
+/** 1 กรณีย่อยของลูกค้า (เลือกด้วยค่าของ split_field) — override config ของ default */
+export interface CustomerCase {
+  name: string;                            // ชื่อกรณี เช่น "DK&N VIETNAM"
+  match_value: string;                     // ค่าที่ต้องตรงกับ split_field (เช่น consignee = "DK&N")
   allowed_fields: string[];
   presets: { [field: string]: string };
   extraction_rules?: string;
   request_screenshot?: boolean;
+}
+export interface CustomerSetting {
+  customer_name: string;
+  allowed_fields: string[];                // = กรณีเริ่มต้น (default)
+  presets: { [field: string]: string };
+  extraction_rules?: string;
+  request_screenshot?: boolean;
+  split_field?: string;                    // ช่องที่ใช้แยกกรณี ("" = ไม่แยก)
+  cases?: CustomerCase[];
+}
+
+/** config ที่ resolve แล้ว (default หรือ กรณีที่ match) */
+export interface EffectiveConfig {
+  case_name: string;                       // "" = default
+  allowed_fields: string[];
+  presets: { [field: string]: string };
+  extraction_rules: string;
+  request_screenshot: boolean;
+}
+/**
+ * เลือก config ที่ใช้จริงจาก setting ตามค่าของ split_field ใน record
+ *   - split_field ว่าง/ไม่มี cases → ใช้ default (คอลัมน์เดิม)
+ *   - มี cases → หา case ที่ match_value ตรงกับ record[split_field] (ไม่สนตัวพิมพ์ + contains 2 ทาง)
+ *   - ไม่เข้ากรณีไหน → default
+ */
+export function selectCaseConfig(
+  s: CustomerSetting,
+  record: { [k: string]: unknown },
+): EffectiveConfig {
+  const def: EffectiveConfig = {
+    case_name: "",
+    allowed_fields: s.allowed_fields ?? [],
+    presets: s.presets ?? {},
+    extraction_rules: s.extraction_rules ?? "",
+    request_screenshot: !!s.request_screenshot,
+  };
+  const field = (s.split_field ?? "").trim();
+  if (!field || !Array.isArray(s.cases) || !s.cases.length) return def;
+  const val = String(record[field] ?? "").trim().toLowerCase();
+  if (!val) return def;
+  const matched = s.cases.find((c) => {
+    const mv = String(c.match_value ?? "").trim().toLowerCase();
+    return mv && (val === mv || val.includes(mv) || mv.includes(val));
+  });
+  if (!matched) return def;
+  return {
+    case_name: matched.name || matched.match_value || "",
+    allowed_fields: matched.allowed_fields ?? [],
+    presets: matched.presets ?? {},
+    extraction_rules: matched.extraction_rules ?? "",
+    request_screenshot: !!matched.request_screenshot,
+  };
 }
 
 /** อ่าน customer settings ทั้งหมด (allowed_fields + presets + extraction_rules) */
@@ -268,7 +322,7 @@ export async function listCustomerSettings(): Promise<CustomerSetting[]> {
   try {
     const { data, error } = await sb
       .from("customer_settings")
-      .select("customer_name, allowed_fields, presets, extraction_rules, request_screenshot")
+      .select("customer_name, allowed_fields, presets, extraction_rules, request_screenshot, split_field, cases")
       .order("customer_name", { ascending: true });
     if (error) throw error;
     return (data ?? []).map((r) => ({
@@ -277,6 +331,8 @@ export async function listCustomerSettings(): Promise<CustomerSetting[]> {
       presets: r.presets ?? {},
       extraction_rules: r.extraction_rules ?? "",
       request_screenshot: r.request_screenshot ?? false,
+      split_field: r.split_field ?? "",
+      cases: Array.isArray(r.cases) ? r.cases : [],
     })) as CustomerSetting[];
   } catch (err) {
     console.error("[supabase] listCustomerSettings error:", errMsg(err));
@@ -298,10 +354,17 @@ export async function upsertCustomerSetting(s: CustomerSetting): Promise<boolean
     // อัปเดต extraction_rules เฉพาะเมื่อส่งมา (กันเขียนทับด้วยค่าว่างโดยไม่ตั้งใจ)
     if (s.extraction_rules !== undefined) row.extraction_rules = s.extraction_rules;
     if (s.request_screenshot !== undefined) row.request_screenshot = s.request_screenshot;
-    const { error } = await sb
+    if (s.split_field !== undefined) row.split_field = s.split_field;
+    if (s.cases !== undefined) row.cases = s.cases;
+    let { error } = await sb
       .from("customer_settings")
       .upsert(row, { onConflict: "customer_name" });
-    if (error) throw error;
+    if (error) {
+      // คอลัมน์ split_field/cases ยังไม่มี (ยังไม่รัน sql/10) → ลองใหม่โดยตัดออก (กันบันทึกพัง)
+      delete row.split_field; delete row.cases;
+      ({ error } = await sb.from("customer_settings").upsert(row, { onConflict: "customer_name" }));
+      if (error) throw error;
+    }
     return true;
   } catch (err) {
     console.error("[supabase] upsertCustomerSetting error:", errMsg(err));
@@ -333,23 +396,15 @@ export async function deleteCustomerSetting(customerName: string): Promise<boole
  */
 export async function getExtractionRulesByKeyword(
   keyword: string,
-): Promise<{ customer_name: string; extraction_rules: string } | null> {
+): Promise<CustomerSetting | null> {
   const sb = getClient();
   if (!sb || !keyword) return null;
   try {
-    const { data, error } = await sb
-      .from("customer_settings")
-      .select("customer_name, extraction_rules");
-    if (error) throw error;
+    const all = await listCustomerSettings();
     const kw = keyword.trim().toUpperCase();
-    for (const row of data ?? []) {
-      const cn = String(row.customer_name || "").trim().toUpperCase();
-      if (cn && (cn === kw || cn.includes(kw) || kw.includes(cn))) {
-        return {
-          customer_name: row.customer_name,
-          extraction_rules: row.extraction_rules || "",
-        };
-      }
+    for (const s of all) {
+      const cn = String(s.customer_name || "").trim().toUpperCase();
+      if (cn && (cn === kw || cn.includes(kw) || kw.includes(cn))) return s;
     }
     return null;
   } catch (err) {

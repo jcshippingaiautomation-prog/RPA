@@ -7,25 +7,41 @@ import path from "node:path";
 import { workerSupabase } from "./queue.js";
 import { config } from "./config.js";
 
+export interface CustomerCase {
+  name?: string;
+  match_value: string;
+  allowed_fields: string[];
+  presets: { [field: string]: string };
+  request_screenshot?: boolean;
+}
 export interface CustomerSetting {
   customer_name: string;
   allowed_fields: string[];
   presets: { [field: string]: string };
   request_screenshot?: boolean;
+  split_field?: string;
+  cases?: CustomerCase[];
 }
 
 /** อ่าน customer settings ทั้งหมด (สำหรับ build overrides เหมือน server.ts) */
 export async function listCustomerSettings(): Promise<CustomerSetting[]> {
   try {
-    const { data, error } = await workerSupabase()
-      .from("customer_settings")
-      .select("customer_name, allowed_fields, presets, request_screenshot");
-    if (error) throw error;
-    return (data ?? []).map((r) => ({
-      customer_name: r.customer_name,
-      allowed_fields: r.allowed_fields ?? [],
-      presets: r.presets ?? {},
-      request_screenshot: r.request_screenshot ?? false,
+    const sel = "customer_name, allowed_fields, presets, request_screenshot, split_field, cases";
+    let res = await workerSupabase().from("customer_settings").select(sel);
+    if (res.error) {
+      // คอลัมน์ split_field/cases ยังไม่มี (ยังไม่รัน sql/10) → เลือกแบบเดิม
+      res = await workerSupabase().from("customer_settings")
+        .select("customer_name, allowed_fields, presets, request_screenshot");
+      if (res.error) throw res.error;
+    }
+    const rows = (res.data ?? []) as Array<Record<string, unknown>>;
+    return rows.map((r): CustomerSetting => ({
+      customer_name: String(r.customer_name ?? ""),
+      allowed_fields: (r.allowed_fields as string[]) ?? [],
+      presets: (r.presets as { [k: string]: string }) ?? {},
+      request_screenshot: !!r.request_screenshot,
+      split_field: (r.split_field as string) ?? "",
+      cases: Array.isArray(r.cases) ? (r.cases as CustomerCase[]) : [],
     }));
   } catch (err) {
     console.error("[worker] listCustomerSettings error:", err);

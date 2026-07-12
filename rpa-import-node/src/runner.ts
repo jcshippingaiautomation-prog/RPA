@@ -71,6 +71,11 @@ export interface RunOptions {
    */
   presetsOverride?: { [customer: string]: { [field: string]: string } };
   /**
+   * หลายกรณีย่อยต่อลูกค้า (multi-case) — เลือกกรณีจากค่าของ split_field ใน record
+   *   ถ้ามีกรณีที่ match → ใช้ allowed/presets/capture ของกรณีนั้นแทน default
+   */
+  casesOverride?: { [customer: string]: CaseOverride };
+  /**
    * inspect mode: หยุดทีละหน้า + dump element (screenshot + JSON) ไม่กรอก/ไม่ Save
    * สำหรับสำรวจ element เพื่อ map ช่องต่อลูกค้า
    */
@@ -135,6 +140,29 @@ export async function loadConfig(): Promise<AppConfig> {
   }
 }
 
+/** 1 กรณีย่อยของลูกค้า (multi-case) — mirror rpa-web CustomerCase (เฉพาะฟิลด์ที่ RPA ใช้) */
+export interface CaseOverride {
+  split_field: string;   // ช่องที่ใช้แยกกรณี (DB key เช่น consignee_name)
+  cases: Array<{
+    name?: string;
+    match_value: string;
+    allowed_fields: string[];
+    presets: { [field: string]: string };
+    request_screenshot?: boolean;
+  }>;
+}
+/** เลือกกรณีที่ match จากค่าของ split_field ใน record — คืน null ถ้าไม่เข้ากรณีไหน */
+function pickCase(r: Record, cfg?: CaseOverride): CaseOverride["cases"][number] | null {
+  if (!cfg || !cfg.split_field || !Array.isArray(cfg.cases) || !cfg.cases.length) return null;
+  const internal = SHEET_HEADER_MAP[cfg.split_field] ?? cfg.split_field;
+  const val = String(r[internal] ?? "").trim().toLowerCase();
+  if (!val) return null;
+  return cfg.cases.find((c) => {
+    const mv = String(c.match_value ?? "").trim().toLowerCase();
+    return mv && (val === mv || val.includes(mv) || mv.includes(val));
+  }) ?? null;
+}
+
 /** ผูก field_rules + customer_rule + capture flag ให้แต่ละ record (Python _attach_rules) */
 async function attachRules(
   records: Record[],
@@ -142,6 +170,7 @@ async function attachRules(
   override?: { [customer: string]: string[] },
   captureOverride?: { [customer: string]: boolean },
   presetsOverride?: { [customer: string]: { [field: string]: string } },
+  casesOverride?: { [customer: string]: CaseOverride },
 ): Promise<void> {
   const gs = cfg.google_sheet;
 
@@ -177,10 +206,24 @@ async function attachRules(
     const cust = String(r.company_search ?? "");
     const fk = matchCustomerKey(cust, Object.keys(fieldRules));
     const ck = matchCustomerKey(cust, Object.keys(customerRules));
-    r.__field_rules__ = fk ? fieldRules[fk] : null;
     r.__customer_rule__ = ck ? (customerRules[ck] as Record) : {};
-    // capture: ใช้ override (Supabase) ก่อน ถ้าไม่มีค่อย fallback Google Sheet
-    if (captureOverride && Object.keys(captureOverride).length > 0) {
+    r.__download_dir__ = downloadDir;
+
+    // ---- เลือก "กรณีย่อย" (multi-case) จากค่า split_field — ถ้า match ใช้ config ของกรณีนั้นแทน default ----
+    const cok = casesOverride ? matchCustomerKey(cust, Object.keys(casesOverride)) : null;
+    const matchedCase = pickCase(r, cok ? casesOverride![cok] : undefined);
+
+    // field rules (allowed): กรณีที่ match ชนะ default
+    if (matchedCase) {
+      r.__field_rules__ = new Set(matchedCase.allowed_fields ?? []);
+    } else {
+      r.__field_rules__ = fk ? fieldRules[fk] : null;
+    }
+
+    // capture: กรณีที่ match ชนะ → default (Supabase) → Google Sheet
+    if (matchedCase) {
+      r.__capture_screenshots__ = !!matchedCase.request_screenshot;
+    } else if (captureOverride && Object.keys(captureOverride).length > 0) {
       const cak = matchCustomerKey(cust, Object.keys(captureOverride));
       r.__capture_screenshots__ = cak ? captureOverride[cak] : false;
     } else {
@@ -188,15 +231,14 @@ async function attachRules(
         ck ? customerRules[ck]["ร้องขอภาพหน้าจอ"] ?? "" : "",
       );
     }
-    r.__download_dir__ = downloadDir;
 
-    // เติม presets ต่อลูกค้า (Supabase) — "กำหนดเอง" override ค่า AI เสมอ (ตามนิยาม config)
+    // presets: กรณีที่ match ชนะ default (Supabase) — "กำหนดเอง" override ค่า AI เสมอ
     let presetCount = 0;
-    if (presetsOverride) {
-      const pk = matchCustomerKey(cust, Object.keys(presetsOverride));
-      const presets = pk ? presetsOverride[pk] : null;
-      if (presets) presetCount = applyPresetsToRecord(r, presets);
-    }
+    const effPresets = matchedCase
+      ? matchedCase.presets
+      : (presetsOverride ? presetsOverride[matchCustomerKey(cust, Object.keys(presetsOverride)) ?? ""] : null);
+    if (effPresets) presetCount = applyPresetsToRecord(r, effPresets);
+    if (matchedCase) log(`  🔀 กรณี '${matchedCase.name || matchedCase.match_value}' (${cust})`);
 
     log(
       `  rules('${cust}'): ` +
@@ -266,6 +308,7 @@ export async function previewRows(
     onLog?: LogSink;
     fieldRulesOverride?: { [c: string]: string[] };
     presetsOverride?: { [c: string]: { [field: string]: string } };
+    casesOverride?: { [c: string]: CaseOverride };
   } = {},
 ): Promise<RowInfo[]> {
   if (opts.onLog) setLogSink(opts.onLog);
@@ -273,7 +316,7 @@ export async function previewRows(
     const cfg: AppConfig = { ...(await loadConfig()), ...(opts.configOverrides ?? {}) };
     const records = await loadAllRecords(cfg);
     // apply rules + presets เพื่อให้ preview เห็นค่าครบ (เหมือนตอนรันจริง)
-    await attachRules(records, cfg, opts.fieldRulesOverride, undefined, opts.presetsOverride);
+    await attachRules(records, cfg, opts.fieldRulesOverride, undefined, opts.presetsOverride, opts.casesOverride);
 
     return records.map((r, i) => {
       const { customer, invoice } = rowLabel(r);
@@ -358,6 +401,7 @@ export async function runImport(opts: RunOptions = {}): Promise<RunResult> {
       opts.fieldRulesOverride,
       opts.captureOverride,
       opts.presetsOverride,
+      opts.casesOverride,
     );
 
     result.total = records.length;

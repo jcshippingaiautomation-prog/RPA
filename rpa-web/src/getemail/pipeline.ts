@@ -9,6 +9,7 @@ import {
   isSenderAllowed,
   getAllowlistSenders,
   getExtractionRulesByKeyword,
+  selectCaseConfig,
   insertDeclaration,
   uploadBytes,
 } from "../supabase.js";
@@ -68,15 +69,30 @@ export async function extractFromAttachments(
     if (keyword) log(`ระบุลูกค้า (AI): ${keyword}`);
   }
 
-  // ดึง extraction_rules ของลูกค้า (จับคู่ keyword) → ให้ AI ถอดตามกฎลูกค้านั้น
+  // ดึง setting ของลูกค้า (จับคู่ keyword) → ให้ AI ถอดตามกฎลูกค้านั้น
   const cs = keyword ? await getExtractionRulesByKeyword(keyword) : null;
   const rule = cs
     ? { Customer_Name: cs.customer_name, Extraction_Rules: cs.extraction_rules || "" }
     : (keyword ? { Customer_Name: keyword, Extraction_Rules: "" } : null);
 
+  // รอบ 1: สกัดด้วยกฎ default ของลูกค้า
   const raw = await extractDeclaration(files, rule, "");
-  const record = postProcess(raw);
+  let record = postProcess(raw);
   if (record._has_error) throw new Error("AI สกัดข้อมูลไม่สำเร็จ (parse ล้มเหลว)");
+
+  // เลือก "กรณีย่อย" จากค่า split_field (เช่น consignee) → ถ้ากรณีมีกฎสกัดต่างจาก default → สกัดรอบ 2
+  if (cs) {
+    const eff = selectCaseConfig(cs, record);
+    if (eff.case_name && eff.extraction_rules && eff.extraction_rules !== (cs.extraction_rules ?? "")) {
+      log(`เข้ากรณี "${eff.case_name}" → สกัดรอบ 2 ด้วยกฎของกรณีนี้`);
+      const raw2 = await extractDeclaration(files, { Customer_Name: cs.customer_name, Extraction_Rules: eff.extraction_rules }, "");
+      const rec2 = postProcess(raw2);
+      if (!rec2._has_error) record = rec2;
+    } else if (eff.case_name) {
+      log(`เข้ากรณี "${eff.case_name}" (ใช้กฎสกัดเดิม; preset/allowed จะใช้ตอน RPA)`);
+    }
+  }
+
   // ถ้า user เลือกลูกค้ามา → ใช้ชื่อนั้นเป็นหลัก (กัน AI สกัดชื่อเพี้ยน)
   const finalCustomer = cs?.customer_name || keyword || String(record.customer_name ?? "");
   if (finalCustomer) record.customer_name = finalCustomer;

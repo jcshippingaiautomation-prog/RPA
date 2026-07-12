@@ -12,7 +12,7 @@ import {
   markError,
   type JobRow,
 } from "./queue.js";
-import { listCustomerSettings, uploadDocument, setDeclarationStatus } from "./supa.js";
+import { listCustomerSettings, uploadDocument, setDeclarationStatus, type CustomerCase } from "./supa.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -31,18 +31,23 @@ async function runRpaImport(job: JobRow): Promise<void> {
   let fieldRulesOverride: { [c: string]: string[] } | undefined;
   let captureOverride: { [c: string]: boolean } | undefined;
   let presetsOverride: { [c: string]: { [field: string]: string } } | undefined;
+  let casesOverride: { [c: string]: { split_field: string; cases: CustomerCase[] } } | undefined;
   const settings = await listCustomerSettings();
   if (settings.length) {
     fieldRulesOverride = {};
     captureOverride = {};
     presetsOverride = {};
+    casesOverride = {};
     for (const s of settings) {
       fieldRulesOverride[s.customer_name] = s.allowed_fields;
       captureOverride[s.customer_name] = !!s.request_screenshot;
       presetsOverride[s.customer_name] = s.presets ?? {};
+      if (s.split_field && Array.isArray(s.cases) && s.cases.length) {
+        casesOverride[s.customer_name] = { split_field: s.split_field, cases: s.cases };
+      }
     }
     await appendLog(job.id, "log", {
-      line: `[WORKER] ใช้ field rules + presets + capture จาก Supabase (${settings.length} ลูกค้า)`,
+      line: `[WORKER] ใช้ field rules + presets + capture + cases จาก Supabase (${settings.length} ลูกค้า)`,
     });
   }
 
@@ -64,6 +69,7 @@ async function runRpaImport(job: JobRow): Promise<void> {
     fieldRulesOverride,
     captureOverride,
     presetsOverride,
+    casesOverride,
     onlyRows,
     onLog: (line) => void appendLog(job.id, "log", { line }),
     onRows: (rows: RowInfo[]) => void appendLog(job.id, "row", { rows }),
@@ -130,17 +136,21 @@ async function runRpaEdit(job: JobRow): Promise<void> {
   const configOverrides: Partial<AppConfig> = {};
   if (typeof payload.headless === "boolean") configOverrides.headless = payload.headless;
 
-  // build overrides เหมือน import (field rules + presets + capture)
+  // build overrides เหมือน import (field rules + presets + capture + cases)
   let fieldRulesOverride: { [c: string]: string[] } | undefined;
   let captureOverride: { [c: string]: boolean } | undefined;
   let presetsOverride: { [c: string]: { [field: string]: string } } | undefined;
+  let casesOverride: { [c: string]: { split_field: string; cases: CustomerCase[] } } | undefined;
   const settings = await listCustomerSettings();
   if (settings.length) {
-    fieldRulesOverride = {}; captureOverride = {}; presetsOverride = {};
+    fieldRulesOverride = {}; captureOverride = {}; presetsOverride = {}; casesOverride = {};
     for (const s of settings) {
       fieldRulesOverride[s.customer_name] = s.allowed_fields;
       captureOverride[s.customer_name] = !!s.request_screenshot;
       presetsOverride[s.customer_name] = s.presets ?? {};
+      if (s.split_field && Array.isArray(s.cases) && s.cases.length) {
+        casesOverride[s.customer_name] = { split_field: s.split_field, cases: s.cases };
+      }
     }
   }
 
@@ -155,6 +165,7 @@ async function runRpaEdit(job: JobRow): Promise<void> {
     fieldRulesOverride,
     captureOverride,
     presetsOverride,
+    casesOverride,
     onlyRows,
     onLog: (line) => void appendLog(job.id, "log", { line }),
     onRows: (rows: RowInfo[]) => void appendLog(job.id, "row", { rows }),
