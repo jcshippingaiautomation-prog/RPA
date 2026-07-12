@@ -152,6 +152,9 @@ body {
 .dt tbody td { border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
 .dt tbody tr:last-child td { border-bottom: none; }
 .dt tbody tr:hover { background: #fafbff; }
+/* แถวรายการใบขนคลิกได้ทั้งแถว → เปิดรายละเอียด */
+#listBody tr[data-id] { cursor: pointer; }
+#listBody tr[data-id]:hover { background: #f2f6ff; }
 .dt td.empty { text-align: center; color: var(--muted); padding: 40px; }
 .dt .w-chk { width: 40px; }
 .dt input[type=checkbox] { accent-color: var(--primary); width: 16px; height: 16px; }

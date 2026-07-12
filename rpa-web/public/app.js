@@ -232,6 +232,11 @@ function renderList() {
     </tr>`;
   }).join("");
   // events
+  // คลิกที่แถวตรงไหนก็เปิดรายละเอียด (ยกเว้นคลิกปุ่ม/checkbox/badge ที่คลิกได้ — ให้ตัวนั้นทำงานเอง)
+  body.querySelectorAll("tr[data-id]").forEach((tr) => (tr.onclick = (e) => {
+    if (e.target.closest("button, input, a, .st-clickable, label")) return;
+    openDetail(tr.dataset.id);
+  }));
   body.querySelectorAll(".actDetail").forEach((b) => (b.onclick = () => openDetail(b.dataset.id)));
   body.querySelectorAll(".errBadge").forEach((b) => (b.onclick = () => openDetail(b.dataset.id)));
   body.querySelectorAll(".partialBadge").forEach((b) => (b.onclick = () => openFiles(b.dataset.id)));
