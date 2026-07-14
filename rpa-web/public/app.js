@@ -376,8 +376,19 @@ async function openDetail(id, opts) {
   detailId = id;
   detailWizard = !!(opts && opts.wizard);
   const box = $("mdBody");
-  box.innerHTML = '<p class="muted">กำลังโหลด…</p>';
   $("modalDetail").style.display = "flex";
+  // เปิดทันทีจากข้อมูลในลิสต์ (โหลดมาแล้ว) → ไม่ต้องรอ API (แก้ "โหลดนาน" ของ free tier)
+  //   จากนั้น API จะเติมรายการสินค้า + validation ให้ครบ
+  const cached = DECLS.find((x) => x.id === id);
+  if (cached) {
+    $("mdTitle").textContent = `${detailWizard ? "ตรวจสอบ — " : ""}${cached.customer_name || "ใบขน"} ${cached.invoice_number ? "/ " + cached.invoice_number : ""}`;
+    renderDetailForm(cached, null, null);
+    const cachedRan = !!(cached.doc_status || String(cached.declaration_no ?? "").trim() || ["done", "partial", "running", "edited"].includes(cached.status));
+    loadDetailDocs(cached.customer_name, cached.invoice_number, cachedRan);
+    loadDetailDocImages(cached.customer_name, cached.invoice_number);
+  } else {
+    box.innerHTML = '<p class="muted">กำลังโหลด…</p>';
+  }
   try {
     const r = await api(`/api/declarations/${encodeURIComponent(id)}`);
     const d = r.declaration || {};
