@@ -734,19 +734,61 @@ async function loadDetailDocImages(customer, invoice) {
       const name = doc.filename || "เอกสาร";
       const lower = name.toLowerCase();
       let inner;
+      let excelId = "";
       if (/\.(png|jpe?g|gif|webp)$/i.test(lower)) {
         inner = `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" class="doc-img" alt="${escapeHtml(name)}" loading="lazy"></a>`;
       } else if (lower.endsWith(".pdf")) {
         // ซ่อน toolbar/navpane ของ PDF viewer ให้สะอาด + fit ความกว้าง (เลื่อนดูทุกหน้าในเฟรม)
         inner = `<iframe class="doc-frame" src="${url}#toolbar=0&navpanes=0&statusbar=0&view=FitH" title="${escapeHtml(name)}" loading="lazy"></iframe>`;
+      } else if (/\.(xlsx?|csv)$/i.test(lower)) {
+        // Excel/CSV → เรนเดอร์เป็นตาราง (SheetJS, client-side) โหลด async
+        excelId = "xls-" + Math.random().toString(36).slice(2, 9);
+        inner = `<div id="${excelId}" class="doc-excel"><div class="doc-empty">กำลังอ่าน Excel…</div></div>`;
       } else {
         inner = `<div class="doc-other">${svgIcon("file", 28)}<div style="margin:8px 0">ไฟล์นี้เปิดดูเป็นภาพไม่ได้ (${escapeHtml(name.split(".").pop() || "")})</div>
           <a class="btn btn-ghost btn-xs" href="${url}" target="_blank" rel="noopener">${svgIcon("file", 13)} เปิด/ดาวน์โหลด</a></div>`;
       }
+      if (excelId) setTimeout(() => renderExcelInto(excelId, url, name), 0);
       return `<div class="doc-file"><div class="doc-file-name">${svgIcon("file", 13)} ${escapeHtml(name)} <a href="${url}" target="_blank" rel="noopener" class="muted" style="margin-left:auto;text-decoration:none" title="เปิดเต็มจอ">↗</a></div>${inner}</div>`;
     }).join("");
   } catch (e) {
     pane.innerHTML = `<div class="doc-empty">โหลดเอกสารต้นฉบับไม่ได้: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+// โหลด SheetJS (xlsx) แบบ lazy — โหลดครั้งเดียวเมื่อมีไฟล์ Excel ให้แสดง (ไม่ถ่วงหน้าอื่น)
+let _xlsxPromise = null;
+function loadXlsxLib() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (_xlsxPromise) return _xlsxPromise;
+  _xlsxPromise = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "/xlsx.full.min.js";
+    s.onload = () => resolve(window.XLSX);
+    s.onerror = () => { _xlsxPromise = null; reject(new Error("โหลด xlsx lib ไม่ได้")); };
+    document.head.appendChild(s);
+  });
+  return _xlsxPromise;
+}
+// อ่านไฟล์ Excel/CSV → เรนเดอร์เป็นตาราง HTML (ทุกชีต) ลงใน element id
+async function renderExcelInto(elId, url, name) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  try {
+    const XLSX = await loadXlsxLib();
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("โหลดไฟล์ไม่ได้ (HTTP " + res.status + ")");
+    const buf = await res.arrayBuffer();
+    const wb = XLSX.read(buf, { type: "array" });
+    const parts = wb.SheetNames.map((sn) => {
+      const html = XLSX.utils.sheet_to_html(wb.Sheets[sn], { editable: false });
+      const tab = wb.SheetNames.length > 1 ? `<div class="xls-sheet-name">📄 ${escapeHtml(sn)}</div>` : "";
+      return tab + `<div class="xls-table">${html}</div>`;
+    });
+    el.innerHTML = parts.join("") || '<div class="doc-empty">ไฟล์ Excel ว่าง</div>';
+  } catch (e) {
+    el.innerHTML = `<div class="doc-other">${svgIcon("file", 24)}<div style="margin:8px 0">แสดง Excel ไม่ได้: ${escapeHtml(e.message)}</div>
+      <a class="btn btn-ghost btn-xs" href="${url}" target="_blank" rel="noopener">${svgIcon("file", 13)} ดาวน์โหลด</a></div>`;
   }
 }
 

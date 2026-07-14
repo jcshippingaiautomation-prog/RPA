@@ -306,6 +306,13 @@ body {
 .doc-img { width: 100%; display: block; }
 .doc-frame { width: 100%; height: 78vh; border: 0; display: block; background: #fff; }
 .doc-other { padding: 16px; text-align: center; font-size: 13px; color: var(--muted2); }
+/* Excel/CSV เรนเดอร์เป็นตาราง (SheetJS) */
+.doc-excel { max-height: 78vh; overflow: auto; background: #fff; }
+.xls-sheet-name { font-size: 12px; font-weight: 700; color: var(--muted2); padding: 8px 10px; background: #f4f7fc; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 1; }
+.xls-table { overflow-x: auto; }
+.xls-table table { border-collapse: collapse; font-size: 12px; width: max-content; min-width: 100%; }
+.xls-table td, .xls-table th { border: 1px solid #e2e6ee; padding: 4px 8px; white-space: nowrap; color: var(--text); }
+.xls-table tr:first-child td { background: #f7f9fc; font-weight: 600; }
 .doc-empty { padding: 24px; text-align: center; color: var(--muted); font-size: 13px; }
 
 /* ฟิลด์ในแผงข้อมูล */
