@@ -535,3 +535,6 @@ select.ms-mode.m-off { background: #f9eaea; color: var(--red); }
 /* ช่องบังคับตาม DCTK (กรอบเขียวในระบบต้นทาง) */
 .fld-req { color: var(--red); font-weight: 700; margin-left: 2px; }
 .reg-fld select.sel { width: 100%; }
+/* ยกเว้นตัวเลือกโหมดในฟอร์ม Master — ไม่งั้นมันกิน 100% จนช่องกรอกค่าหายไป
+   (แถวใน Master ใช้ .reg-fld ร่วมกับฟอร์มใบขน กฎบนจึงเลยมาโดนด้วย) */
+.reg-fld .ms-row select.ms-mode { width: 118px; flex: none; }

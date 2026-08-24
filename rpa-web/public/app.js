@@ -203,7 +203,10 @@ function ruleAttrs(f) {
 /** ช่องของหน้า/ขอบเขตที่ต้องการ — ใช้ formPage (หน้าในฟอร์มเรา) ไม่ใช่ page (หน้าใน DCTK)
  *  สิทธิประโยชน์ถูกแยกเป็นหน้า 4 ตามที่ตกลงกับลูกค้า แต่ RPA ยังกรอกที่หน้า 3 เหมือนเดิม */
 function regFields(pageNo, scope) {
-  return REGISTRY.filter((f) => (f.formPage ?? f.page) === pageNo && f.scope === scope);
+  return REGISTRY.filter((f) => (f.formPage ?? f.page) === pageNo && f.scope === scope
+    // ซ่อนช่อง "สถานะ/ประวัติการรับส่งข้อมูล" ของ DCTK (วัน/เวลาส่งกรมฯ, รหัสข้อผิดพลาด, จำนวนครั้งที่ส่ง)
+    //   เป็นผลลัพธ์หลังยื่น ไม่ใช่ข้อมูลที่คนกรอก — ข้อมูลยังอยู่ครบ RPA ยังกรอกเหมือนเดิม
+    && !f.system);
 }
 /** จัดกลุ่มตามหัวข้อ โดยคงลำดับเดิมใน registry */
 function regGroups(pageNo, scope) {

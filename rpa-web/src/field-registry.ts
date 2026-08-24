@@ -28,6 +28,8 @@ export interface FieldDef {
   ai: boolean;
   required: boolean;
   readonlyInDctk: boolean;
+  /** ช่องสถานะ/ประวัติของ DCTK — ซ่อนจากฟอร์ม แต่ข้อมูลยังเก็บและ RPA ยังกรอก */
+  system: boolean;
   dctkName: string;
   options: { value: string; text: string }[];
   catalogKey: string | null;
