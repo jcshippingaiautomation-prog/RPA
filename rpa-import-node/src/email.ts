@@ -87,7 +87,11 @@ export async function sendEmailWithPdf(
     });
   }
 
-  log(`email → ${e.recipient}`);
+  // ปลายทางทดสอบ: ตั้ง RPA_EMAIL_TO เพื่อส่งไปที่อื่นชั่วคราว โดยไม่ต้องแก้ config.json
+  // (config.json คือค่าที่ใช้งานจริง ไม่ควรแก้เพื่อทดสอบแล้วลืมแก้กลับ)
+  const to = (process.env.RPA_EMAIL_TO ?? "").trim() || e.recipient;
+  if (to !== e.recipient) log(`email: ใช้ปลายทางทดสอบจาก RPA_EMAIL_TO (ปกติคือ ${e.recipient})`);
+  log(`email → ${to}`);
   const transporter = nodemailer.createTransport({
     host: e.smtp_host,
     port: e.smtp_port,
@@ -97,7 +101,7 @@ export async function sendEmailWithPdf(
 
   await transporter.sendMail({
     from: e.sender,
-    to: e.recipient,
+    to,
     subject: e.subject ?? "แจ้งบันทึกข้อมูลในระบบ IXMPLE",
     text: buildEmailBody(record),
     attachments,
