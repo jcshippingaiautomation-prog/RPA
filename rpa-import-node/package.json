@@ -14,7 +14,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsc && mkdir -p dist/data && cp -f src/data/field-catalog.json dist/data/ 2>/dev/null || true",
+    "build": "tsc && mkdir -p dist/data && cp -f src/data/field-catalog.json src/data/field-registry.json src/data/field-rules.json dist/data/ 2>/dev/null || true",
     "start": "node dist/main.js",
     "dev": "tsx src/main.ts",
     "typecheck": "tsc --noEmit",

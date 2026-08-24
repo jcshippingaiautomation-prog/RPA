@@ -23,6 +23,7 @@ import {
   clearField,
   kendoPickDate,
 } from "./helpers.js";
+import { loadFieldRegistry, resolveSelector } from "./field-registry.js";
 import type { Record } from "./types.js";
 
 /**
@@ -111,6 +112,8 @@ function nowStamp(): string {
  *   - ช่องที่ไม่อยู่ใน set = "ปิดใช้งาน" → ไม่แตะเลย
  */
 function allowed(r: Record, sheetField: string): boolean {
+  // Master ตั้งช่องนี้ไว้ว่า "ไม่กรอก" (field_modes = 'off') → ชนะทุกกฎ ไม่แตะช่องนี้เลย
+  if (offField(r, sheetField)) return false;
   const rules = r.__field_rules__;
   if (rules === null || rules === undefined) return true;
   return rules.has(sheetField);
@@ -129,6 +132,95 @@ function shouldClearWhenEmpty(r: Record, sheetField: string): boolean {
 
 const isEmptyVal = (v: unknown) =>
   v === null || v === undefined || String(v).trim() === "";
+
+/** ช่องที่ Master สั่ง "ไม่กรอก" (field_modes = 'off') — มาจากคอลัมน์ declarations.field_modes */
+function offField(r: Record, key: string): boolean {
+  const off = r.__off_fields__ as Set<string> | undefined;
+  return !!off?.has(key);
+}
+
+/**
+ * ตัวกรอกอัตโนมัติจากทะเบียนช่อง (field-registry) — สำหรับ "ช่องที่ยังไม่มีคอลัมน์ใน DB"
+ * เช่น เลขที่ใบสั่งซื้อ, ที่อยู่ผู้ซื้อ, รหัสสิทธิพิเศษ, ประเทศต้นกำเนิด ฯลฯ
+ *
+ * หลักการที่ทำให้ปลอดภัยกับของเดิม:
+ *   1) แตะเฉพาะช่องที่ column = null → ช่องที่มีคอลัมน์ยังใช้ logic hard-code เดิม (พิสูจน์แล้วว่านิ่ง)
+ *   2) ข้ามช่อง computed ทั้งหมด → ไม่กรอกทับค่าที่ DCTK เติมเองจากรหัสสินค้า/พิกัด
+ *      (เคยพลาดตรงนี้: กรอก 0 ทับค่าประกัน → Message Validate → พิมพ์ใบขนไม่ออก)
+ *   3) กรอกเฉพาะช่องที่ "มีค่าจริง" ที่ผู้ใช้กรอก/Master กำหนด → ไม่มีค่า = ไม่แตะ
+ *   4) ช่องที่ Master ตั้ง 'off' → ข้าม
+ *   5) กรอกไม่สำเร็จ 1 ช่อง = log แล้วไปต่อ ไม่ให้ทั้งใบล้มเพราะช่องเสริม
+ *
+ * ⚠ ไม่ผูกกับ __field_rules__ (config ลูกค้าเดิม) เพราะ rules ครอบเฉพาะ 32 ช่องหลัก
+ *   ช่องใหม่จะถูกบล็อกหมดถ้าเอาไปผูก — ใช้ "มีค่า = ตั้งใจกรอก" เป็นเกณฑ์แทน
+ */
+export async function fillFromRegistry(
+  page: Page,
+  r: Record,
+  pageNo: 1 | 2 | 3,
+  scope: "header" | "item" = "header",
+  values?: { [k: string]: unknown },
+): Promise<void> {
+  const vals = values ?? (r.__extra_fields__ as { [k: string]: unknown } | undefined);
+  if (!vals || !Object.keys(vals).length) return;
+
+  const reg = await loadFieldRegistry();
+  // timeout สั้นสำหรับช่องเสริม (ปรับได้ผ่าน env ถ้าเน็ตช้า)
+  const SKIP_TIMEOUT_MS = Number(process.env.RPA_EXTRA_FIELD_TIMEOUT_MS ?? 4000);
+  const defaultTimeout = Number(process.env.RPA_DEFAULT_TIMEOUT_MS ?? 15000);
+  let filled = 0;
+  for (const f of reg) {
+    if (f.page !== pageNo || f.scope !== scope) continue;
+    if (f.computed || f.column) continue;              // (1)(2)
+    const val = vals[f.key];
+    if (isEmptyVal(val)) continue;                     // (3)
+    if (offField(r, f.key)) { log(`  ⏭ [ทะเบียนช่อง] ${f.label} — Master ตั้งไว้ว่าไม่กรอก`); continue; } // (4)
+    const sel = resolveSelector(f);
+    if (!sel) { log(`  ⚠ [ทะเบียนช่อง] ${f.label} — ไม่มี selector ข้าม`); continue; }
+
+    try {
+      const text = String(val).trim();
+      // ⚠ ช่องเสริมเป็น "ของแถม" — ถ้ากรอกไม่ได้ต้องข้ามเร็ว
+      //   ไม่งั้นแต่ละช่องกิน 15s (default timeout) รวมกันเป็นนาที ๆ ต่อใบ
+      //   ช่องที่ DCTK ปิดอยู่/ยังไม่มีตัวเลือก จะ timeout เป็นปกติ ไม่ใช่ error
+      const prevTimeout = SKIP_TIMEOUT_MS;
+      page.setDefaultTimeout(prevTimeout);
+      switch (f.type) {
+        case "combo":
+          await comboPick(page, sel, text);
+          break;
+        case "dropdown":
+          await kendoDropdownPick(page, sel, text);
+          break;
+        case "date":
+          await kendoPickDate(page, sel, text);
+          break;
+        case "checkbox": {
+          const on = /^(1|true|yes|y|on|ใช่)$/i.test(text);
+          await page.evaluate(
+            ({ s, v }: { s: string; v: boolean }) => {
+              const el = document.querySelector(s) as HTMLInputElement | null;
+              if (el && el.checked !== v) el.click();
+            },
+            { s: sel, v: on },
+          );
+          break;
+        }
+        default:
+          await clickThenType(page, sel, text, { commit: true });
+      }
+      filled++;
+      log(`  ✓ [ทะเบียนช่อง] ${f.label} = ${text.slice(0, 40)}`);
+    } catch (e) {                                      // (5)
+      const msg = e instanceof Error ? e.message : String(e);
+      const brief = /timeout/i.test(msg) ? "ช่องนี้ยังกรอกไม่ได้ (DCTK ปิดอยู่/ไม่มีตัวเลือก)" : msg.slice(0, 70);
+      log(`  ⏭ [ทะเบียนช่อง] ข้าม "${f.label}" — ${brief}`);
+    } finally {
+      page.setDefaultTimeout(defaultTimeout);          // คืน timeout เดิมให้ flow หลัก
+    }
+  }
+  if (filled) log(`  📋 กรอกช่องเสริมหน้า ${pageNo} (${scope}) สำเร็จ ${filled} ช่อง`);
+}
 
 /**
  * กรอก value ลง selector ตามนิยาม config:
@@ -300,13 +392,35 @@ export async function openPortfolioAndAdd(page: Page): Promise<void> {
  *   (รัน `RPA_INSPECT_EDIT=1 RPA_INSPECT_DECL_NO="<เลขใบ>" npm start` ก่อน)
  *   pattern ค้นใช้แนวเดียวกับ searchCompanyInPopup (พิมพ์→Enter→รอ grid→double-click แถว)
  */
+/**
+ * เดาว่าเลขที่ให้มาเป็นเลขชนิดไหน → จะได้กรองถูกคอลัมน์
+ *   DCTK0000xxxxx = เลขที่อ้างอิง (ระบบรันเอง)
+ *   A005-16905-.. หรือขึ้นต้นด้วยตัวเลขล้วนยาว = เลขที่ใบขนฯ
+ *   ที่เหลือ (DKN 22/2026, KPV08C, MEK1314) = เลขที่ใบกำกับสินค้าที่ลูกค้าใช้
+ */
+export function detectSearchColumn(value: string): { selector: string; label: string } {
+  const v = String(value ?? "").trim().toUpperCase();
+  if (/^DCTK\d+$/.test(v)) return { selector: S.SEL_DECL_SEARCH_REFERENCE, label: "เลขที่อ้างอิง" };
+  if (/^[A-Z]?\d{3,}-\d+/.test(v) || /^\d{10,}$/.test(v)) {
+    return { selector: S.SEL_DECL_SEARCH_INPUT, label: "เลขที่ใบขนฯ" };
+  }
+  return { selector: S.SEL_DECL_SEARCH_INVOICE, label: "เลขที่ใบกำกับสินค้า" };
+}
+
 export async function openDeclarationForEdit(page: Page, declNo: string): Promise<Page> {
-  log(`portfolio → ค้นใบ ${declNo} เพื่อแก้`);
+  const col = detectSearchColumn(declNo);
+  log(`portfolio → ค้นใบ ${declNo} (คอลัมน์ ${col.label}) เพื่อแก้`);
   // 1) เปิดหน้ารายการใบขน
   await page.click(S.SEL_PORTFOLIO_MENU);
   await sleep(5000);
-  // 2) filter คอลัมน์ "เลขที่ใบขนฯ" ด้วยเลขใบขน (Kendo grid filter — auto apply)
-  const filterBox = page.locator(S.SEL_DECL_SEARCH_INPUT).first();
+  // 2) filter คอลัมน์ที่ตรงกับชนิดเลข (Kendo grid filter — auto apply)
+  //    ถ้าคอลัมน์ที่เดาไว้ไม่มี ให้ถอยไปใช้คอลัมน์เลขที่ใบขนฯ (พฤติกรรมเดิม)
+  let searchSel = col.selector;
+  if (!(await page.locator(searchSel).count().catch(() => 0))) {
+    log(`  ⚠ ไม่พบช่องกรอง "${col.label}" — ใช้คอลัมน์เลขที่ใบขนฯ แทน`);
+    searchSel = S.SEL_DECL_SEARCH_INPUT;
+  }
+  const filterBox = page.locator(searchSel).first();
   await filterBox.waitFor({ state: "visible", timeout: 15000 });
   await filterBox.click();
   await filterBox.fill(declNo);
@@ -464,6 +578,9 @@ export async function fillPage1(page: Page, r: Record): Promise<void> {
   }
   await putDate(page, r, "etd", S.SEL_ETD_DATEPICKER, String(r.etd_date ?? ""));
 
+  // ---- ช่องเสริมจากทะเบียนช่อง (ช่องที่ยังไม่มีคอลัมน์ใน DB) — ทำท้ายสุดเสมอ
+  await fillFromRegistry(page, r, 1, "header");
+
   await captureIfRequested(page, r, "page1");
   if (r.__dry_run__) {
     log("  🧪 dry run: ข้ามการกด Save (Page 1)");
@@ -595,6 +712,10 @@ export async function fillPage2Fill(page: Page, r: Record): Promise<Page> {
   // น้ำหนัก (ช่องแยกฝั่งขวา — คนละ fieldset กับตารางราคา)
   await put(page, r, "net_weight_kg", S.SEL_TOTAL_NET, String(r.net_weight_kg ?? ""));   // น้ำหนักสุทธิรวม
   await put(page, r, "gross_weight_kg", S.SEL_TOTAL_GROSS, String(r.gross_weight_kg ?? "")); // น้ำหนักรวมหีบห่อ
+
+  // ---- ช่องเสริมจากทะเบียนช่อง (PO, เงื่อนไขชำระเงิน, ที่อยู่ผู้ซื้อ, หมายเหตุ ฯลฯ)
+  //   ทำหลังตารางราคา/น้ำหนักเสร็จ เพื่อไม่ให้ recalc ของ Kendo มารีเซ็ตค่าที่เพิ่งกรอก
+  await fillFromRegistry(page, r, 2, "header");
 
   // ✅ ตรวจค่าจริงก่อนเซฟ (รอบเดียวรู้ผล): _Freight ต้อง="USD", _FreightForeign ต้อง=จำนวนเงิน
   try {
@@ -824,6 +945,10 @@ async function fillOneGoodsItem(
   } else {
     log("  ⏭ ข้ามกรอกค่าประกันต่อ item (item ไม่มีค่าเฉพาะ) — คงค่าที่ DCTK เติมอัตโนมัติ (กัน 0 ทับ + กัน multi-item เกิน)");
   }
+
+  // ---- ช่องเสริมต่อรายการจากทะเบียนช่อง (รหัสสิทธิพิเศษ, ประเทศต้นกำเนิด, หมายเหตุรายการ ฯลฯ)
+  //   ⚠ ตัวกรอกนี้ข้ามช่อง computed ทั้งหมด (พิกัด/หน่วยหลังพิกัด/ราคาต่อหน่วย) ที่ DCTK เติมเอง
+  await fillFromRegistry(page, r, 3, "item", item.__extra_fields__ as { [k: string]: unknown } | undefined);
 
   // FOC (รายการของแถม) — Kendo DropDownList #NatureTrans (ปกติ "11-ไม่ใช่ของแถม")
   //   RPA_DUMP_FOC=1 → dump ตัวเลือก dropdown (ครั้งแรก) เพื่อหาค่าที่ถูกของ "ของแถม"

@@ -17,6 +17,8 @@ import {
 } from "rpa-import-node";
 
 import { config } from "./config.js";
+import { loadRegistry, rowToFields, splitRecord } from "./field-registry.js";
+import { applyTemplate } from "./master-template.js";
 import {
   listDocuments,
   listDocumentsFor,
@@ -48,11 +50,18 @@ import {
   subscribeJobLogs,
   getAppConfig,
   setAppConfig,
+  extraFieldsEnabled,
+  templatesEnabled,
+  listTemplates,
+  getTemplate,
+  saveTemplate,
+  deleteTemplate,
+  type FieldMode,
   type JobLogRow,
   type JobRow,
 } from "./supabase.js";
 import { summarizeJobError, extractLogLines } from "./job-error.js";
-import { validateDeclaration } from "./validate-declaration.js";
+import { validateDeclaration, validateDeclarationFull } from "./validate-declaration.js";
 import { runGet, getStatus as gasGetStatus, gasEnabled } from "./gas.js";
 import {
   initScheduler,
@@ -317,7 +326,7 @@ app.get("/api/declarations/:id", async (req, res) => {
     if (logs.length) errorSummary = summarizeJobError(logs);
   }
   // ตรวจข้อมูลก่อนรัน (แนบไปเลย ให้ modal โชว์ว่าครบ/ขาดอะไร ก่อน user กดรัน)
-  const validation = validateDeclaration(decl as Record<string, unknown> & { _items?: Record<string, unknown>[] });
+  const validation = await validateDeclarationFull(decl as Record<string, unknown> & { _items?: Record<string, unknown>[] });
   res.json({ ok: true, declaration: decl, errorSummary, validation });
 });
 
@@ -356,7 +365,7 @@ app.post("/api/declarations/:id/run", async (req, res) => {
     const force = !!(req.body && (req.body as { force?: boolean }).force);
     const declForCheck = await getDeclaration(id);
     if (declForCheck) {
-      const check = validateDeclaration(declForCheck as Record<string, unknown> & { _items?: Record<string, unknown>[] });
+      const check = await validateDeclarationFull(declForCheck as Record<string, unknown> & { _items?: Record<string, unknown>[] });
       if (!check.ok && !force) {
         res.status(422).json({ error: "ข้อมูลไม่ครบ — แก้ไขก่อนรัน", validation: check });
         return;
@@ -757,6 +766,134 @@ async function getFieldCatalog() {
 }
 app.get("/api/field-catalog", async (_req, res) => {
   res.json({ fields: await getFieldCatalog() });
+});
+
+// ---- Field registry (ทะเบียนช่องกรอกทั้งหมด 3 หน้า — ฟอร์มเรนเดอร์จากตัวนี้) ----
+app.get("/api/field-registry", async (_req, res) => {
+  const fields = await loadRegistry();
+  res.json({
+    fields,
+    // ให้ frontend รู้ว่า DB พร้อมเก็บช่องใหม่แล้วหรือยัง (ยังไม่รัน sql/11 = เก็บได้เฉพาะช่องเดิม)
+    extraFieldsReady: supabaseEnabled() ? await extraFieldsEnabled("declarations") : false,
+  });
+});
+
+// ---- กฎ/เงื่อนไขของ DCTK (ความยาวสูงสุด · ช่องบังคับ · ถ้า X แล้ว Y) ----
+app.get("/api/dctk-rules", async (_req, res) => {
+  const { loadDctkRules } = await import("./dctk-rules.js");
+  res.json(await loadDctkRules());
+});
+
+// ============================================================
+//  Master ข้อมูล (declaration_templates)
+// ============================================================
+app.get("/api/templates", async (req, res) => {
+  if (!supabaseEnabled()) { res.json({ enabled: false, templates: [] }); return; }
+  const customer = String(req.query.customer ?? "").trim();
+  res.json({
+    enabled: await templatesEnabled(),
+    templates: await listTemplates(customer || undefined),
+  });
+});
+
+app.get("/api/templates/:id", async (req, res) => {
+  const t = await getTemplate(String(req.params.id));
+  if (!t) { res.status(404).json({ error: "ไม่พบ Master นี้" }); return; }
+  res.json(t);
+});
+
+app.post("/api/templates", requireUser, async (req, res) => {
+  if (!supabaseEnabled() || !(await templatesEnabled())) {
+    res.status(400).json({ error: "ยังไม่ได้สร้างตาราง Master — โปรดรัน sql/11_extra_fields_and_masters.sql" });
+    return;
+  }
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const name = String(b.name ?? "").trim();
+  if (!name) { res.status(400).json({ error: "ต้องตั้งชื่อ Master ก่อน" }); return; }
+  const saved = await saveTemplate({
+    id: b.id ? String(b.id) : undefined,
+    name,
+    customer_name: String(b.customer_name ?? "").trim(),
+    description: b.description ? String(b.description) : null,
+    consignee_names: Array.isArray(b.consignee_names) ? (b.consignee_names as string[]) : [],
+    product_codes: Array.isArray(b.product_codes) ? (b.product_codes as string[]) : [],
+    priority: Number(b.priority ?? 0),
+    header: (b.header ?? {}) as Record<string, unknown>,
+    items: Array.isArray(b.items) ? (b.items as Record<string, unknown>[]) : [],
+    field_modes: (b.field_modes ?? {}) as { [k: string]: FieldMode },
+    is_default: !!b.is_default,
+  }, (req as Request & { user?: { id?: string } }).user?.id ?? null);
+  if (!saved) { res.status(500).json({ error: "บันทึก Master ไม่สำเร็จ" }); return; }
+  res.json(saved);
+});
+
+app.delete("/api/templates/:id", requireUser, async (req, res) => {
+  const ok = await deleteTemplate(String(req.params.id));
+  if (!ok) { res.status(500).json({ error: "ลบ Master ไม่สำเร็จ" }); return; }
+  res.json({ ok: true });
+});
+
+/** บันทึกใบขนที่มีอยู่ → เป็น Master (คัดลอกค่าทั้งหมด + รายการสินค้า) */
+app.post("/api/declarations/:id/save-as-template", requireUser, async (req, res) => {
+  const d = await getDeclaration(String(req.params.id));
+  if (!d) { res.status(404).json({ error: "ไม่พบใบขนนี้" }); return; }
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const header = await rowToFields(d, "header");
+  const items = await Promise.all(
+    ((d._items ?? []) as Record<string, unknown>[]).map((it) => rowToFields(it, "item")),
+  );
+  const saved = await saveTemplate({
+    name: String(b.name ?? `${d.customer_name ?? "Master"} — ${d.invoice_number ?? ""}`).trim(),
+    customer_name: String(b.customer_name ?? d.customer_name ?? "").trim(),
+    description: b.description ? String(b.description) : null,
+    // ผูกระดับ 2/3 ให้อัตโนมัติจากใบที่บันทึก (แก้ทีหลังได้ในหน้าคลัง Master)
+    consignee_names: Array.isArray(b.consignee_names)
+      ? (b.consignee_names as string[])
+      : (d.consignee_name ? [String(d.consignee_name)] : []),
+    product_codes: Array.isArray(b.product_codes)
+      ? (b.product_codes as string[])
+      : [...new Set(((d._items ?? []) as Record<string, unknown>[])
+          .map((it) => String(it.description_eng ?? "")).filter(Boolean))],
+    header,
+    items,
+    field_modes: (b.field_modes ?? {}) as { [k: string]: FieldMode },
+    is_default: !!b.is_default,
+  }, (req as Request & { user?: { id?: string } }).user?.id ?? null);
+  if (!saved) { res.status(500).json({ error: "บันทึก Master ไม่สำเร็จ" }); return; }
+  res.json(saved);
+});
+
+/** สร้างใบขนใหม่จาก Master (ค่าที่ผู้ใช้แก้ในฟอร์มส่งมาใน body.override ทับอีกชั้น) */
+app.post("/api/templates/:id/create-declaration", requireUser, async (req, res) => {
+  const tpl = await getTemplate(String(req.params.id));
+  if (!tpl) { res.status(404).json({ error: "ไม่พบ Master นี้" }); return; }
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const override = (b.override ?? {}) as Record<string, unknown> & { _items?: Record<string, unknown>[] };
+  // Master เป็นฐาน → ค่าที่ผู้ใช้แก้ในฟอร์มทับทีหลังเสมอ (ผู้ใช้ชนะ Master)
+  const applied = applyTemplate(tpl, {});
+  const record: Record<string, unknown> = { ...applied.record };
+  for (const [k, v] of Object.entries(override)) {
+    if (k === "_items") continue;
+    record[k] = v;
+  }
+  if (Array.isArray(override._items) && override._items.length) record._items = override._items;
+  // ชื่อลูกค้าอาจมาเป็น key ของ registry (cmp_name_thai) หรือชื่อคอลัมน์ (customer_name)
+  //   → แปลงเป็นสเปซคอลัมน์ก่อนตรวจ แล้วเติมกลับให้ record ด้วย
+  const asCols = await splitRecord(record, "header");
+  const customerName = String(
+    asCols.columns.customer_name ?? record.customer_name ?? tpl.customer_name ?? "",
+  ).trim();
+  if (!customerName) {
+    res.status(400).json({ error: "ต้องมีชื่อลูกค้า — ตั้งค่า 'ลูกค้า' ใน Master หรือกรอกในฟอร์มก่อน" });
+    return;
+  }
+  record.customer_name = customerName;
+  const created = await createDeclaration(record, {
+    source: "master",
+    fieldModes: applied.fieldModes,
+  });
+  if (!created) { res.status(500).json({ error: "สร้างใบขนไม่สำเร็จ" }); return; }
+  res.json({ ok: true, id: created.id, appliedFrom: tpl.name });
 });
 
 // ---- กฎสถานที่รับบรรทุก (loading) คำนวณจากสถานที่ตรวจปล่อย (release) — global config ----

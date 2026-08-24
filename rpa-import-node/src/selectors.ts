@@ -268,6 +268,15 @@ export const SEL_REPORT_SAVE_BTN =
 export const SEL_DECL_SEARCH_INPUT =
   (process.env.RPA_SEL_DECL_SEARCH ?? "").trim() ||
   'input[aria-label*="เลขที่ใบขนฯ"]'; // filter cell คอลัมน์ DeclarationNo
+// ── ช่องกรองคอลัมน์อื่นในหน้ารายการใบขน (ยืนยันจากการสำรวจจริง) ──
+//   คอลัมน์: [1] ReferenceNo "เลขที่อ้างอิง" · [2] InvoiceNoText "ใบกำกับสินค้า" · [4] DeclarationNo "เลขที่ใบขนฯ"
+//   ⚠ ลูกค้าส่ง "เลขที่ใบกำกับสินค้า" มาให้ (เลขบนเอกสารจริง) ไม่ใช่เลขอ้างอิงที่ระบบรันเอง
+export const SEL_DECL_SEARCH_INVOICE =
+  (process.env.RPA_SEL_DECL_SEARCH_INVOICE ?? "").trim() ||
+  'input[aria-label*="ใบกำกับสินค้า"]';
+export const SEL_DECL_SEARCH_REFERENCE =
+  (process.env.RPA_SEL_DECL_SEARCH_REF ?? "").trim() ||
+  'input[aria-label*="เลขที่อ้างอิง"]';
 // ปุ่มค้นหา (มีในหน้า portfolio)
 export const SEL_DECL_SEARCH_BTN =
   (process.env.RPA_SEL_DECL_SEARCH_BTN ?? "").trim() || "#btnSearch";

@@ -88,16 +88,32 @@ export function validateDeclaration(decl: Decl): ValidationResult {
     }
   });
 
-  // ตรวจผลรวมราคา item ตรงกับหัวใบไหม (DCTK ตรวจข้อนี้ → ถ้าไม่ตรง finalize ติด)
-  if (items.length) {
-    const sumItems = items.reduce((s, it) => s + num(it.amount), 0);
-    const head = num(decl.total_goods_amount);
-    if (head > 0 && sumItems > 0 && Math.abs(sumItems - head) > 1) {
-      add("warn", "total_goods_amount",
-        `ผลรวมราคารายการ (${sumItems.toLocaleString()}) ไม่เท่ากับมูลค่ารวมทั้งใบ (${head.toLocaleString()}) — DCTK จะ block ตอน finalize`);
-    }
-  }
+  // หมายเหตุ: การเทียบ "ผลรวมรายการ vs ยอดทั้งใบ" ย้ายไปที่ dctk-rules.ts (กฎกระทบยอด)
+  //   เพราะถอดมาจากหน้ารายงานจริงของกรมฯ (ExDec/ExCheckDiff) ครอบคลุมทั้ง
+  //   ราคา · ค่าประกัน · น้ำหนักสุทธิ · น้ำหนักรวมหีบห่อ · จำนวนหีบห่อ (ไม่ใช่แค่ราคา)
 
   const ok = !issues.some((i) => i.level === "error");
   return { ok, issues };
+}
+
+/**
+ * ตรวจแบบเต็ม = กฎจากประสบการณ์ (ข้างบน) + กฎจริงที่ถอดมาจากหน้าจอ DCTK
+ *   - ความยาวสูงสุดของแต่ละช่อง (DCTK ประกาศไว้เอง)
+ *   - ช่องที่ต้องเป็นตัวเลข
+ *   - ช่องที่ถูกปิดตามเงื่อนไข (เช่น Incoterms = CFR → ค่าประกันกรอกไม่ได้)
+ * ใช้แทน validateDeclaration ได้เลย (คืนรูปแบบเดียวกัน)
+ */
+export async function validateDeclarationFull(decl: Decl): Promise<ValidationResult> {
+  const base = validateDeclaration(decl);
+  try {
+    const [{ checkDctkRules }, { columnMap }] = await Promise.all([
+      import("./dctk-rules.js"),
+      import("./field-registry.js"),
+    ]);
+    const extra = await checkDctkRules(decl, await columnMap());
+    const issues = [...base.issues, ...extra];
+    return { ok: !issues.some((i) => i.level === "error"), issues };
+  } catch {
+    return base;                 // ไม่มีไฟล์กฎ → ใช้ผลเดิม (ไม่ทำให้ระบบล่ม)
+  }
 }

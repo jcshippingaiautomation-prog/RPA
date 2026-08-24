@@ -158,6 +158,199 @@ const PAGE_FIELDS = {
 // รายการ flat (ใช้กับ modal สร้างใหม่ + highlightFields) = ช่องหัวใบจริง (ตัด derived ที่คำนวณอัตโนมัติออก)
 const DECL_FIELDS = [...PAGE_FIELDS[1].fields, ...PAGE_FIELDS[2].fields].filter(([, , o]) => !(o && o.derived));
 
+// ============================================================
+//  ทะเบียนช่อง (field registry) — ช่องกรอกทั้งหมดของ DCTK 3 หน้า
+//  โหลดจาก /api/field-registry ตอนเปิดเว็บ → ฟอร์มเรนเดอร์จากตัวนี้
+//  เพิ่มช่องใหม่ = แก้ field-registry.json อย่างเดียว ไม่ต้องแตะโค้ดหน้าเว็บ
+// ============================================================
+let REGISTRY = [];              // ทุกช่อง
+let REG_READY = false;          // โหลดสำเร็จแล้วไหม (ไม่สำเร็จ = ใช้ฟอร์มเดิม)
+let REG_EXTRA_OK = false;       // DB พร้อมเก็บช่องใหม่แล้วไหม (รัน sql/11 หรือยัง)
+// กฎจริงของ DCTK (ถอดมาจากหน้าจอกรมฯ) — ความยาวสูงสุด / ช่องบังคับ / ถ้า X แล้ว Y
+let DCTK_RULES = { fields: [], dependencies: [] };
+let RULE_BY_KEY = new Map();    // "scope:key" → กฎ
+
+async function loadFieldRegistry() {
+  try {
+    const r = await api("/api/field-registry");
+    REGISTRY = Array.isArray(r.fields) ? r.fields : [];
+    REG_EXTRA_OK = !!r.extraFieldsReady;
+    REG_READY = REGISTRY.length > 0;
+  } catch { REG_READY = false; }
+  try {
+    DCTK_RULES = await api("/api/dctk-rules");
+    RULE_BY_KEY = new Map((DCTK_RULES.fields || []).map((f) => [`${f.scope}:${f.key}`, f]));
+  } catch { /* ไม่มีกฎก็ใช้ฟอร์มได้ปกติ */ }
+}
+
+/** กฎของช่องหนึ่ง (ใช้ตั้ง maxlength + ข้อความช่วย) */
+function ruleOf(f) { return RULE_BY_KEY.get(`${f.scope}:${f.key}`); }
+
+/** attribute maxlength + title ตามกฎจริงของ DCTK */
+function ruleAttrs(f) {
+  const r = ruleOf(f);
+  if (!r) return "";
+  const parts = [];
+  if (r.maxLength) parts.push(`maxlength="${r.maxLength}"`);
+  const tips = [];
+  if (r.maxLength) tips.push(`ยาวได้ไม่เกิน ${r.maxLength} ตัวอักษร`);
+  if (r.dataType === "number") tips.push("ต้องเป็นตัวเลข");
+  if (r.requiredMessage) tips.push(`กรมฯ บังคับ: ${r.requiredMessage}`);
+  if (tips.length) parts.push(`title="${escapeHtml(tips.join(" · "))}"`);
+  return parts.join(" ");
+}
+
+/** ช่องของหน้า/ขอบเขตที่ต้องการ — ใช้ formPage (หน้าในฟอร์มเรา) ไม่ใช่ page (หน้าใน DCTK)
+ *  สิทธิประโยชน์ถูกแยกเป็นหน้า 4 ตามที่ตกลงกับลูกค้า แต่ RPA ยังกรอกที่หน้า 3 เหมือนเดิม */
+function regFields(pageNo, scope) {
+  return REGISTRY.filter((f) => (f.formPage ?? f.page) === pageNo && f.scope === scope);
+}
+/** จัดกลุ่มตามหัวข้อ โดยคงลำดับเดิมใน registry */
+function regGroups(pageNo, scope) {
+  const out = [];
+  for (const f of regFields(pageNo, scope)) {
+    let g = out.find((x) => x.title === f.group);
+    if (!g) { g = { title: f.group, fields: [] }; out.push(g); }
+    g.fields.push(f);
+  }
+  return out;
+}
+/** ค่าปัจจุบันของช่อง: คอลัมน์จริง หรือ extra_fields */
+function regValue(row, f) {
+  if (!row) return "";
+  const v = f.column ? row[f.column] : (row.extra_fields || {})[f.key];
+  return v == null ? "" : String(v);
+}
+/** แถวจาก DB → object ที่ key เป็น key ของ registry (ใช้แก้รายการสินค้า/สร้าง Master) */
+function rowToRegFields(row, scope) {
+  const out = {};
+  for (const f of REGISTRY) {
+    if (f.scope !== scope || f.computed) continue;
+    const v = regValue(row, f);
+    if (v !== "") out[f.key] = v;
+  }
+  return out;
+}
+
+// ช่องที่ควรกรอกหลายบรรทัด
+const REG_MULTILINE = new Set(["shipping_mark", "description_eng_field", "product_description_thai",
+  "item_shipping_mark", "other_charge_detail", "self_certification_remark", "note1", "item_remark"]);
+
+
+/**
+ * <select> จากตัวเลือกจริงที่สำรวจมาจาก DCTK
+ * ถ้าค่าปัจจุบันไม่อยู่ในรายการ (ข้อมูลเก่า/ค่าที่ AI สกัดมา) → ใส่เป็นตัวเลือกเพิ่มไว้ ไม่ให้ค่าหาย
+ */
+function regSelectHtml(f, val, cls) {
+  const opts = f.options.map((o) => {
+    const v = o.value || o.text;
+    return `<option value="${escapeHtml(v)}" ${v === val ? "selected" : ""}>${escapeHtml(o.text || v)}</option>`;
+  });
+  const known = f.options.some((o) => (o.value || o.text) === val);
+  if (val && !known) opts.unshift(`<option value="${escapeHtml(val)}" selected>${escapeHtml(val)} (ค่าเดิม)</option>`);
+  if (!val) opts.unshift('<option value="" selected>— ไม่ระบุ —</option>');
+  else opts.unshift('<option value="">— ไม่ระบุ —</option>');
+  return `<select class="sel ${cls}" data-key="${f.key}">${opts.join("")}</select>`;
+}
+
+/** เรนเดอร์ 1 ช่องจากนิยาม registry */
+function renderRegField(f, row, cls) {
+  const val = escapeHtml(regValue(row, f));
+  const label = escapeHtml(f.label);
+  const req = f.required ? '<span class="fld-req" title="DCTK บังคับกรอกช่องนี้">*</span>' : "";
+  const hint = f.computed
+    ? '<span class="fld-auto" title="DCTK คำนวณ/เติมให้เอง — แก้ที่นี่ไม่มีผล">DCTK เติมเอง</span>'
+    : (f.fill ? "" : '<span class="fld-new" title="ยังไม่มีคอลัมน์เฉพาะใน DB — เก็บเป็นช่องเสริมและกรอกด้วยตัวกรอกทั่วไป">ช่องเสริม</span>');
+  const meta = `data-key="${f.key}" data-group="${escapeHtml(f.group)}" data-label="${label}" data-req="${f.required ? 1 : 0}"`;
+  const wrap = (inner, full) =>
+    `<div class="fld ${full ? "fld-full" : ""} reg-fld" ${meta}><label>${label}${req} ${hint}</label>${inner}</div>`;
+
+  if (f.computed) {
+    return wrap(`<input class="inp inp-auto" value="${val}" readonly tabindex="-1" />`, false);
+  }
+  if (REG_MULTILINE.has(f.key)) {
+    return wrap(`<textarea class="inp ${cls}" data-key="${f.key}" rows="3" placeholder="ใส่ได้หลายบรรทัดตามเอกสาร" ${ruleAttrs(f)}>${val}</textarea>`, true);
+  }
+  if (f.type === "checkbox") {
+    const on = /^(1|true|yes|y|on|ใช่)$/i.test(regValue(row, f));
+    return wrap(`<label class="switch switch-inline"><input type="checkbox" class="${cls} chk" data-key="${f.key}" ${on ? "checked" : ""} /><span>เปิด</span></label>`, false);
+  }
+  // ช่องที่ DCTK มีตัวเลือกตายตัว → เลือกจากรายการจริง (กันกรอกค่าที่ DCTK ไม่รู้จัก)
+  if (f.options && f.options.length) return wrap(regSelectHtml(f, val, cls), false);
+  const ph = f.type === "date" ? 'placeholder="dd/mm/yyyy"' : "";
+  return wrap(`<input type="text" class="inp ${cls}" data-key="${f.key}" value="${val}" ${ph} ${ruleAttrs(f)} />`, false);
+}
+
+/** แถบเครื่องมือค้น/กรองช่อง (ฟอร์มมี 130+ ช่อง — ต้องหาเจอเร็ว) */
+function regToolbar(pageNo) {
+  return `<div class="reg-toolbar" data-page="${pageNo}">
+    <input type="text" class="inp inp-sm reg-search" placeholder="🔍 ค้นชื่อช่อง เช่น ที่อยู่, ประกัน, พิกัด" />
+    <div class="reg-chips">
+      <button class="chip active" data-filter="all">ทุกช่อง</button>
+      <button class="chip" data-filter="filled">เฉพาะช่องที่มีค่า</button>
+      <button class="chip" data-filter="required">เฉพาะช่องบังคับ</button>
+      <button class="chip" data-filter="auto">เฉพาะช่องที่ระบบกรอกให้</button>
+    </div>
+  </div>`;
+}
+
+/** เรนเดอร์ทั้งหน้า (หัวใบ) จาก registry — จัดกลุ่มตามหัวข้อจริงในใบขน */
+function renderRegPage(pageNo, row, cls) {
+  const groups = regGroups(pageNo, "header");
+  if (!groups.length) return '<p class="muted">ไม่มีช่องในหน้านี้</p>';
+  return regToolbar(pageNo) + groups.map((g) => `
+    <div class="reg-group" data-group="${escapeHtml(g.title)}">
+      <div class="reg-group-title">${escapeHtml(g.title)} <span class="muted">(${g.fields.length})</span></div>
+      <div class="md-grid">${g.fields.map((f) => renderRegField(f, row, cls)).join("")}</div>
+    </div>`).join("");
+}
+
+/** ผูกเหตุการณ์ค้น/กรองช่อง ในขอบเขต root ที่ให้มา */
+function bindRegToolbar(root) {
+  root.querySelectorAll(".reg-toolbar").forEach((tb) => {
+    const panel = tb.parentElement;
+    const apply = () => {
+      const q = (tb.querySelector(".reg-search").value || "").trim().toLowerCase();
+      const mode = tb.querySelector(".chip.active")?.dataset.filter || "all";
+      panel.querySelectorAll(".reg-fld").forEach((fld) => {
+        const label = (fld.dataset.label || "").toLowerCase();
+        const group = (fld.dataset.group || "").toLowerCase();
+        const input = fld.querySelector("input, textarea");
+        const hasVal = input && (input.type === "checkbox" ? input.checked : String(input.value || "").trim() !== "");
+        const isAuto = !!fld.querySelector(".fld-auto") || !fld.querySelector(".fld-new");
+        let show = !q || label.includes(q) || group.includes(q);
+        if (show && mode === "filled") show = hasVal;
+        if (show && mode === "required") show = fld.dataset.req === "1";
+        if (show && mode === "auto") show = isAuto;
+        fld.style.display = show ? "" : "none";
+      });
+      // ซ่อนกลุ่มที่ไม่เหลือช่องเลย
+      panel.querySelectorAll(".reg-group").forEach((g) => {
+        const any = [...g.querySelectorAll(".reg-fld")].some((f) => f.style.display !== "none");
+        g.style.display = any ? "" : "none";
+      });
+    };
+    tb.querySelector(".reg-search").oninput = apply;
+    tb.querySelectorAll(".chip").forEach((c) => (c.onclick = () => {
+      tb.querySelectorAll(".chip").forEach((x) => x.classList.remove("active"));
+      c.classList.add("active");
+      apply();
+    }));
+  });
+}
+
+/** อ่านค่าที่ผู้ใช้กรอกในฟอร์ม registry (คืน object key = key ของ registry) */
+function collectRegValues(root, cls) {
+  const out = {};
+  root.querySelectorAll(`.${cls}`).forEach((el) => {
+    const k = el.dataset.key;
+    if (!k) return;
+    out[k] = el.type === "checkbox" ? (el.checked ? "1" : "") : String(el.value ?? "").trim();
+  });
+  return out;
+}
+
+
 let DECLS = [];      // รายการทั้งหมด (จาก /api/declarations)
 let selected = new Set();
 
@@ -460,11 +653,47 @@ function renderItemFieldCell(it, idx, k, label, opts) {
      <input class="inp it-edit" data-i="${idx}" data-key="${k}" value="${escapeHtml(it[k] != null ? String(it[k]) : "")}" />
    </div>`;
 }
-function renderItemCard(it, idx) {
+/** 1 ช่องของรายการสินค้า จากนิยาม registry (ค่าเก็บใน editItems[idx] แบบ key ของ registry) */
+function renderRegItemCell(it, idx, f) {
+  const label = escapeHtml(f.label);
+  const val = escapeHtml(it[f.key] != null ? String(it[f.key]) : "");
+  const full = REG_MULTILINE.has(f.key) ? "fld-full" : "";
+  if (f.computed) {
+    return `<div class="fld ${full}"><label>${label} <span class="fld-auto">DCTK เติมเอง</span></label>
+      <input class="inp inp-auto" value="${val}" readonly tabindex="-1" /></div>`;
+  }
+  const hint = (f.required ? '<span class="fld-req">*</span>' : "")
+    + (f.fill ? "" : '<span class="fld-new" title="ช่องเสริม — กรอกด้วยตัวกรอกทั่วไป">ช่องเสริม</span>');
+  if (f.options && f.options.length) {
+    return `<div class="fld"><label>${label} ${hint}</label>
+      ${regSelectHtml(f, val, "it-edit").replace('class="sel it-edit"', `class="sel it-edit" data-i="${idx}"`)}</div>`;
+  }
+  if (REG_MULTILINE.has(f.key)) {
+    return `<div class="fld fld-full"><label>${label} ${hint}</label>
+      <textarea class="inp it-edit" data-i="${idx}" data-key="${f.key}" rows="3">${val}</textarea></div>`;
+  }
+  if (f.type === "checkbox") {
+    const on = /^(1|true|yes|y|on|ใช่)$/i.test(String(it[f.key] ?? ""));
+    return `<div class="fld"><label>${label} ${hint}</label>
+      <label class="switch switch-inline"><input type="checkbox" class="it-chk" data-i="${idx}" data-key="${f.key}" ${on ? "checked" : ""} /><span>เปิด</span></label></div>`;
+  }
+  return `<div class="fld ${full}"><label>${label} ${hint}</label>
+    <input class="inp it-edit" data-i="${idx}" data-key="${f.key}" value="${val}" ${ruleAttrs(f)} /></div>`;
+}
+
+function renderItemCard(it, idx, formPage = 3) {
   let html = "";
-  for (const [k, label, opts] of ITEM_FIELDS) {
-    if (opts && opts.section) html += `<div class="item-sec-title fld-full">${escapeHtml(opts.section)}</div>`;
-    html += renderItemFieldCell(it, idx, k, label, opts);
+  if (REG_READY) {
+    // ช่องของรายการสินค้าในหน้าที่ระบุ (3 = ทั่วไป · 4 = สิทธิประโยชน์)
+    for (const g of regGroups(formPage, "item")) {
+      html += `<div class="item-sec-title fld-full">${escapeHtml(g.title)}</div>`;
+      for (const f of g.fields) html += renderRegItemCell(it, idx, f);
+    }
+  } else {
+    for (const [k, label, opts] of ITEM_FIELDS) {
+      if (opts && opts.section) html += `<div class="item-sec-title fld-full">${escapeHtml(opts.section)}</div>`;
+      html += renderItemFieldCell(it, idx, k, label, opts);
+    }
   }
   return `<div class="item-card">
     <div class="item-card-head">
@@ -477,29 +706,47 @@ function renderItemCard(it, idx) {
   </div>`;
 }
 
-function renderItemsTable() {
-  const cards = editItems.map((it, i) => renderItemCard(it, i)).join("")
-    || '<div class="muted" style="padding:6px 0">ยังไม่มีรายการสินค้า — กด "เพิ่มรายการ"</div>';
+function renderItemsTable(formPage = 3) {
+  const isP4 = formPage === 4;
+  const cards = editItems.map((it, i) => renderItemCard(it, i, formPage)).join("")
+    || '<div class="muted" style="padding:6px 0">ยังไม่มีรายการสินค้า — กด "เพิ่มรายการ" ในหน้า 3</div>';
+  const title = isP4
+    ? `สิทธิประโยชน์/ภาษีอากร — ต่อรายการสินค้า (${editItems.length})`
+    : `รายการสินค้า (${editItems.length})`;
+  const addBtn = isP4 ? "" : `<button class="btn btn-ghost btn-xs" id="itAdd">${svgIcon("plus", 12)} เพิ่มรายการ</button>`;
+  const note = isP4
+    ? '<p class="muted" style="margin:0 0 10px">ช่องเหล่านี้อยู่ในแท็บ "สิทธิประโยชน์/ภาษีอากร" ของหน้ารายการสินค้าในระบบกรมฯ · ตั้งค่าแยกได้ทีละรายการ</p>'
+    : "";
+  // ปุ่มบันทึกมีชุดเดียว (หน้า 3) — หน้า 4 แก้แล้วกดบันทึกที่หน้า 3 ได้เลย ข้อมูลชุดเดียวกัน
+  const saveBtn = isP4 ? "" : `<button class="btn btn-primary btn-sm" id="itSave" style="margin-top:10px">${svgIcon("save", 13)} บันทึกรายการสินค้า</button>
+    <span id="itSaved" class="saved" style="display:none">${svgIcon("check", 13)} บันทึกแล้ว</span>`;
   return `<div class="md-section">
-    <div class="md-section-title">รายการสินค้า (${editItems.length}) <button class="btn btn-ghost btn-xs" id="itAdd">${svgIcon("plus", 12)} เพิ่มรายการ</button></div>
-    <div class="item-cards" id="itBody">${cards}</div>
-    <button class="btn btn-primary btn-sm" id="itSave" style="margin-top:10px">${svgIcon("save", 13)} บันทึกรายการสินค้า</button>
-    <span id="itSaved" class="saved" style="display:none">${svgIcon("check", 13)} บันทึกแล้ว</span>
+    <div class="md-section-title">${title} ${addBtn}</div>
+    ${note}
+    <div class="item-cards" id="${isP4 ? "itBody4" : "itBody"}">${cards}</div>
+    ${saveBtn}
   </div>`;
 }
 
 function bindItemsEvents() {
-  const body = $("itBody");
-  if (!body) return;
-  body.querySelectorAll(".it-edit").forEach((el) => (el.oninput = () => { editItems[+el.dataset.i][el.dataset.key] = el.value; }));
-  body.querySelectorAll(".it-foc").forEach((el) => (el.onchange = () => { editItems[+el.dataset.i].is_foc = el.checked; }));
-  body.querySelectorAll(".it-del").forEach((b) => (b.onclick = () => { editItems.splice(+b.dataset.i, 1); refreshItemsTable(); }));
+  bindOneItemsBody($("itBody"));
+  bindOneItemsBody($("itBody4"));      // หน้า 4 = ข้อมูลชุดเดียวกัน คนละกลุ่มช่อง
   if ($("itAdd")) $("itAdd").onclick = () => { editItems.push({ description_eng: "", brand_name: "NO BRAND", is_foc: false }); refreshItemsTable(); };
   if ($("itSave")) $("itSave").onclick = saveItems;
 }
+function bindOneItemsBody(body) {
+  if (!body) return;
+  body.querySelectorAll(".it-edit").forEach((el) => (el.oninput = () => { editItems[+el.dataset.i][el.dataset.key] = el.value; }));
+  body.querySelectorAll(".it-foc").forEach((el) => (el.onchange = () => { editItems[+el.dataset.i].is_foc = el.checked; }));
+  body.querySelectorAll(".it-chk").forEach((el) => (el.onchange = () => { editItems[+el.dataset.i][el.dataset.key] = el.checked ? "1" : ""; }));
+  body.querySelectorAll(".it-del").forEach((b) => (b.onclick = () => { editItems.splice(+b.dataset.i, 1); refreshItemsTable(); }));
+}
 function refreshItemsTable() {
   const sec = $("itBody")?.closest(".md-section");
-  if (sec) { sec.outerHTML = renderItemsTable(); bindItemsEvents(); }
+  if (sec) sec.outerHTML = renderItemsTable(3);
+  const sec4 = $("itBody4")?.closest(".md-section");
+  if (sec4) sec4.outerHTML = renderItemsTable(4);
+  bindItemsEvents();
 }
 async function saveItems() {
   if (!detailId) return;
@@ -542,7 +789,9 @@ function renderPageFields(pageNo, d) {
   return PAGE_FIELDS[pageNo].fields.map(([k, label, opts]) => renderFieldCell(k, label, d, opts)).join("");
 }
 function renderDetailForm(d, errorSummary, validation) {
-  editItems = Array.isArray(d._items) ? d._items.map((it) => ({ ...it })) : [];
+  editItems = Array.isArray(d._items)
+    ? d._items.map((it) => (REG_READY ? { line_no: it.line_no, ...rowToRegFields(it, "item") } : { ...it }))
+    : [];
   // ใบนี้มีไฟล์ใบขน (ผลลัพธ์) ให้เปิดดูไหม — done/partial/มีเลขใบขน
   const declHasFile = !!(d.doc_status || d.status === "done" || d.status === "partial" || String(d.declaration_no ?? "").trim());
   // แบนเนอร์ขั้น wizard (แสดงเฉพาะตอนเข้ามาจากการอัปโหลด → ขั้นที่ 3 ตรวจสอบ)
@@ -554,9 +803,10 @@ function renderDetailForm(d, errorSummary, validation) {
   // แท็บ 3 หน้า ตาม DCTK (Page 1/2/3)
   const tabs = `
     <div class="md-tabs">
-      <button class="md-tab" data-page="1">หน้า 1 · ${escapeHtml(PAGE_FIELDS[1].title)}</button>
-      <button class="md-tab" data-page="2">หน้า 2 · ${escapeHtml(PAGE_FIELDS[2].title)}</button>
+      <button class="md-tab" data-page="1">หน้า 1 · ใบขนสินค้าขาออก</button>
+      <button class="md-tab" data-page="2">หน้า 2 · ใบกำกับสินค้า</button>
       <button class="md-tab" data-page="3">หน้า 3 · รายการสินค้า (${editItems.length})</button>
+      ${REG_READY ? '<button class="md-tab" data-page="4">หน้า 4 · สิทธิประโยชน์/ภาษีอากร</button>' : ""}
     </div>`;
   // ซ้าย = เอกสารต้นฉบับ (ภาพ) · ขวา = ข้อมูลที่สกัด (ตรวจ/แก้) แบ่งเป็น 3 แท็บ
   $("mdBody").innerHTML = `
@@ -575,9 +825,10 @@ function renderDetailForm(d, errorSummary, validation) {
         ${renderValidationBox(validation)}
         ${renderErrorBox(errorSummary, detailJobId)}
         ${tabs}
-        <div class="md-tabpanel" data-page="1"><div class="md-grid">${renderPageFields(1, d)}</div></div>
-        <div class="md-tabpanel" data-page="2"><div class="md-grid">${renderPageFields(2, d)}</div></div>
+        <div class="md-tabpanel" data-page="1">${renderDetailPage(1, d)}</div>
+        <div class="md-tabpanel" data-page="2">${renderDetailPage(2, d)}</div>
         <div class="md-tabpanel" data-page="3">${renderItemsTable()}</div>
+        ${REG_READY ? `<div class="md-tabpanel" data-page="4">${renderItemsTable(4)}</div>` : ""}
         <div class="md-section"><div class="md-section-title">📎 ไฟล์ผลลัพธ์ (ใบขน/แคปหน้าจอ)</div><div id="mdDocs" class="att-list muted">กำลังโหลด…</div></div>
       </div>
     </div>
@@ -585,6 +836,14 @@ function renderDetailForm(d, errorSummary, validation) {
   bindItemsEvents();
   bindErrorBox(detailJobId);
   bindDetailTabs();
+  bindRegToolbar($("mdBody"));
+}
+
+/** เนื้อหาแท็บหน้า 1/2 — ใช้ทะเบียนช่องถ้าโหลดได้ ไม่งั้น fallback ฟอร์มเดิม */
+function renderDetailPage(n, d) {
+  return REG_READY
+    ? renderRegPage(n, d, "md-edit")
+    : `<div class="md-grid">${renderPageFields(n, d)}</div>`;
 }
 // สลับแท็บหน้า 1/2/3 (โชว์ทีละหน้า) — ฟิลด์ทุกหน้ายังอยู่ใน DOM จึงบันทึกครบทุกหน้า
 function bindDetailTabs() {
@@ -1041,14 +1300,135 @@ const CREATE_FIELDS = [
   ["invoice_date", "วันที่ใบกำกับฯ"],
   ...DECL_FIELDS,
 ];
+let createPage = 1;         // แท็บที่เปิดอยู่ในฟอร์มสร้างใหม่
+let createItems = [];       // รายการสินค้าของใบที่กำลังสร้าง
+let createFromTemplateId = ""; // Master ที่เลือกเป็นฐาน ("" = เริ่มจากว่าง)
+
 function openCreate() {
-  $("crBody").innerHTML = `<div class="md-grid">${CREATE_FIELDS.map(([k, label]) => {
-    const rows = MULTILINE_FIELDS[k];
-    return rows
-      ? `<div class="fld fld-full"><label>${escapeHtml(label)}</label><textarea class="inp cr-edit" data-key="${k}" rows="${rows}" placeholder="ใส่ได้หลายบรรทัดตามเอกสาร"></textarea></div>`
-      : `<div class="fld"><label>${escapeHtml(label)}</label><input class="inp cr-edit" data-key="${k}" /></div>`;
-  }).join("")}</div>`;
+  createPage = 1;
+  createItems = [];
+  createFromTemplateId = "";
+  if (!REG_READY) {
+    // fallback: ฟอร์มเดิม (กรณีโหลดทะเบียนช่องไม่ได้)
+    $("crBody").innerHTML = `<div class="md-grid">${CREATE_FIELDS.map(([k, label]) => {
+      const rows = MULTILINE_FIELDS[k];
+      return rows
+        ? `<div class="fld fld-full"><label>${escapeHtml(label)}</label><textarea class="inp cr-edit" data-key="${k}" rows="${rows}" placeholder="ใส่ได้หลายบรรทัดตามเอกสาร"></textarea></div>`
+        : `<div class="fld"><label>${escapeHtml(label)}</label><input class="inp cr-edit" data-key="${k}" /></div>`;
+    }).join("")}</div>`;
+    $("modalCreate").style.display = "flex";
+    return;
+  }
+  renderCreateForm({});
   $("modalCreate").style.display = "flex";
+  loadCreateTemplates();
+}
+
+/** ฟอร์มสร้างใบใหม่ = ทุกช่อง 3 หน้า (เหมือนหน้า DCTK จริง) + เลือก Master เป็นฐานได้ */
+function renderCreateForm(row) {
+  $("crBody").innerHTML = `
+    <div class="reg-master-bar">
+      <label>เริ่มจาก Master</label>
+      <select class="sel" id="crTemplate"><option value="">— เริ่มจากฟอร์มว่าง —</option></select>
+      <button class="btn btn-ghost btn-sm" id="crApplyTpl">${svgIcon("copy", 13)} ใช้ค่าจาก Master</button>
+      <span class="muted" id="crTplNote"></span>
+    </div>
+    <div class="md-tabs">
+      <button class="md-tab" data-page="1">หน้า 1 · ใบขนสินค้าขาออก</button>
+      <button class="md-tab" data-page="2">หน้า 2 · ใบกำกับสินค้า</button>
+      <button class="md-tab" data-page="3">หน้า 3 · รายการสินค้า (${createItems.length})</button>
+      <button class="md-tab" data-page="4">หน้า 4 · สิทธิประโยชน์/ภาษีอากร</button>
+    </div>
+    <div class="md-tabpanel" data-page="1">${renderRegPage(1, row, "cr-edit")}</div>
+    <div class="md-tabpanel" data-page="2">${renderRegPage(2, row, "cr-edit")}</div>
+    <div class="md-tabpanel" data-page="3">${renderCreateItems(3)}</div>
+    <div class="md-tabpanel" data-page="4">${renderCreateItems(4)}</div>
+  `;
+  const setPage = (n) => {
+    createPage = n;
+    $("crBody").querySelectorAll(".md-tab").forEach((t) => t.classList.toggle("active", +t.dataset.page === n));
+    $("crBody").querySelectorAll(".md-tabpanel").forEach((p) => (p.style.display = +p.dataset.page === n ? "" : "none"));
+  };
+  $("crBody").querySelectorAll(".md-tab").forEach((t) => (t.onclick = () => setPage(+t.dataset.page)));
+  setPage(createPage);
+  bindRegToolbar($("crBody"));
+  bindCreateItems();
+  if ($("crApplyTpl")) $("crApplyTpl").onclick = applyCreateTemplate;
+}
+
+function renderCreateItems(formPage = 3) {
+  const isP4 = formPage === 4;
+  const cards = createItems.map((it, i) => `
+    <div class="item-card">
+      <div class="item-card-head"><b>รายการที่ ${i + 1}</b><div style="flex:1"></div>
+        ${isP4 ? "" : `<button class="btn btn-ghost btn-xs cri-del" data-i="${i}">${svgIcon("trash", 13)} ลบ</button>`}</div>
+      <div class="item-grid">${regGroups(formPage, "item").map((g) =>
+        `<div class="item-sec-title fld-full">${escapeHtml(g.title)}</div>` +
+        g.fields.map((f) => renderRegItemCell(it, i, f)).join("")).join("")}</div>
+    </div>`).join("") || `<div class="muted" style="padding:6px 0">ยังไม่มีรายการสินค้า — กด "เพิ่มรายการ"${isP4 ? " ในหน้า 3" : ""}</div>`;
+  return `<div class="md-section">
+    <div class="md-section-title">${isP4 ? "สิทธิประโยชน์/ภาษีอากร — ต่อรายการ" : "รายการสินค้า"} (${createItems.length})
+      ${isP4 ? "" : `<button class="btn btn-ghost btn-xs" id="criAdd">${svgIcon("plus", 12)} เพิ่มรายการ</button>`}</div>
+    <div class="item-cards" id="${isP4 ? "criBody4" : "criBody"}">${cards}</div>
+  </div>`;
+}
+
+function bindCreateItems() {
+  bindOneCreateBody($("criBody"));
+  bindOneCreateBody($("criBody4"));
+  if ($("criAdd")) $("criAdd").onclick = () => { createItems.push({ brand_name: "NO BRAND" }); refreshCreateItems(); };
+}
+function bindOneCreateBody(body) {
+  if (!body) return;
+  body.querySelectorAll(".it-edit").forEach((el) => (el.oninput = () => { createItems[+el.dataset.i][el.dataset.key] = el.value; }));
+  body.querySelectorAll(".it-chk").forEach((el) => (el.onchange = () => { createItems[+el.dataset.i][el.dataset.key] = el.checked ? "1" : ""; }));
+  body.querySelectorAll(".cri-del").forEach((b) => (b.onclick = () => { createItems.splice(+b.dataset.i, 1); refreshCreateItems(); }));
+}
+function refreshCreateItems() {
+  const sec = $("criBody")?.closest(".md-section");
+  if (sec) sec.outerHTML = renderCreateItems(3);
+  const sec4 = $("criBody4")?.closest(".md-section");
+  if (sec4) sec4.outerHTML = renderCreateItems(4);
+  bindCreateItems();
+  const tab = $("crBody")?.querySelector('.md-tab[data-page="3"]');
+  if (tab) tab.textContent = `หน้า 3 · รายการสินค้า (${createItems.length})`;
+}
+
+/** เติม dropdown เลือก Master ในฟอร์มสร้างใหม่ */
+async function loadCreateTemplates() {
+  const sel = $("crTemplate");
+  if (!sel) return;
+  try {
+    const r = await api("/api/templates");
+    if (!r.enabled) { $("crTplNote").textContent = "ยังไม่ได้สร้างตาราง Master (รัน sql/11)"; return; }
+    sel.innerHTML = '<option value="">— เริ่มจากฟอร์มว่าง —</option>' +
+      (r.templates || []).map((t) =>
+        `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}${t.customer_name ? " · " + escapeHtml(t.customer_name) : ""}${t.is_default ? " ★" : ""}</option>`).join("");
+  } catch { /* ไม่มี Master ก็สร้างจากว่างได้ */ }
+}
+
+/** กด "ใช้ค่าจาก Master" → เติมค่าลงฟอร์ม (ค่าที่กรอกไว้แล้วไม่ถูกทับ) */
+async function applyCreateTemplate() {
+  const id = $("crTemplate").value;
+  if (!id) { toast("เลือก Master ก่อน", "error"); return; }
+  try {
+    const t = await api(`/api/templates/${encodeURIComponent(id)}`);
+    createFromTemplateId = id;
+    // ค่าที่ผู้ใช้พิมพ์ไว้แล้วชนะ Master เสมอ
+    const typed = collectRegValues($("crBody"), "cr-edit");
+    const merged = { extra_fields: {} };
+    for (const f of REGISTRY) {
+      if (f.scope !== "header" || f.computed) continue;
+      const v = (typed[f.key] || "").trim() || (t.header || {})[f.key] || "";
+      if (v === "") continue;
+      if (f.column) merged[f.column] = v; else merged.extra_fields[f.key] = v;
+    }
+    if (!createItems.length && Array.isArray(t.items) && t.items.length) createItems = t.items.map((it) => ({ ...it }));
+    renderCreateForm(merged);
+    $("crTemplate").value = id;
+    $("crTplNote").textContent = `ใช้ค่าจาก "${t.name}" แล้ว — แก้ได้ตามต้องการ`;
+    toast(`เติมค่าจาก Master "${t.name}" แล้ว`, "success");
+  } catch (e) { toast("ใช้ Master ไม่สำเร็จ: " + e.message, "error"); }
 }
 function closeCreate() { $("modalCreate").style.display = "none"; }
 $("btnCreate").onclick = openCreate;
@@ -1056,7 +1436,11 @@ $("crClose").onclick = closeCreate;
 $("crCancel").onclick = closeCreate;
 $("crSubmit").onclick = async () => {
   const rec = {};
-  $("crBody").querySelectorAll(".cr-edit").forEach((inp) => { const v = inp.value.trim(); if (v) rec[inp.dataset.key] = v; });
+  $("crBody").querySelectorAll(".cr-edit").forEach((inp) => {
+    const v = inp.type === "checkbox" ? (inp.checked ? "1" : "") : String(inp.value ?? "").trim();
+    if (v) rec[inp.dataset.key] = v;
+  });
+  if (createItems.length) rec._items = createItems;
   if (!rec.customer_name) { toast("กรอกชื่อลูกค้าก่อน", "error"); return; }
   $("crSubmit").disabled = true;
   try {
@@ -1109,6 +1493,7 @@ $("btnClearSel").onclick = () => { selected.clear(); renderList(); };
 // ============================================================
 const PAGE_META = {
   list: { title: "รายการใบขน", sub: "จัดการใบขนสินค้าทั้งหมดในที่เดียว" },
+  masters: { title: "คลัง Master ข้อมูล", sub: "ชุดค่าตั้งต้น — สร้างสำเนา แก้เล็กน้อย แล้วนำเข้าได้เลย" },
   history: { title: "ประวัติงาน", sub: "ประวัติการรัน RPA + เอกสารที่สร้าง" },
   settings: { title: "ตั้งค่า", sub: "Allowlist · AI · ตารางเวลา · RPA · ลูกค้า" },
 };
@@ -1123,6 +1508,7 @@ function showPage(page) {
   $("pageTitle").textContent = meta.title; $("pageSubtitle").textContent = meta.sub;
   if (page === "list") loadDecls();
   if (page === "history") { loadJobs(); }
+  if (page === "masters") loadMasters();
   if (page === "settings") { loadRules(); loadEmailSchedule(); loadModel(); loadEmailRules(); loadConfig(); loadLoadingRules(); }
 }
 document.querySelectorAll(".nav-item[data-page]").forEach((n) => (n.onclick = (e) => { e.preventDefault(); showPage(n.dataset.page); }));
@@ -1789,8 +2175,309 @@ async function bootstrap() {
   try { const me = await api("/api/me"); CURRENT_USER = me.user || null; }
   catch { return; }
   applyRoleUI();
+  await loadFieldRegistry();
   showPage("list");
   connectSSE();
   updatePollStatus();
 }
 bootstrap();
+
+// ============================================================
+//  คลัง Master ข้อมูล
+//  Master = ชุดค่าตั้งต้น + "โหมดรายช่อง" ที่ตั้งไว้ล่วงหน้าว่าช่องนั้น
+//    ใช้ค่า Master  → ทับค่าที่ AI สกัดมาเสมอ
+//    จาก AI        → ปล่อย AI สกัด (Master เติมให้เฉพาะช่องที่ AI ไม่ได้ค่า)
+//    ไม่กรอก        → ข้ามช่องนี้ ไม่กรอกลง DCTK
+// ============================================================
+let MASTERS = [];
+let msEditing = null;      // Master ที่กำลังแก้ (null = สร้างใหม่)
+let msItems = [];          // รายการสินค้าของ Master ที่กำลังแก้
+let msPage = 1;
+
+const MODE_LABEL = { master: "ใช้ค่า Master", ai: "จาก AI", off: "ไม่กรอก" };
+
+/** โหมดที่ใช้จริงของช่อง (ตามที่ตั้งไว้ หรือเดาจากการมีค่า) — ตรงกับ effectiveMode ฝั่ง server */
+function msMode(tpl, key) {
+  const m = (tpl.field_modes || {})[key];
+  if (m === "master" || m === "ai" || m === "off") return m;
+  const v = (tpl.header || {})[key];
+  return v == null || String(v).trim() === "" ? "ai" : "master";
+}
+
+async function loadMasters() {
+  const note = $("mastersNote");
+  const body = $("mastersBody");
+  try {
+    const r = await api("/api/templates");
+    if (!r.enabled) {
+      note.textContent = "⚠ ยังไม่ได้สร้างตาราง Master — เปิด Supabase SQL Editor แล้วรัน rpa-web/sql/11_extra_fields_and_masters.sql";
+      body.innerHTML = '<tr><td colspan="6" class="empty">—</td></tr>';
+      return;
+    }
+    note.textContent = "";
+    MASTERS = r.templates || [];
+    renderMasters();
+  } catch (e) {
+    note.textContent = "โหลดไม่ได้: " + e.message;
+  }
+}
+
+function renderMasters() {
+  const body = $("mastersBody");
+  if (!MASTERS.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty">ยังไม่มี Master — กด "สร้าง Master ใหม่" หรือกดปุ่ม “บันทึกเป็น Master” จากใบขนที่ทำสำเร็จแล้ว</td></tr>';
+    return;
+  }
+  body.innerHTML = MASTERS.map((t) => {
+    const modes = t.field_modes || {};
+    const nMaster = Object.values(modes).filter((m) => m === "master").length;
+    const nOff = Object.values(modes).filter((m) => m === "off").length;
+    const nVals = Object.keys(t.header || {}).length;
+    return `<tr>
+      <td><b>${escapeHtml(t.name)}</b>${t.is_default ? ' <span class="st st-done" title="ใช้เติมใบที่มาจากอีเมลอัตโนมัติ">★ ค่าเริ่มต้น</span>' : ""}
+        ${t.description ? `<div class="muted-cell">${escapeHtml(t.description)}</div>` : ""}</td>
+      <td class="muted-cell">${escapeHtml(t.customer_name || "— ทุกลูกค้า —")}
+        ${(t.consignee_names || []).length ? `<div class="muted-cell">👤 ${escapeHtml((t.consignee_names || []).join(", ").slice(0, 46))}</div>` : ""}
+        ${(t.product_codes || []).length ? `<div class="muted-cell">📦 ${escapeHtml((t.product_codes || []).join(", ").slice(0, 46))}</div>` : ""}</td>
+      <td class="muted-cell">${nVals} ช่องมีค่า · ทับ AI ${nMaster} · ไม่กรอก ${nOff}</td>
+      <td class="muted-cell">${(t.items || []).length} รายการ</td>
+      <td class="muted-cell">${fmtDate(t.updated_at)}</td>
+      <td class="ta-right">
+        <button class="btn btn-ghost btn-xs msUse" data-id="${t.id}" title="สร้างใบขนใหม่จาก Master นี้">${svgIcon("plus", 13)} สร้างใบ</button>
+        <button class="btn btn-ghost btn-xs msEdit" data-id="${t.id}">${svgIcon("settings", 13)} แก้ไข</button>
+        <button class="btn btn-ghost btn-xs msDup" data-id="${t.id}" title="ทำสำเนา Master">${svgIcon("copy", 13)}</button>
+        <button class="btn btn-ghost btn-xs msDel" data-id="${t.id}">${svgIcon("trash", 13)}</button>
+      </td>
+    </tr>`;
+  }).join("");
+
+  body.querySelectorAll(".msEdit").forEach((b) => (b.onclick = () => openMaster(MASTERS.find((t) => t.id === b.dataset.id))));
+  body.querySelectorAll(".msUse").forEach((b) => (b.onclick = () => useMaster(b.dataset.id)));
+  body.querySelectorAll(".msDup").forEach((b) => (b.onclick = () => {
+    const t = MASTERS.find((x) => x.id === b.dataset.id);
+    openMaster({ ...t, id: undefined, name: `${t.name} (สำเนา)`, is_default: false });
+  }));
+  body.querySelectorAll(".msDel").forEach((b) => (b.onclick = async () => {
+    const t = MASTERS.find((x) => x.id === b.dataset.id);
+    if (!(await confirmDialog(`ลบ Master <b>${escapeHtml(t.name)}</b>?`, "ลบ Master"))) return;
+    try { await api(`/api/templates/${encodeURIComponent(t.id)}`, "DELETE"); toast("ลบแล้ว", "success"); loadMasters(); }
+    catch (e) { toast("ลบไม่สำเร็จ: " + e.message, "error"); }
+  }));
+}
+
+/** สร้างใบขนใหม่จาก Master → เปิดฟอร์มสร้างพร้อมค่าที่เติมไว้ให้ (แก้ได้ก่อนบันทึก) */
+async function useMaster(id) {
+  showPage("list");
+  openCreate();
+  setTimeout(async () => {
+    await loadCreateTemplates();
+    $("crTemplate").value = id;
+    await applyCreateTemplate();
+  }, 60);
+}
+
+// ---- Modal สร้าง/แก้ Master ----
+function openMaster(tpl) {
+  msEditing = tpl ? JSON.parse(JSON.stringify(tpl)) : { name: "", customer_name: "", description: "", header: {}, items: [], field_modes: {}, is_default: false };
+  msItems = Array.isArray(msEditing.items) ? msEditing.items.map((it) => ({ ...it })) : [];
+  msPage = 1;
+  $("msTitle").textContent = msEditing.id ? `แก้ไข Master — ${msEditing.name}` : "สร้าง Master ใหม่";
+  renderMasterForm();
+  $("modalMaster").style.display = "flex";
+}
+function closeMaster() { $("modalMaster").style.display = "none"; msEditing = null; }
+
+/** ฟอร์ม Master = ทุกช่อง 3 หน้า + ตัวเลือกโหมดต่อช่อง */
+function renderMasterForm() {
+  const t = msEditing;
+  const custOpts = [...new Set(DECLS.map((d) => d.customer_name).filter(Boolean))].sort();
+  // row สำหรับอ่านค่าเดิม: header เก็บด้วย key ของ registry อยู่แล้ว → ใส่เป็น extra_fields ให้ regValue อ่านเจอทุกช่อง
+  const row = { extra_fields: { ...(t.header || {}) } };
+  for (const f of REGISTRY) if (f.column && (t.header || {})[f.key] != null) row[f.column] = t.header[f.key];
+
+  $("msBody").innerHTML = `
+    <div class="md-grid" style="margin-bottom:12px">
+      <div class="fld"><label>ชื่อ Master *</label><input class="inp" id="msName" value="${escapeHtml(t.name || "")}" placeholder="เช่น THANAKORN — ตู้ 40ft ไปเวียดนาม" /></div>
+      <div class="fld"><label>ลูกค้า (ว่าง = ใช้ได้ทุกลูกค้า)</label>
+        <input class="inp" id="msCustomer" list="msCustList" value="${escapeHtml(t.customer_name || "")}" placeholder="เช่น THANAKORN" />
+        <datalist id="msCustList">${custOpts.map((c) => `<option value="${escapeHtml(c)}">`).join("")}</datalist></div>
+      <div class="fld fld-full"><label>คำอธิบาย</label><input class="inp" id="msDesc" value="${escapeHtml(t.description || "")}" placeholder="ใช้เมื่อไหร่ / ต่างจาก Master อื่นตรงไหน" /></div>
+    </div>
+
+    <div class="reg-mode-help">
+      <b>ใช้ Master นี้กับใคร</b> — ระบบเลือก Master ให้อัตโนมัติจาก 3 ระดับ:
+      ลูกค้า → Consignee → รหัสสินค้า · <b>ยิ่งระบุละเอียด ยิ่งถูกเลือกก่อน</b> · เว้นว่าง = ใช้ได้ทุกราย
+    </div>
+    <div class="md-grid" style="margin-bottom:12px">
+      <div class="fld fld-full"><label>Consignee ที่ใช้ Master นี้ (คั่นด้วยจุลภาค)</label>
+        <input class="inp" id="msConsignees" value="${escapeHtml((t.consignee_names || []).join(", "))}"
+               placeholder="เช่น DK&amp;N VIETNAM LTD, ABC CO — หลายรายใช้ต้นแบบเดียวกันได้" /></div>
+      <div class="fld fld-full"><label>รหัสสินค้าที่ใช้ Master นี้ (คั่นด้วยจุลภาค)</label>
+        <input class="inp" id="msProducts" value="${escapeHtml((t.product_codes || []).join(", "))}"
+               placeholder="เช่น REFINED BLEACHED — Consignee เดียวกันแต่คนละสินค้า ใช้คนละ Master ได้" /></div>
+      <div class="fld"><label>ลำดับความสำคัญ (สูง = ถูกเลือกก่อนเมื่อคะแนนเท่ากัน)</label>
+        <input class="inp" id="msPriority" type="number" value="${Number(t.priority || 0)}" /></div>
+    </div>
+    <label class="switch"><input type="checkbox" id="msDefault" ${t.is_default ? "checked" : ""} />
+      <span>ตั้งเป็นค่าเริ่มต้นของลูกค้านี้ — ใช้เติมใบที่เข้ามาจากอีเมลอัตโนมัติ (1 ลูกค้ามีได้ 1 อัน)</span></label>
+
+    <div class="reg-mode-help">
+      <b>โหมดรายช่อง</b> — ตั้งไว้ล่วงหน้าว่าแต่ละช่องจะเอาค่าจากไหน:
+      <span class="mode-pill m-master">ใช้ค่า Master</span> ทับค่าที่ AI สกัดมาเสมอ ·
+      <span class="mode-pill m-ai">จาก AI</span> ปล่อย AI สกัด (Master เติมให้เฉพาะตอน AI ไม่ได้ค่า) ·
+      <span class="mode-pill m-off">ไม่กรอก</span> ข้ามช่องนี้ ไม่กรอกลง DCTK
+    </div>
+
+    <div class="md-tabs">
+      <button class="md-tab" data-page="1">หน้า 1 · ใบขนสินค้าขาออก</button>
+      <button class="md-tab" data-page="2">หน้า 2 · ใบกำกับสินค้า</button>
+      <button class="md-tab" data-page="3">หน้า 3 · รายการสินค้า (${msItems.length})</button>
+      <button class="md-tab" data-page="4">หน้า 4 · สิทธิประโยชน์/ภาษีอากร</button>
+    </div>
+    <div class="md-tabpanel" data-page="1">${renderMasterPage(1, row)}</div>
+    <div class="md-tabpanel" data-page="2">${renderMasterPage(2, row)}</div>
+    <div class="md-tabpanel" data-page="3">${renderMasterItems(3)}</div>
+    <div class="md-tabpanel" data-page="4">${renderMasterItems(4)}</div>
+  `;
+  const setPage = (n) => {
+    msPage = n;
+    $("msBody").querySelectorAll(".md-tab").forEach((x) => x.classList.toggle("active", +x.dataset.page === n));
+    $("msBody").querySelectorAll(".md-tabpanel").forEach((p) => (p.style.display = +p.dataset.page === n ? "" : "none"));
+  };
+  $("msBody").querySelectorAll(".md-tab").forEach((x) => (x.onclick = () => setPage(+x.dataset.page)));
+  setPage(msPage);
+  bindRegToolbar($("msBody"));
+  bindMasterItems();
+}
+
+/** 1 หน้าในฟอร์ม Master = ช่อง + ตัวเลือกโหมด */
+function renderMasterPage(pageNo, row) {
+  const groups = regGroups(pageNo, "header");
+  return regToolbar(pageNo) + groups.map((g) => `
+    <div class="reg-group" data-group="${escapeHtml(g.title)}">
+      <div class="reg-group-title">${escapeHtml(g.title)} <span class="muted">(${g.fields.length})</span></div>
+      <div class="md-grid">${g.fields.map((f) => {
+        if (f.computed) return "";   // DCTK เติมเอง — ตั้งใน Master ไม่มีความหมาย
+        const val = escapeHtml(regValue(row, f));
+        const mode = msMode(msEditing, f.key);
+        return `<div class="fld reg-fld" data-key="${f.key}" data-group="${escapeHtml(f.group)}" data-label="${escapeHtml(f.label)}">
+          <label>${escapeHtml(f.label)}</label>
+          <div class="ms-row">
+            <input class="inp ms-edit" data-key="${f.key}" value="${val}" />
+            <select class="sel sel-sm ms-mode m-${mode}" data-key="${f.key}">
+              <option value="master" ${mode === "master" ? "selected" : ""}>ใช้ค่า Master</option>
+              <option value="ai" ${mode === "ai" ? "selected" : ""}>จาก AI</option>
+              <option value="off" ${mode === "off" ? "selected" : ""}>ไม่กรอก</option>
+            </select>
+          </div>
+        </div>`;
+      }).join("")}</div>
+    </div>`).join("");
+}
+
+function renderMasterItems(formPage = 3) {
+  const isP4 = formPage === 4;
+  const cards = msItems.map((it, i) => `
+    <div class="item-card">
+      <div class="item-card-head"><b>รายการที่ ${i + 1}</b><div style="flex:1"></div>
+        ${isP4 ? "" : `<button class="btn btn-ghost btn-xs msi-del" data-i="${i}">${svgIcon("trash", 13)} ลบ</button>`}</div>
+      <div class="item-grid">${regGroups(formPage, "item").map((g) =>
+        `<div class="item-sec-title fld-full">${escapeHtml(g.title)}</div>` +
+        g.fields.filter((f) => !f.computed).map((f) =>
+          `<div class="fld"><label>${escapeHtml(f.label)}</label>
+             <input class="inp msi-edit" data-i="${i}" data-key="${f.key}" value="${escapeHtml(it[f.key] != null ? String(it[f.key]) : "")}" /></div>`).join("")
+      ).join("")}</div>
+    </div>`).join("") || '<div class="muted" style="padding:6px 0">ยังไม่มีรายการสินค้าใน Master นี้</div>';
+  return `<div class="md-section">
+    <div class="md-section-title">${isP4 ? "สิทธิประโยชน์/ภาษีอากร — ต่อรายการ" : "รายการสินค้าใน Master"} (${msItems.length})
+      ${isP4 ? "" : `<button class="btn btn-ghost btn-xs" id="msiAdd">${svgIcon("plus", 12)} เพิ่มรายการ</button>`}</div>
+    <div class="item-cards" id="${isP4 ? "msiBody4" : "msiBody"}">${cards}</div>
+  </div>`;
+}
+function bindMasterItems() {
+  for (const body of [$("msiBody"), $("msiBody4")]) {
+    if (!body) continue;
+    body.querySelectorAll(".msi-edit").forEach((el) => (el.oninput = () => { msItems[+el.dataset.i][el.dataset.key] = el.value; }));
+    body.querySelectorAll(".msi-del").forEach((b) => (b.onclick = () => { msItems.splice(+b.dataset.i, 1); refreshMasterItems(); }));
+  }
+  if ($("msiAdd")) $("msiAdd").onclick = () => { msItems.push({ brand_name: "NO BRAND" }); refreshMasterItems(); };
+  // สีของ dropdown โหมดเปลี่ยนตามค่าที่เลือก (อ่านง่ายเวลามี 100+ ช่อง)
+  $("msBody").querySelectorAll(".ms-mode").forEach((sel) => (sel.onchange = () => {
+    sel.className = `sel sel-sm ms-mode m-${sel.value}`;
+  }));
+}
+function refreshMasterItems() {
+  const sec = $("msiBody")?.closest(".md-section");
+  if (sec) sec.outerHTML = renderMasterItems(3);
+  const sec4 = $("msiBody4")?.closest(".md-section");
+  if (sec4) sec4.outerHTML = renderMasterItems(4);
+  bindMasterItems();
+  const tab = $("msBody")?.querySelector('.md-tab[data-page="3"]');
+  if (tab) tab.textContent = `หน้า 3 · รายการสินค้า (${msItems.length})`;
+}
+
+async function saveMaster() {
+  const name = $("msName").value.trim();
+  if (!name) { toast("ตั้งชื่อ Master ก่อน", "error"); return; }
+  const header = {};
+  $("msBody").querySelectorAll(".ms-edit").forEach((el) => {
+    const v = String(el.value ?? "").trim();
+    if (v) header[el.dataset.key] = v;
+  });
+  const field_modes = {};
+  $("msBody").querySelectorAll(".ms-mode").forEach((el) => {
+    // เก็บเฉพาะโหมดที่ "ตั้งใจตั้ง" — ช่องว่าง+จาก AI = ค่าปริยาย ไม่ต้องเก็บ (กัน jsonb บวม)
+    const k = el.dataset.key;
+    const isDefault = el.value === (header[k] ? "master" : "ai");
+    if (!isDefault) field_modes[k] = el.value;
+  });
+  const splitList = (v) => String(v || "").split(",").map((x) => x.trim()).filter(Boolean);
+  const payload = {
+    id: msEditing.id, name,
+    customer_name: $("msCustomer").value.trim(),
+    description: $("msDesc").value.trim(),
+    consignee_names: splitList($("msConsignees")?.value),
+    product_codes: splitList($("msProducts")?.value),
+    priority: Number($("msPriority")?.value || 0),
+    header, items: msItems, field_modes,
+    is_default: $("msDefault").checked,
+  };
+  $("msSave").disabled = true;
+  try {
+    await api("/api/templates", "POST", payload);
+    const sv = $("msSaved"); sv.style.display = "inline"; setTimeout(() => (sv.style.display = "none"), 2000);
+    toast("บันทึก Master แล้ว", "success");
+    closeMaster();
+    loadMasters();
+  } catch (e) { toast("บันทึกไม่สำเร็จ: " + e.message, "error"); }
+  finally { $("msSave").disabled = false; }
+}
+
+$("btnNewMaster").onclick = () => openMaster(null);
+$("btnReloadMasters").onclick = loadMasters;
+$("msClose").onclick = closeMaster;
+$("msCancel").onclick = closeMaster;
+$("msSave").onclick = saveMaster;
+
+/** ปุ่ม "บันทึกเป็น Master" ในหน้ารายละเอียดใบขน — เก็บค่าทั้งใบไว้ใช้ครั้งหน้า */
+$("mdSaveMaster").onclick = async () => {
+  if (!detailId) return;
+  const d = DECLS.find((x) => x.id === detailId) || {};
+  const suggested = `${d.customer_name || "Master"}${d.consignee_name ? " — " + d.consignee_name : ""}`;
+  const name = prompt("ตั้งชื่อ Master นี้:", suggested);
+  if (name === null) return;
+  if (!name.trim()) { toast("ต้องตั้งชื่อก่อน", "error"); return; }
+  try {
+    // บันทึกค่าที่กำลังแก้อยู่ในฟอร์มก่อน แล้วค่อยเก็บเป็น Master (ได้ค่าล่าสุดเสมอ)
+    const patch = {};
+    $("mdBody").querySelectorAll(".md-edit").forEach((inp) => {
+      patch[inp.dataset.key] = inp.type === "checkbox" ? (inp.checked ? "1" : "") : String(inp.value ?? "").trim();
+    });
+    await api(`/api/declarations/${encodeURIComponent(detailId)}`, "POST", patch);
+    if (editItems.length) await api(`/api/declarations/${encodeURIComponent(detailId)}/items`, "PUT", { items: editItems });
+    const t = await api(`/api/declarations/${encodeURIComponent(detailId)}/save-as-template`, "POST", {
+      name: name.trim(), customer_name: d.customer_name || "",
+    });
+    toast(`บันทึกเป็น Master "${t.name}" แล้ว — ดูได้ที่เมนู "คลัง Master"`, "success");
+  } catch (e) { toast("บันทึกเป็น Master ไม่สำเร็จ: " + e.message, "error"); }
+};

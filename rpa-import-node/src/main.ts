@@ -15,8 +15,12 @@ const onlyRows = (process.env.RPA_ONLY_ROWS ?? "")
 const opts = {
   inspect: truthy(process.env.RPA_INSPECT),
   inspectEdit: truthy(process.env.RPA_INSPECT_EDIT),
+  // dry run: กรอกฟอร์มจริงทุกช่อง แต่ไม่กด Save/Finalize/Print และไม่ส่งอีเมล
+  //   ใช้ทดสอบว่าตัวกรอกทำงานถูกโดยไม่สร้างใบในระบบกรมฯ
+  dryRun: truthy(process.env.RPA_DRY_RUN),
   ...(onlyRows.length ? { onlyRows } : {}),
 };
+if (opts.dryRun) console.log("[RPA] 🧪 DRY RUN — กรอกจริงแต่ไม่บันทึก/ไม่พิมพ์");
 
 runImport(opts)
   .then((r) => {

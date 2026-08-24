@@ -27,6 +27,7 @@
       </div>
       <nav class="nav">
         <a class="nav-item active" href="#list" data-page="list"><span class="nav-ico" data-icon="list"></span> รายการใบขน</a>
+        <a class="nav-item" href="#masters" data-page="masters"><span class="nav-ico" data-icon="copy"></span> คลัง Master</a>
         <a class="nav-item" href="#history" data-page="history"><span class="nav-ico" data-icon="clock"></span> ประวัติงาน</a>
         <a class="nav-item" href="#settings" data-page="settings" data-admin="true"><span class="nav-ico" data-icon="settings"></span> ตั้งค่า</a>
       </nav>
@@ -106,6 +107,26 @@
             </tbody>
           </table>
         </div>
+      </div>
+
+      <!-- ============ PAGE: คลัง Master ข้อมูล ============ -->
+      <div id="page-masters" class="page" style="display:none">
+        <section class="card">
+          <div class="card-head">
+            <h2><i data-icon="copy"></i> คลัง Master ข้อมูล</h2>
+            <div class="head-actions">
+              <button class="btn btn-primary" id="btnNewMaster"><i data-icon="plus"></i> สร้าง Master ใหม่</button>
+              <button class="btn btn-ghost" id="btnReloadMasters"><i data-icon="refresh"></i> โหลดใหม่</button>
+            </div>
+          </div>
+          <p class="muted">ชุดค่าตั้งต้นที่บันทึกไว้ — สร้างใบขนใหม่จาก Master แล้วแก้เล็กน้อยก็นำเข้าได้เลย<br>
+             Master ที่ตั้งเป็น <b>ค่าเริ่มต้น (★)</b> ของลูกค้า จะถูกใช้เติมใบที่เข้ามาจากอีเมลอัตโนมัติ ตามโหมดที่ตั้งไว้รายช่อง</p>
+          <div id="mastersNote" class="note"></div>
+          <div class="table-wrap"><table class="tbl">
+            <thead><tr><th>ชื่อ Master</th><th>ลูกค้า</th><th>ช่องที่ตั้งไว้</th><th>รายการสินค้า</th><th>แก้ล่าสุด</th><th class="w-act">จัดการ</th></tr></thead>
+            <tbody id="mastersBody"><tr><td colspan="6" class="empty">กำลังโหลด…</td></tr></tbody>
+          </table></div>
+        </section>
       </div>
 
       <!-- ============ PAGE: ประวัติงาน ============ -->
@@ -312,6 +333,7 @@
         <span id="mdSaved" class="saved" style="display:none"><i data-icon="check"></i> บันทึกแล้ว</span>
         <div style="flex:1"></div>
         <button class="btn btn-ghost" id="mdDelete"><i data-icon="x"></i> ลบรายการ</button>
+        <button class="btn btn-ghost" id="mdSaveMaster" title="บันทึกค่าทั้งใบนี้ไว้เป็น Master ใช้สร้างใบใหม่ครั้งหน้า"><i data-icon="copy"></i> บันทึกเป็น Master</button>
         <button class="btn btn-primary" id="mdSave"><i data-icon="save"></i> บันทึก</button>
         <button class="btn btn-warn" id="mdEdit" title="ต้องมีเลขใบขน DCTK ก่อน"><i data-icon="refresh"></i> แก้ไขและรัน RPA</button>
         <button class="btn btn-success" id="mdRun"><i data-icon="play"></i> รัน RPA (สร้าง)</button>
@@ -422,6 +444,20 @@
         <div style="flex:1"></div>
         <button class="btn btn-ghost" id="crCancel">ยกเลิก</button>
         <button class="btn btn-primary" id="crSubmit"><i data-icon="plus"></i> สร้างรายการ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Modal: สร้าง/แก้ Master ===== -->
+  <div id="modalMaster" class="modal" style="display:none">
+    <div class="modal-box modal-lg">
+      <div class="modal-head"><h3 id="msTitle">สร้าง Master ใหม่</h3><button class="modal-x" id="msClose"><i data-icon="x"></i></button></div>
+      <div class="modal-body" id="msBody"></div>
+      <div class="modal-foot">
+        <span id="msSaved" class="saved" style="display:none"><i data-icon="check"></i> บันทึกแล้ว</span>
+        <div style="flex:1"></div>
+        <button class="btn btn-ghost" id="msCancel">ยกเลิก</button>
+        <button class="btn btn-primary" id="msSave"><i data-icon="save"></i> บันทึก Master</button>
       </div>
     </div>
   </div>

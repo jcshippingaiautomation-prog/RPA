@@ -471,3 +471,67 @@ table.items-edit.fld-error { outline: 2px solid #dc2626; outline-offset: 2px; bo
 /* ===== Responsive ===== */
 @media (max-width: 1000px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 720px) { .sidebar { display: none; } .main { padding: 16px; } .stat-grid { grid-template-columns: 1fr 1fr; } .search-box input { width: 140px; } }
+
+/* ============================================================
+   ทะเบียนช่อง (field registry) — ฟอร์มครบทุกช่องของ DCTK
+   ============================================================ */
+.reg-toolbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 12px; margin-bottom: 12px;
+  background: #f7f9fc; border: 1px solid var(--border); border-radius: 10px;
+  position: sticky; top: 0; z-index: 3;
+}
+.reg-search { flex: 1; min-width: 200px; }
+.inp-sm { padding: 6px 10px; font-size: 13px; }
+.reg-chips { display: flex; gap: 6px; }
+.chip {
+  padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  border: 1px solid var(--border); background: #fff; color: var(--muted2); cursor: pointer;
+}
+.chip:hover { border-color: var(--primary); color: var(--primary); }
+.chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+.reg-group { margin-bottom: 18px; }
+.reg-group-title {
+  font-size: 13px; font-weight: 700; color: var(--muted2);
+  padding: 6px 0 8px; margin-bottom: 6px; border-bottom: 1px solid var(--border);
+}
+/* ป้ายกำกับชนิดช่อง */
+.fld-new {
+  font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 999px;
+  background: #eef2f7; color: var(--muted2); vertical-align: middle;
+}
+.switch-inline { margin: 0; }
+
+/* ---- แถบเลือก Master ในฟอร์มสร้างใบใหม่ ---- */
+.reg-master-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px 14px; margin-bottom: 14px;
+  background: var(--ico-blue-bg); border-radius: 10px;
+}
+.reg-master-bar label { font-size: 13px; font-weight: 600; color: var(--primary); margin: 0; }
+.reg-master-bar .sel { min-width: 240px; }
+
+/* ---- ฟอร์ม Master: ช่อง + โหมดรายช่อง ---- */
+.reg-mode-help {
+  font-size: 12px; color: var(--muted2); line-height: 1.9;
+  padding: 10px 14px; margin: 12px 0;
+  background: #f7f9fc; border: 1px solid var(--border); border-radius: 10px;
+}
+.mode-pill { padding: 2px 8px; border-radius: 999px; font-weight: 600; font-size: 11px; }
+.m-master, .mode-pill.m-master { background: var(--ico-blue-bg); color: var(--primary); }
+.m-ai, .mode-pill.m-ai { background: var(--ico-green-bg); color: var(--green-dark); }
+.m-off, .mode-pill.m-off { background: #f9eaea; color: var(--red); }
+
+.ms-row { display: flex; gap: 6px; align-items: center; }
+.ms-row .inp { flex: 1; min-width: 0; }
+.ms-mode { width: 118px; flex: none; font-size: 12px; font-weight: 600; border-width: 1px; }
+select.ms-mode.m-master { background: var(--ico-blue-bg); color: var(--primary); }
+select.ms-mode.m-ai { background: var(--ico-green-bg); color: var(--green-dark); }
+select.ms-mode.m-off { background: #f9eaea; color: var(--red); }
+
+.head-actions { display: flex; gap: 8px; align-items: center; }
+
+/* ช่องบังคับตาม DCTK (กรอบเขียวในระบบต้นทาง) */
+.fld-req { color: var(--red); font-weight: 700; margin-left: 2px; }
+.reg-fld select.sel { width: 100%; }

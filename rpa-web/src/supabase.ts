@@ -6,6 +6,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { config } from "./config.js";
+import { splitRecord, rowToFields } from "./field-registry.js";
+import { applyTemplate } from "./master-template.js";
 
 export interface DocumentRecord {
   id?: string;
@@ -543,7 +545,7 @@ export async function getDeclaration(id: string): Promise<Record<string, unknown
 /** สร้าง declaration ใหม่ (manual create หรือ upload) — คืน id */
 export async function createDeclaration(
   record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
-  opts: { source?: string; status?: string } = {},
+  opts: { source?: string; status?: string; fieldModes?: { [k: string]: string } } = {},
 ): Promise<{ id: string } | null> {
   const sb = getClient();
   if (!sb) return null;
@@ -552,6 +554,18 @@ export async function createDeclaration(
     for (const col of DECL_COLUMNS) if (record[col] !== undefined) payload[col] = record[col] ?? null;
     const extra = await availableExtraColumns();
     for (const col of extra) if (record[col] !== undefined) payload[col] = record[col] ?? null;
+    // ฟอร์มใหม่ส่งมาเป็น "key ของ registry" (เช่น amount_currency → คอลัมน์ currency)
+    //   + ช่องที่ยังไม่มีคอลัมน์จริง → เก็บก้อนเดียวใน extra_fields jsonb
+    const split = await splitRecord(record, "header");
+    const knownCols = new Set([...DECL_COLUMNS, ...extra]);
+    for (const [c, v] of Object.entries(split.columns)) if (knownCols.has(c)) payload[c] = v ?? null;
+    if (Object.keys(split.extra).length && (await extraFieldsEnabled("declarations"))) {
+      payload.extra_fields = split.extra;
+    }
+    // โหมดรายช่องที่ติดมาจาก Master ('master'/'ai'/'off') — worker ใช้ตอนกรอก
+    if (opts.fieldModes && Object.keys(opts.fieldModes).length && (await fieldModesEnabled())) {
+      payload.field_modes = opts.fieldModes;
+    }
     payload.source = opts.source ?? "manual";
     payload.doc_status = false;
     if (await declarationStatusEnabled()) {
@@ -599,6 +613,10 @@ async function insertItems(declId: string, items: Record<string, unknown>[]): Pr
   if (!sb) return;
   const hasExtra = await itemExtraEnabled();
   const hasMulti = await itemMultiEnabled();
+  const hasJson = await extraFieldsEnabled("declaration_items");
+  // ฟอร์มใหม่ส่ง key ของ registry (เช่น item_net_weight_kg → คอลัมน์ net_weight_kg)
+  //   → แยกเป็นคอลัมน์จริง + extra_fields ก่อนประกอบแถว
+  const splits = await Promise.all(items.map((it) => splitRecord(it, "item", ["line_no", "is_foc"])));
   const rows = items.map((it, i) => {
     const row: Record<string, unknown> = {
       declaration_id: declId,
@@ -624,6 +642,18 @@ async function insertItems(declId: string, items: Record<string, unknown>[]): Pr
       row.insurance = it.insurance ?? null;
       row.product_description_thai = it.product_description_thai ?? null;
     }
+    // ค่าที่มาจากฟอร์มใหม่ (key ของ registry) — เขียนทับเฉพาะคอลัมน์ที่ DB มีจริง
+    const okCols = new Set<string>([
+      "description_eng", "brand_name", "container_or_volume_qty", "container_unit_code",
+      "net_weight_kg", "gross_weight_kg", "net_weight_ton", "amount", "is_foc",
+      ...(hasExtra ? ["export_tariff", "customs_unit_code"] : []),
+      ...(hasMulti ? ["description_eng_field", "net_weight_unit_code", "insurance", "product_description_thai"] : []),
+    ]);
+    for (const [c, v] of Object.entries(splits[i].columns)) {
+      if (okCols.has(c)) row[c] = v ?? null;
+    }
+    // ช่อง Page 3 ที่ยังไม่มีคอลัมน์จริง (พิกัด/สิทธิ/ต้นกำเนิด/หมายเหตุ ฯลฯ)
+    if (hasJson && Object.keys(splits[i].extra).length) row.extra_fields = splits[i].extra;
     return row;
   });
   const r = await sb.from("declaration_items").insert(rows);
@@ -738,6 +768,30 @@ async function availableExtraColumns(): Promise<Set<string>> {
   return _extraCols;
 }
 
+// คอลัมน์ extra_fields (jsonb) — sql/11 · ใช้เก็บทุกช่อง DCTK ที่ยังไม่มีคอลัมน์จริง
+//   graceful: ถ้ายังไม่ได้รัน sql/11 ระบบทำงานต่อได้ (แค่ไม่เก็บช่องใหม่)
+const _extraJson: { [table: string]: boolean } = {};
+export async function extraFieldsEnabled(table: "declarations" | "declaration_items"): Promise<boolean> {
+  if (table in _extraJson) return _extraJson[table];
+  const sb = getClient();
+  if (!sb) { _extraJson[table] = false; return false; }
+  const { error } = await sb.from(table).select("extra_fields").limit(1);
+  _extraJson[table] = !error;
+  if (error) console.warn(`[supabase] ${table}.extra_fields ยังไม่มี — โปรดรัน sql/11_extra_fields_and_masters.sql`);
+  return _extraJson[table];
+}
+
+// คอลัมน์ field_modes (jsonb) — sql/11 · โหมดรายช่องที่คัดลอกมาจาก Master
+let _fieldModesOk: boolean | null = null;
+export async function fieldModesEnabled(): Promise<boolean> {
+  if (_fieldModesOk !== null) return _fieldModesOk;
+  const sb = getClient();
+  if (!sb) { _fieldModesOk = false; return false; }
+  const { error } = await sb.from("declarations").select("field_modes").limit(1);
+  _fieldModesOk = !error;
+  return _fieldModesOk;
+}
+
 // คอลัมน์ workflow (เพิ่มใน sql/03) — ใช้แบบ graceful: ถ้ายังไม่ได้รัน SQL ระบบยังทำงานได้
 const STATUS_COLUMNS = ["status", "status_message", "last_job_id", "updated_at"];
 // cache ว่าคอลัมน์ status มีจริงไหม (กันยิงซ้ำ) — null = ยังไม่ได้ตรวจ
@@ -791,11 +845,47 @@ export async function insertDeclaration(
     return { inserted: false, reason: "ซ้ำ (customer+invoice มีอยู่แล้ว)" };
   }
   try {
+    // ── ผสม Master ที่ตั้งเป็นค่าเริ่มต้นของลูกค้า (ถ้ามี) ──────────────
+    //   โหมดรายช่องตัดสินว่าใช้ค่าไหน: 'master' ทับค่า AI · 'ai' เติมเฉพาะช่องว่าง · 'off' ไม่กรอก
+    let rec: Record<string, unknown> & { _items?: Record<string, unknown>[] } = record;
+    let fieldModes: { [k: string]: FieldMode } | undefined;
+    // เลือก Master 3 ระดับ: ลูกค้า → consignee → รหัสสินค้า (ตามที่ตกลงในที่ประชุม)
+    //   ไม่มีตัวไหนตรง → ถอยไปใช้ Master ค่าเริ่มต้นของลูกค้า (พฤติกรรมเดิม)
+    const consigneeName = String(record.consignee_name ?? "");
+    const productCodes = (record._items ?? [])
+      .map((it) => String((it as Record<string, unknown>).description_eng ?? ""))
+      .filter(Boolean);
+    const tpl = (await templateLevelsEnabled())
+      ? (await findBestTemplate(customer, consigneeName, productCodes)) ?? (await getDefaultTemplate(customer))
+      : await getDefaultTemplate(customer);
+    if (tpl) {
+      const cur = await rowToFields(record, "header");             // คอลัมน์ → key ของ registry
+      const applied = applyTemplate(tpl, cur, { includeItems: false });
+      const split = await splitRecord(applied.record, "header");   // กลับเป็นคอลัมน์ + extra
+      fieldModes = applied.fieldModes;
+      rec = {
+        ...record,
+        ...split.columns,
+        extra_fields: { ...((record.extra_fields ?? {}) as object), ...split.extra },
+      };
+      if (!(record._items?.length) && tpl.items?.length) rec._items = tpl.items.map((it) => ({ ...it }));
+      const changed = applied.overridden.length + applied.filled.length;
+      if (changed) console.log(`[master] ใช้ Master "${tpl.name}" กับ ${customer}/${invoice} — ทับ ${applied.overridden.length} · เติม ${applied.filled.length} ช่อง`);
+    }
+
     const payload: Record<string, unknown> = {};
-    for (const col of DECL_COLUMNS) payload[col] = record[col] ?? null;
+    for (const col of DECL_COLUMNS) payload[col] = rec[col] ?? null;
     // extra columns — ใส่เฉพาะที่ DB มีจริง (graceful)
     const extra = await availableExtraColumns();
-    for (const col of extra) if (record[col] != null) payload[col] = record[col];
+    for (const col of extra) if (rec[col] != null) payload[col] = rec[col];
+    // ช่องที่ยังไม่มีคอลัมน์จริง → extra_fields jsonb
+    const extraJson = (rec.extra_fields ?? {}) as Record<string, unknown>;
+    if (Object.keys(extraJson).length && (await extraFieldsEnabled("declarations"))) {
+      payload.extra_fields = extraJson;
+    }
+    if (fieldModes && Object.keys(fieldModes).length && (await fieldModesEnabled())) {
+      payload.field_modes = fieldModes;
+    }
     payload.source = "get-email";
     payload.doc_status = false;
     // ไม่ใช้ "new" — ทุกใบเริ่มที่ "ready" (พร้อมรัน) เสมอ
@@ -808,7 +898,7 @@ export async function insertDeclaration(
     if (ins.error) throw ins.error;
     const declId = ins.data?.id as string;
 
-    const items = record._items ?? [];
+    const items = rec._items ?? [];
     if (declId && items.length) await insertItems(declId, items);
     return { inserted: true, id: declId };
   } catch (err) {
@@ -830,6 +920,22 @@ export async function updateDeclaration(
   const clean: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(patch)) {
     if (allowed.has(k)) clean[k] = v === "" ? null : v;
+  }
+  // ฟอร์มใหม่: key ของ registry → คอลัมน์จริง + ช่องที่ไม่มีคอลัมน์ → extra_fields
+  const split = await splitRecord(patch, "header");
+  for (const [c, v] of Object.entries(split.columns)) {
+    if (allowed.has(c)) clean[c] = v === "" ? null : v;
+  }
+  if (Object.keys(split.extra).length && (await extraFieldsEnabled("declarations"))) {
+    // merge กับของเดิม (ฟอร์มอาจส่งมาบางส่วน — ห้ามล้างช่องอื่นที่ไม่ได้แก้)
+    const cur = await sb.from("declarations").select("extra_fields").eq("id", id).maybeSingle();
+    const before = (cur.data?.extra_fields ?? {}) as Record<string, unknown>;
+    const merged: Record<string, unknown> = { ...before };
+    for (const [k, v] of Object.entries(split.extra)) {
+      if (v === "" || v === null || v === undefined) delete merged[k];  // ล้างค่า = ลบ key
+      else merged[k] = v;
+    }
+    clean.extra_fields = merged;
   }
   if (!Object.keys(clean).length) return false;
   // ถ้าไม่มีคอลัมน์ status → ตัดออกกัน error
@@ -1026,4 +1132,215 @@ export function subscribeJobLogs(
   return () => {
     sb.removeChannel(ch);
   };
+}
+
+// ============================================================
+//  Master ข้อมูล (declaration_templates) — sql/11
+//  ชุดค่าตั้งต้นที่บันทึกไว้ ใช้สร้างใบใหม่ / เติมช่องว่างให้ใบที่มาจากอีเมล
+//  field_modes = โหมดรายช่อง:
+//    'master' ใช้ค่าใน Master เสมอ (ทับค่าที่ AI สกัดมา)
+//    'ai'     ปล่อยให้ AI สกัด — Master เติมให้เฉพาะตอนที่ AI ไม่ได้ค่า
+//    'off'    ไม่กรอกช่องนี้
+// ============================================================
+export type FieldMode = "master" | "ai" | "off";
+
+export interface DeclarationTemplate {
+  id?: string;
+  name: string;
+  customer_name: string;
+  description?: string | null;
+  /** ระดับ 2 — consignee ที่ Master นี้ใช้ได้ (ว่าง = ทุกราย) */
+  consignee_names?: string[];
+  /** ระดับ 3 — รหัสสินค้าที่ Master นี้ใช้ได้ (ว่าง = ทุกสินค้า) */
+  product_codes?: string[];
+  /** ลำดับความสำคัญเมื่อคะแนนเท่ากัน */
+  priority?: number;
+  source?: Record<string, unknown>;
+  header: Record<string, unknown>;
+  items: Record<string, unknown>[];
+  field_modes: { [key: string]: FieldMode };
+  is_default: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+let _templatesOk: boolean | null = null;
+/** ตารางคลัง Master มีจริงไหม (รัน sql/11 แล้วหรือยัง) */
+export async function templatesEnabled(): Promise<boolean> {
+  if (_templatesOk !== null) return _templatesOk;
+  const sb = getClient();
+  if (!sb) { _templatesOk = false; return false; }
+  const { error } = await sb.from("declaration_templates").select("id").limit(1);
+  _templatesOk = !error;
+  if (error) console.warn("[supabase] ยังไม่มีตาราง declaration_templates — โปรดรัน sql/11_extra_fields_and_masters.sql");
+  return _templatesOk;
+}
+
+export async function listTemplates(customer?: string): Promise<DeclarationTemplate[]> {
+  const sb = getClient();
+  if (!sb || !(await templatesEnabled())) return [];
+  try {
+    let q = sb.from("declaration_templates").select("*").order("updated_at", { ascending: false });
+    if (customer) q = q.eq("customer_name", customer);
+    const { data, error } = await q;
+    if (error) throw error;
+    return (data ?? []) as DeclarationTemplate[];
+  } catch (err) {
+    console.error("[supabase] listTemplates error:", errMsg(err));
+    return [];
+  }
+}
+
+export async function getTemplate(id: string): Promise<DeclarationTemplate | null> {
+  const sb = getClient();
+  if (!sb || !id || !(await templatesEnabled())) return null;
+  try {
+    const { data, error } = await sb.from("declaration_templates").select("*").eq("id", id).maybeSingle();
+    if (error) throw error;
+    return (data ?? null) as DeclarationTemplate | null;
+  } catch (err) {
+    console.error("[supabase] getTemplate error:", errMsg(err));
+    return null;
+  }
+}
+
+/** Master ที่ตั้งเป็นค่าเริ่มต้นของลูกค้า (ใช้เติมใบที่มาจากอีเมลอัตโนมัติ) */
+export async function getDefaultTemplate(customer: string): Promise<DeclarationTemplate | null> {
+  const sb = getClient();
+  if (!sb || !customer || !(await templatesEnabled())) return null;
+  try {
+    const { data, error } = await sb.from("declaration_templates").select("*")
+      .eq("customer_name", customer).eq("is_default", true).maybeSingle();
+    if (error) throw error;
+    return (data ?? null) as DeclarationTemplate | null;
+  } catch (err) {
+    console.error("[supabase] getDefaultTemplate error:", errMsg(err));
+    return null;
+  }
+}
+
+/** สร้าง/แก้ Master — ส่ง id มา = แก้ของเดิม, ไม่ส่ง = สร้างใหม่ */
+export async function saveTemplate(
+  t: Partial<DeclarationTemplate> & { name: string },
+  userId?: string | null,
+): Promise<DeclarationTemplate | null> {
+  const sb = getClient();
+  if (!sb || !(await templatesEnabled())) return null;
+  const payload: Record<string, unknown> = {
+    name: t.name,
+    customer_name: t.customer_name ?? "",
+    description: t.description ?? null,
+    header: t.header ?? {},
+    items: t.items ?? [],
+    field_modes: t.field_modes ?? {},
+    is_default: !!t.is_default,
+  };
+  // ฟิลด์ 3 ระดับ (sql/12) — ใส่เฉพาะเมื่อ DB มีคอลัมน์แล้ว กันพังถ้ายังไม่ได้รัน
+  if (await templateLevelsEnabled()) {
+    payload.consignee_names = (t.consignee_names ?? []).map((x) => String(x).trim()).filter(Boolean);
+    payload.product_codes = (t.product_codes ?? []).map((x) => String(x).trim()).filter(Boolean);
+    payload.priority = Number(t.priority ?? 0);
+    if (t.source) payload.source = t.source;
+  }
+  try {
+    // 1 ลูกค้ามี default ได้อันเดียว → ปลด default เดิมก่อน (unique index จะไม่ให้ insert ซ้อน)
+    if (payload.is_default && payload.customer_name) {
+      let clear = sb.from("declaration_templates").update({ is_default: false })
+        .eq("customer_name", payload.customer_name).eq("is_default", true);
+      if (t.id) clear = clear.neq("id", t.id);
+      await clear;
+    }
+    if (t.id) {
+      const { data, error } = await sb.from("declaration_templates")
+        .update(payload).eq("id", t.id).select().single();
+      if (error) throw error;
+      return data as DeclarationTemplate;
+    }
+    payload.created_by = userId ?? null;
+    const { data, error } = await sb.from("declaration_templates")
+      .insert(payload).select().single();
+    if (error) throw error;
+    return data as DeclarationTemplate;
+  } catch (err) {
+    console.error("[supabase] saveTemplate error:", errMsg(err));
+    return null;
+  }
+}
+
+
+let _tplLevels: boolean | null = null;
+/** ตาราง Master มีคอลัมน์ 3 ระดับแล้วไหม (รัน sql/12 หรือยัง) */
+export async function templateLevelsEnabled(): Promise<boolean> {
+  if (_tplLevels !== null) return _tplLevels;
+  const sb = getClient();
+  if (!sb) { _tplLevels = false; return false; }
+  const { error } = await sb.from("declaration_templates").select("consignee_names").limit(1);
+  _tplLevels = !error;
+  if (error) console.warn("[supabase] Master ยังไม่มีคอลัมน์ 3 ระดับ — โปรดรัน sql/12_master_3_levels.sql");
+  return _tplLevels;
+}
+
+/**
+ * เลือก Master ที่ "ตรงที่สุด" สำหรับใบนี้ — ตามที่ตกลงในที่ประชุม (3 ระดับ)
+ *   คะแนน = ตรงรหัสสินค้า ×4 + ตรง consignee ×2 + เป็นค่าเริ่มต้น ×1 + priority
+ *   ไม่ตรงเลยและไม่ใช่ค่าเริ่มต้น = ไม่เอา (กัน Master ของ consignee อื่นมาใช้ผิด)
+ */
+export function scoreTemplate(
+  t: DeclarationTemplate,
+  consignee: string,
+  productCodes: string[],
+): number | null {
+  const norm = (s: unknown) => String(s ?? "").trim().toUpperCase();
+  const cons = norm(consignee);
+  const prods = new Set(productCodes.map(norm).filter(Boolean));
+  const tCons = (t.consignee_names ?? []).map(norm).filter(Boolean);
+  const tProds = (t.product_codes ?? []).map(norm).filter(Boolean);
+
+  // null = Master ไม่ได้ระบุระดับนี้ → ใช้ได้กับทุกค่า
+  const consMatch = tCons.length ? (!!cons && tCons.includes(cons)) : null;
+  const prodMatch = tProds.length ? tProds.some((p) => prods.has(p)) : null;
+
+  // ระบุไว้แล้วแต่ไม่ตรง → ใช้ Master นี้ไม่ได้
+  if (consMatch === false || prodMatch === false) return null;
+
+  let score = 0;
+  if (prodMatch === true) score += 4;      // ระดับ 3 ตรง = ละเอียดสุด
+  if (consMatch === true) score += 2;      // ระดับ 2 ตรง
+  if (t.is_default) score += 1;            // ค่าเริ่มต้นของลูกค้า
+  score += Number(t.priority ?? 0);
+  // ไม่ตรงอะไรเลยและไม่ใช่ค่าเริ่มต้น → ไม่เดาสุ่ม
+  return score === 0 ? null : score;
+}
+
+export async function findBestTemplate(
+  customer: string,
+  consignee: string,
+  productCodes: string[] = [],
+): Promise<DeclarationTemplate | null> {
+  if (!customer) return null;
+  const all = await listTemplates(customer);
+  if (!all.length) return null;
+  let best: { score: number; tpl: DeclarationTemplate } | null = null;
+  for (const t of all) {
+    const score = scoreTemplate(t, consignee, productCodes);
+    if (score === null) continue;
+    if (!best || score > best.score) best = { score, tpl: t };
+  }
+  if (best) {
+    console.log(`[master] เลือก "${best.tpl.name}" (คะแนน ${best.score}) สำหรับ ${customer}/${consignee || "-"}`);
+  }
+  return best?.tpl ?? null;
+}
+
+export async function deleteTemplate(id: string): Promise<boolean> {
+  const sb = getClient();
+  if (!sb || !id || !(await templatesEnabled())) return false;
+  try {
+    const { error } = await sb.from("declaration_templates").delete().eq("id", id);
+    if (error) throw error;
+    return true;
+  } catch (err) {
+    console.error("[supabase] deleteTemplate error:", errMsg(err));
+    return false;
+  }
 }

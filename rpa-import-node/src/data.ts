@@ -340,6 +340,22 @@ export async function loadRecordsFromSupabase(onlyDeclId?: string): Promise<Reco
         Object.entries(raw).map(([k, v]) => [k, v == null ? "" : String(v)]),
       );
       rec.__supabase_id__ = raw.id; // ไว้ mark doc_status หลังทำเสร็จ
+      // ช่องจากทะเบียนช่องที่ยังไม่มีคอลัมน์จริง (sql/11) — ตัวกรอก generic ใช้
+      if (raw.extra_fields && typeof raw.extra_fields === "object") {
+        rec.__extra_fields__ = raw.extra_fields as { [k: string]: unknown };
+      }
+      // โหมดรายช่องที่มาจาก Master — 'off' = ห้ามกรอกช่องนั้น
+      if (raw.field_modes && typeof raw.field_modes === "object") {
+        const off = new Set<string>();
+        for (const [k, mode] of Object.entries(raw.field_modes as { [k: string]: unknown })) {
+          if (String(mode) !== "off") continue;
+          off.add(k);
+          // key ของ registry อาจต่างจากชื่อที่ allowed() ใช้ (ซึ่งเป็นชื่อคอลัมน์) → ใส่ทั้งคู่
+          const mapped = SHEET_HEADER_MAP[k];
+          if (mapped) off.add(mapped);
+        }
+        if (off.size) rec.__off_fields__ = off;
+      }
       out.push(rec);
     }
 
@@ -379,6 +395,8 @@ export function mapItemRow(it: { [k: string]: unknown }): Record {
     export_tariff: s(it.export_tariff),
     customs_unit_code: s(it.customs_unit_code),
     is_foc: it.is_foc === true || s(it.is_foc).toLowerCase() === "true",
+    // ช่องต่อรายการที่ยังไม่มีคอลัมน์ (พิกัดสิทธิ/ประเทศต้นกำเนิด/หมายเหตุ ฯลฯ) — ตัวกรอก generic ใช้
+    __extra_fields__: (it.extra_fields ?? {}) as { [k: string]: unknown },
   };
 }
 

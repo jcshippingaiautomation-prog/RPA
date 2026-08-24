@@ -23,6 +23,11 @@ export interface Record {
   __declaration_no__?: string;
   // รายการสินค้าหลายแถว (จาก declaration_items) — ถ้าว่าง fallback ใช้ค่าหัวรายการ
   __items__?: Record[];
+  // ช่องจากทะเบียนช่อง (field-registry) ที่ยังไม่มีคอลัมน์ใน DB — เก็บใน declarations.extra_fields
+  //   ตัวกรอก generic (fillFromRegistry) อ่านจากตรงนี้
+  __extra_fields__?: { [key: string]: unknown };
+  // ช่องที่ Master สั่ง "ไม่กรอก" (declarations.field_modes = 'off') — ทั้ง key ของ registry และชื่อคอลัมน์
+  __off_fields__?: Set<string>;
 }
 
 export interface EmailConfig {
