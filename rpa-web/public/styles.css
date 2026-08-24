@@ -550,3 +550,11 @@ select.ms-mode.m-off { background: #f9eaea; color: var(--red); }
 /* ยกเว้นตัวเลือกโหมดในฟอร์ม Master — ไม่งั้นมันกิน 100% จนช่องกรอกค่าหายไป
    (แถวใน Master ใช้ .reg-fld ร่วมกับฟอร์มใบขน กฎบนจึงเลยมาโดนด้วย) */
 .reg-fld .ms-row select.ms-mode { width: 118px; flex: none; }
+
+/* คำอธิบายหัวหน้าตั้งค่าลูกค้า — บอกว่าอะไรย้ายไป Master แล้ว */
+.cs-note {
+  font-size: 12.5px; line-height: 1.6; color: var(--muted2);
+  background: var(--ico-blue-bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 12px; margin-bottom: 14px;
+}
+.cs-note a { color: var(--primary); font-weight: 600; }

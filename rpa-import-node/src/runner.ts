@@ -221,10 +221,16 @@ async function attachRules(
     const matchedCase = pickCase(r, cok ? casesOverride![cok] : undefined);
 
     // field rules (allowed): กรณีที่ match ชนะ default
+    //   ⚠ รายการว่าง = "ไม่จำกัด" ไม่ใช่ "ห้ามกรอกทุกช่อง"
+    //     การคุมว่าช่องไหนกรอก/ไม่กรอก ย้ายไปอยู่ที่ field_modes ของ Master แล้ว
+    //     ถ้าตีความว่าง = ห้ามหมด ลูกค้าที่ยังไม่ได้ตั้ง Master จะกรอกอะไรไม่ได้เลย
+    const emptySet = (s?: Set<string> | null) => !s || s.size === 0;
     if (matchedCase) {
-      r.__field_rules__ = new Set(matchedCase.allowed_fields ?? []);
+      const cs = new Set(matchedCase.allowed_fields ?? []);
+      r.__field_rules__ = emptySet(cs) ? null : cs;
     } else {
-      r.__field_rules__ = fk ? fieldRules[fk] : null;
+      const ds = fk ? fieldRules[fk] : null;
+      r.__field_rules__ = emptySet(ds) ? null : ds;
     }
 
     // capture: กรณีที่ match ชนะ → default (Supabase) → Google Sheet
@@ -249,7 +255,9 @@ async function attachRules(
 
     log(
       `  rules('${cust}'): ` +
-        `fields=${fk === null ? "all" : (r.__field_rules__ as Set<string>).size}, ` +
+        // __field_rules__ = null ได้ทั้งกรณี "ไม่เจอลูกค้า" และ "รายการว่าง = ไม่จำกัด"
+        //   → ต้องดูค่าจริง ไม่ใช่เดาจาก fk (ไม่งั้น .size พังเมื่อเป็น null)
+        `fields=${r.__field_rules__ ? (r.__field_rules__ as Set<string>).size : "ทุกช่อง"}, ` +
         `capture=${r.__capture_screenshots__}, presets=${presetCount}`,
     );
   }

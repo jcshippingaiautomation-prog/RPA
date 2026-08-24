@@ -1890,27 +1890,6 @@ $("btnSaveCfg").onclick = async () => {
 // ---- Customer field rules (config/AI per field) ----
 let ruleFields = [], catalogFields = [], custSettings = [];
 let csOpen = new Set();       // ชื่อลูกค้าที่ accordion เปิดอยู่ (คงสถานะข้าม re-render)
-let csCaseOpen = new Set();   // "ลูกค้า::index" ของกรณีที่เปิดอยู่
-const PAGE_NAMES = { 1: "หน้า 1 — หัวใบขน", 2: "หน้า 2 — ใบกำกับ/Invoice", 3: "หน้า 3 — รายละเอียดสินค้า" };
-// โหมดของช่อง: ai = ใช้ค่า AI, config = กำหนดเอง, off = ไม่ใช้งาน(ไม่กรอก)
-function fieldMode(s, key) {
-  if (!s.allowed.has(key)) return "off";
-  // "กำหนดเอง" = key อยู่ใน presets (แม้ค่าว่าง = ตั้งใจให้ช่องว่าง); ไม่อยู่ = "จาก AI"
-  const hasPreset = Object.prototype.hasOwnProperty.call(s.presets, key);
-  return hasPreset ? "config" : "ai";
-}
-// นับช่องที่ "ใช้งาน" (ai+config) ในกลุ่ม → โชว์ "ใช้ x/y"
-function countActive(s, fields) {
-  const on = fields.filter((f) => s.allowed.has(f.key)).length;
-  return `${on}/${fields.length}`;
-}
-
-// ช่องที่ใช้ "แยกกรณี" ได้ (split field)
-const SPLIT_FIELD_OPTIONS = [
-  ["", "— ไม่แยกกรณี —"],
-  ["consignee_name", "Consignee (ผู้ซื้อ)"],
-  ["destination_country_code", "ประเทศปลายทาง"],
-];
 // คืน config object ตาม caseIdx: -1 = default (customer), 0..N = s.cases[idx] — ทุกตัวมี allowed(Set)/presets/rules/capture
 function cfgOf(s, ci) { return ci < 0 ? s : s.cases[ci]; }
 
@@ -1918,150 +1897,41 @@ function renderCustomerSettings() {
   const c = $("rulesContainer");
   if (!custSettings.length) { c.innerHTML = '<p class="empty" style="padding:20px">ยังไม่มีลูกค้า — เพิ่มด้านบน</p>'; return; }
 
-  // จัดช่องเป็นกลุ่มตามหน้า
-  const byPage = {};
-  ruleFields.forEach((f) => { const pg = f.page || 0; (byPage[pg] = byPage[pg] || []).push(f); });
-  const pages = Object.keys(byPage).sort();
-
-  // แถวช่อง (mode + preset) — cfg = default หรือ case; ci ระบุปลายทางการเก็บค่า
-  const rowHtml = (f, si, ci, cfg) => {
-    const mode = fieldMode(cfg, f.key);
-    const preset = (cfg.presets[f.key] != null) ? String(cfg.presets[f.key]) : "";
-    return `<div class="cs-row ${mode === "off" ? "is-off" : ""}">
-      <span class="cs-flabel">${escapeHtml(f.label)}</span>
-      <select class="csMode sel sel-sm" data-s="${si}" data-c="${ci}" data-f="${f.key}">
-        <option value="ai" ${mode === "ai" ? "selected" : ""}>จาก AI</option>
-        <option value="config" ${mode === "config" ? "selected" : ""}>กำหนดเอง</option>
-        <option value="off" ${mode === "off" ? "selected" : ""}>ไม่ใช้งาน</option>
-      </select>
-      <input class="csPreset inp" data-s="${si}" data-c="${ci}" data-f="${f.key}" placeholder="ค่าที่กำหนด" value="${escapeHtml(preset)}" style="display:${mode === "config" ? "" : "none"}" /></div>`;
-  };
-  // บล็อก config 1 ชุด (3 หน้า + กฎสกัด) — ใช้ทั้ง default และแต่ละกรณี
-  const configBlock = (si, ci, cfg) => {
-    const pagesHtml = pages.map((pg) => {
-      const fields = byPage[pg];
-      const rows = fields.map((f) => rowHtml(f, si, ci, cfg)).join("");
-      return `<details class="cs-page">
-        <summary><span class="cs-page-name">${escapeHtml(PAGE_NAMES[pg] || (pg == 0 ? "ทั่วไป" : "หน้า " + pg))}</span>
-          <span class="cs-count">ใช้ ${countActive(cfg, fields)}</span></summary>
-        <div class="cs-grid">${rows}</div></details>`;
-    }).join("");
-    return `${pagesHtml}
-      <details class="cs-rules"><summary>กฎสกัด AI (Extraction Rules)</summary>
-        <textarea class="csRules inp" data-s="${si}" data-c="${ci}" rows="5">${escapeHtml(cfg.extraction_rules || "")}</textarea></details>`;
-  };
-
-  c.innerHTML = custSettings.map((s, si) => {
-    const cases = Array.isArray(s.cases) ? s.cases : [];
-    const splitRealOpts = SPLIT_FIELD_OPTIONS.filter(o => o[0]).map(([v, l]) =>
-      `<option value="${v}" ${(s.split_field || "consignee_name") === v ? "selected" : ""}>${escapeHtml(l)}</option>`).join("");
-    // ส่วนกรณีย่อย (แสดงเมื่อมีอย่างน้อย 1 กรณี) — split dropdown อยู่ในหัวข้อ
-    const casesHtml = !cases.length ? "" : `
-      <div class="cs-cases">
-        <div class="cs-cases-head">
-          <span>กรณีย่อย (${cases.length})</span>
-          <span class="cs-split-inline">แยกตาม <select class="csSplit sel sel-sm" data-s="${si}">${splitRealOpts}</select></span>
-        </div>
-        ${cases.map((cc, ci) => `
-          <details class="cs-case" data-key="${escapeHtml(s.customer_name)}::${ci}" ${csCaseOpen.has(s.customer_name + "::" + ci) ? "open" : ""}>
-            <summary class="cs-case-sum">
-              <span class="cs-case-badge">กรณี ${ci + 1}</span>
-              <span class="cs-name">${escapeHtml(cc.name || cc.match_value || "(ยังไม่ตั้งชื่อ)")}</span>
-              <span class="cs-cust-actions">
-                <label class="chk-inline" onclick="event.stopPropagation()"><input type="checkbox" class="csCapture" data-s="${si}" data-c="${ci}" ${cc.request_screenshot ? "checked" : ""}/> ขอภาพหน้าจอ</label>
-                <button class="btn btn-ghost btn-xs csCaseDel" data-s="${si}" data-c="${ci}" onclick="event.stopPropagation()">ลบกรณี</button>
-              </span>
-            </summary>
-            <div class="cs-case-body">
-              <div class="cs-case-match">
-                <div class="fld"><label>ชื่อกรณี</label><input class="csCaseName inp" data-s="${si}" data-c="${ci}" value="${escapeHtml(cc.name || "")}" placeholder="เช่น DK&N VIETNAM" /></div>
-                <div class="fld"><label>ค่าที่ต้องตรง (${escapeHtml(SPLIT_FIELD_OPTIONS.find(o => o[0] === s.split_field)?.[1] || "")})</label><input class="csCaseMatch inp" data-s="${si}" data-c="${ci}" value="${escapeHtml(cc.match_value || "")}" placeholder="เช่น DK&N" /></div>
-              </div>
-              ${configBlock(si, ci, cc)}
-            </div>
-          </details>`).join("")}
-      </div>`;
+  c.innerHTML = `<div class="cs-note">
+      การคุมว่า <b>ช่องไหนใช้ค่าตายตัว · ช่องไหนให้ AI อ่าน · ช่องไหนไม่กรอก</b>
+      ย้ายไปอยู่ที่ <a href="#masters">คลัง Master</a> แล้ว เพราะตั้งได้ละเอียดกว่า (แยกราย Consignee และรายสินค้า)
+      หน้านี้เหลือไว้เฉพาะสิ่งที่เป็นของ “ลูกค้าทั้งราย” ไม่ผูกกับใบขนใบใด
+    </div>` + custSettings.map((s, si) => {
+    const nRules = (s.extraction_rules || "").trim().length;
     return `<details class="cs-cust" data-cust="${escapeHtml(s.customer_name)}" ${csOpen.has(s.customer_name) ? "open" : ""}>
       <summary class="cs-cust-sum">
         <span class="cs-name">${escapeHtml(s.customer_name)}</span>
-        <span class="cs-cust-meta">ใช้ ${countActive(s, ruleFields)} ช่อง${cases.length ? ` · ${cases.length} กรณี` : ""}</span>
+        <span class="cs-cust-meta">${nRules ? `กฎสั่ง AI ${nRules.toLocaleString()} ตัวอักษร` : "ยังไม่มีกฎสั่ง AI"}</span>
         <span class="cs-cust-actions">
           <label class="chk-inline" onclick="event.stopPropagation()"><input type="checkbox" class="csCapture" data-s="${si}" data-c="-1" ${s.request_screenshot ? "checked" : ""}/> ขอภาพหน้าจอ</label>
           <button class="btn btn-ghost btn-xs csDel" data-s="${si}" onclick="event.stopPropagation()">ลบ</button>
         </span>
       </summary>
       <div class="cs-cust-body">
-        ${cases.length ? '<div class="cs-default-label">⚙ กรณีเริ่มต้น (default) — ใช้เมื่อไม่เข้ากรณีย่อยไหน</div>' : ""}
-        ${configBlock(si, -1, s)}
-        <div class="cs-add-case-bar">
-          <button class="btn btn-primary btn-sm csAddCase" data-s="${si}">${svgIcon("plus", 13)} เพิ่มกรณี (ตั้งค่าเฉพาะเงื่อนไข)</button>
-          <span class="muted" style="font-size:12px">เช่น แยกตาม Consignee — บางผู้ซื้อใช้ preset/กฎต่างกัน</span>
+        <div class="fld">
+          <label>กฎสั่ง AI ตอนอ่านเอกสารของลูกค้ารายนี้</label>
+          <textarea class="csRules inp" data-s="${si}" data-c="-1" rows="12"
+            placeholder="เช่น: ชื่อสินค้าให้ใช้บรรทัดแรกของ description · น้ำหนักสุทธิอยู่คอลัมน์ N.W. · ถ้าไม่มีเลข PO ให้เว้นว่าง"
+          >${escapeHtml(s.extraction_rules || "")}</textarea>
         </div>
-        ${casesHtml}
       </div>
     </details>`;
   }).join("");
 
-  // dropdown 3 ค่า: ai / config / off — เขียนลง cfg ที่ระบุด้วย data-c
-  c.querySelectorAll(".csMode").forEach((sel) => (sel.onchange = () => {
-    const cfg = cfgOf(custSettings[+sel.dataset.s], +sel.dataset.c), f = sel.dataset.f;
-    const row = sel.closest(".cs-row");
-    const input = row.querySelector(".csPreset");
-    if (sel.value === "off") {
-      cfg.allowed.delete(f); delete cfg.presets[f];
-      if (input) input.style.display = "none";
-      row.classList.add("is-off");
-    } else {
-      cfg.allowed.add(f);
-      row.classList.remove("is-off");
-      if (sel.value === "config") {
-        if (!Object.prototype.hasOwnProperty.call(cfg.presets, f)) cfg.presets[f] = "";
-        if (input) input.style.display = "";
-      } else {
-        delete cfg.presets[f];
-        if (input) { input.style.display = "none"; input.value = ""; }
-      }
-    }
-  }));
-  c.querySelectorAll(".csPreset").forEach((el) => (el.oninput = () => {
-    cfgOf(custSettings[+el.dataset.s], +el.dataset.c).presets[el.dataset.f] = el.value;
-  }));
   c.querySelectorAll(".csRules").forEach((el) => (el.oninput = () => {
     cfgOf(custSettings[+el.dataset.s], +el.dataset.c).extraction_rules = el.value;
   }));
   c.querySelectorAll(".csCapture").forEach((el) => (el.onchange = () => {
     cfgOf(custSettings[+el.dataset.s], +el.dataset.c).request_screenshot = el.checked;
   }));
-  // จำสถานะเปิด/ปิด accordion (ลูกค้า + กรณี) ข้าม re-render — กัน "หน้าต่างยุบ" ตอนเลือก split/เพิ่มกรณี
+  // จำสถานะเปิด/ปิด accordion ข้าม re-render
   c.querySelectorAll(".cs-cust").forEach((el) => (el.ontoggle = () => {
     if (el.open) csOpen.add(el.dataset.cust); else csOpen.delete(el.dataset.cust);
-  }));
-  c.querySelectorAll(".cs-case").forEach((el) => (el.ontoggle = () => {
-    if (el.open) csCaseOpen.add(el.dataset.key); else csCaseOpen.delete(el.dataset.key);
-  }));
-  // เปลี่ยน "แยกกรณีตาม" — ลูกค้าเปิดค้างไว้ + กรณีย่อยโผล่ทันที
-  c.querySelectorAll(".csSplit").forEach((sel) => (sel.onchange = () => {
-    const s = custSettings[+sel.dataset.s];
-    s.split_field = sel.value;
-    if (s.split_field && !Array.isArray(s.cases)) s.cases = [];
-    csOpen.add(s.customer_name); // คงเปิดไว้
-    renderCustomerSettings();
-  }));
-  // เพิ่มกรณี — ตั้ง split เริ่มต้น (Consignee) ถ้ายังไม่มี + ลูกค้าเปิดค้าง + เปิดกรณีใหม่ให้กรอกต่อทันที
-  c.querySelectorAll(".csAddCase").forEach((b) => (b.onclick = () => {
-    const s = custSettings[+b.dataset.s];
-    if (!s.split_field) s.split_field = "consignee_name"; // default แยกตาม Consignee (เปลี่ยนได้ในหัวข้อกรณี)
-    (s.cases = s.cases || []).push({ name: "", match_value: "", allowed: new Set(ruleFields.map((f) => f.key)), presets: {}, extraction_rules: "", request_screenshot: false });
-    csOpen.add(s.customer_name);
-    csCaseOpen.add(s.customer_name + "::" + (s.cases.length - 1)); // เปิดกรณีใหม่
-    renderCustomerSettings();
-  }));
-  c.querySelectorAll(".csCaseName").forEach((el) => (el.oninput = () => { custSettings[+el.dataset.s].cases[+el.dataset.c].name = el.value; }));
-  c.querySelectorAll(".csCaseMatch").forEach((el) => (el.oninput = () => { custSettings[+el.dataset.s].cases[+el.dataset.c].match_value = el.value; }));
-  c.querySelectorAll(".csCaseDel").forEach((b) => (b.onclick = async () => {
-    const s = custSettings[+b.dataset.s];
-    if (!(await confirmDialog(`ลบกรณี <b>${escapeHtml(s.cases[+b.dataset.c].name || s.cases[+b.dataset.c].match_value || "")}</b>?`, "ลบกรณี"))) return;
-    s.cases.splice(+b.dataset.c, 1); csOpen.add(s.customer_name); renderCustomerSettings();
   }));
   c.querySelectorAll(".csDel").forEach((b) => (b.onclick = async () => {
     const s = custSettings[+b.dataset.s];
@@ -2092,18 +1962,11 @@ async function loadRules() {
     ruleFields = (data.fields || []).map((f) => ({ ...f, page: FIELD_PAGE[f.key] || 1 }));
     if (!data.enabled) { note.textContent = "⚠ ยังไม่ได้ตั้งค่า Supabase"; custSettings = []; renderCustomerSettings(); return; }
     note.textContent = "";
-    const allKeys = ruleFields.map((f) => f.key);
+    // หน้านี้เหลือแค่ "กฎสั่ง AI" กับ "ขอภาพหน้าจอ" — ช่องอนุญาต/ค่าตายตัว/กรณีย่อย ย้ายไป Master แล้ว
     custSettings = (data.settings || []).map((s) => ({
       customer_name: s.customer_name,
-      // default = จาก AI: ถ้าลูกค้ายังไม่เคยตั้ง allowed_fields → เปิดทุกช่อง (จาก AI)
-      allowed: new Set((s.allowed_fields && s.allowed_fields.length) ? s.allowed_fields : allKeys),
-      presets: { ...(s.presets || {}) }, extraction_rules: s.extraction_rules || "", request_screenshot: !!s.request_screenshot,
-      split_field: s.split_field || "",
-      cases: (Array.isArray(s.cases) ? s.cases : []).map((cc) => ({
-        name: cc.name || "", match_value: cc.match_value || "",
-        allowed: new Set((cc.allowed_fields && cc.allowed_fields.length) ? cc.allowed_fields : allKeys),
-        presets: { ...(cc.presets || {}) }, extraction_rules: cc.extraction_rules || "", request_screenshot: !!cc.request_screenshot,
-      })),
+      extraction_rules: s.extraction_rules || "",
+      request_screenshot: !!s.request_screenshot,
     }));
     renderCustomerSettings();
   } catch (e) { note.textContent = "โหลดไม่ได้: " + e.message; }
@@ -2112,22 +1975,19 @@ $("btnAddCustomer").onclick = () => {
   const inp = $("newCustomer"), name = inp.value.trim();
   if (!name) { toast("ใส่ชื่อลูกค้าก่อน", "error"); return; }
   if (custSettings.some((s) => s.customer_name.toUpperCase() === name.toUpperCase())) { toast("มีลูกค้านี้แล้ว", "error"); return; }
-  custSettings.unshift({ customer_name: name, allowed: new Set(ruleFields.map((f) => f.key)), presets: {}, extraction_rules: "", request_screenshot: false, split_field: "", cases: [] });
+  custSettings.unshift({ customer_name: name, extraction_rules: "", request_screenshot: false });
   inp.value = ""; renderCustomerSettings();
 };
 $("btnReloadRules").onclick = loadRules;
 $("btnSaveRules").onclick = async () => {
   try {
     for (const s of custSettings)
+      // ส่ง allowed_fields/presets/cases เป็นว่างเสมอ — เลิกใช้แล้ว ให้ Master คุมแทน
+      //   (ถ้าส่งค่ากลับไป จะกลายเป็นตัวคุมซ้อนกับ Master แล้วแก้ที่ Master ไม่มีผล)
       await api("/api/customer-settings", "POST", {
-        customer_name: s.customer_name, allowed_fields: [...s.allowed], presets: s.presets,
+        customer_name: s.customer_name,
+        allowed_fields: [], presets: {}, cases: [], split_field: "",
         extraction_rules: s.extraction_rules || "", request_screenshot: !!s.request_screenshot,
-        split_field: s.split_field || "",
-        cases: (s.cases || []).map((cc) => ({
-          name: cc.name || "", match_value: cc.match_value || "",
-          allowed_fields: [...cc.allowed], presets: cc.presets,
-          extraction_rules: cc.extraction_rules || "", request_screenshot: !!cc.request_screenshot,
-        })),
       });
     const sv = $("rulesSaved"); sv.style.display = "inline"; setTimeout(() => (sv.style.display = "none"), 2000);
     toast("บันทึกการตั้งค่าลูกค้าแล้ว", "success");
