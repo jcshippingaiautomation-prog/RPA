@@ -289,6 +289,53 @@ async function putDate(
   await kendoPickDate(page, selector, value);
 }
 
+/**
+ * ตรวจว่า "วันที่ส่งออก" ลงช่องจริง แล้วซ่อมถ้าไม่ลง
+ *
+ * ทำไมต้องมี: ช่องนี้เป็น MaskedTextBox ครอบ DatePicker อีกที
+ * การคลิกวันในปฏิทินตั้งค่าให้ DatePicker แต่บางครั้ง input จริงยังเป็น "0_/__/____"
+ * → DCTK ปฏิเสธตอนบันทึก ("Cannot insert the value NULL into column 'DEPARTURE_DATE'")
+ * ซึ่งอ่านจากล็อกไม่เห็น เพราะปฏิทินเลือกสำเร็จแล้ว
+ *
+ * ซ่อมโดยพิมพ์ dd/mm/yyyy ลง input ตรง ๆ (รูปแบบที่ DCTK ใช้แสดงผล)
+ */
+async function assertDepartureDate(page: Page, r: Record): Promise<void> {
+  const iso = String(r.etd_date ?? "").trim();
+  if (!iso || !allowed(r, "etd")) return;
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) { log(`  ⚠ วันที่ส่งออก "${iso}" ไม่ใช่รูปแบบ YYYY-MM-DD — ข้ามการตรวจ`); return; }
+  const want = `${m[3]}/${m[2]}/${m[1]}`;
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const got = await page.evaluate(() => {
+      const el = document.querySelector("#DepartureDate") as HTMLInputElement | null;
+      return el ? el.value : null;
+    }).catch(() => null);
+    if (got === null) { log(`  ⚠ ไม่พบช่องวันที่ส่งออก (#DepartureDate) — ข้ามการตรวจ`); return; }
+    if (got === want) {
+      if (attempt > 1) log(`  ✓ ซ่อมวันที่ส่งออกสำเร็จ = ${want}`);
+      return;
+    }
+    log(`  ⚠ วันที่ส่งออกในช่อง = "${got}" ไม่ตรงกับ "${want}" — พิมพ์ใหม่ (รอบ ${attempt}/3)`);
+    try {
+      await page.click("#DepartureDate");
+      await page.fill("#DepartureDate", "");
+      await page.type("#DepartureDate", want.replace(/\//g, ""), { delay: 60 });
+      await page.keyboard.press("Escape");   // ปิดปฏิทินที่เด้งขึ้นมา ไม่ให้ทับค่าที่พิมพ์
+      await page.evaluate(() => {
+        const el = document.querySelector("#DepartureDate") as HTMLInputElement | null;
+        el?.dispatchEvent(new Event("change", { bubbles: true }));
+        el?.blur();
+      });
+      await sleep(1200);
+    } catch (e) {
+      log(`  ⚠ พิมพ์วันที่ส่งออกไม่สำเร็จ: ${e instanceof Error ? e.message.slice(0, 70) : ""}`);
+      return;
+    }
+  }
+  log(`  ✗ ตั้งวันที่ส่งออกไม่สำเร็จหลังลอง 3 รอบ — DCTK จะบันทึกไม่ผ่าน`);
+}
+
 /** ถ้าลูกค้าขอ screenshot → save PNG เก็บ path ไว้ใน record (Python _capture_if_requested) */
 async function captureIfRequested(
   page: Page,
@@ -576,10 +623,14 @@ export async function fillPage1(page: Page, r: Record): Promise<void> {
     }
     await kendoDropdownPick(page, S.SEL_TAX_DROPDOWN, String(r.tax_payment_code ?? ""));
   }
-  await putDate(page, r, "etd", S.SEL_ETD_DATEPICKER, String(r.etd_date ?? ""));
-
-  // ---- ช่องเสริมจากทะเบียนช่อง (ช่องที่ยังไม่มีคอลัมน์ใน DB) — ทำท้ายสุดเสมอ
+  // ---- ช่องเสริมจากทะเบียนช่อง (ช่องที่ยังไม่มีคอลัมน์ใน DB)
+  //   ต้องทำ "ก่อน" ช่องบังคับด้านล่าง: การกรอกช่องเสริมทำให้ DCTK คำนวณใหม่
+  //   แล้วล้างค่าวันที่ส่งออกทิ้ง (เจอจริง: บันทึกไม่ผ่าน DEPARTURE_DATE = NULL)
   await fillFromRegistry(page, r, 1, "header");
+
+  // ---- วันที่ส่งออก: ช่องบังคับของ DCTK — ตั้งท้ายสุดเสมอ กันโดนทับ
+  await putDate(page, r, "etd", S.SEL_ETD_DATEPICKER, String(r.etd_date ?? ""));
+  await assertDepartureDate(page, r);
 
   await captureIfRequested(page, r, "page1");
   if (r.__dry_run__) {
@@ -588,6 +639,31 @@ export async function fillPage1(page: Page, r: Record): Promise<void> {
   }
   await page.click(S.SEL_BTN_SAVE);
   await sleep(10000);
+  await reportSaveErrors(page, "Page 1");
+}
+
+/**
+ * อ่านกล่องแดง "ไม่สามารถบันทึกข้อมูลได้" ของ DCTK แล้วเขียนลงล็อก
+ *
+ * ก่อนหน้านี้ Save ที่ไม่ผ่านจะเงียบ แล้วไปพังที่หน้าถัดไปด้วยข้อความ
+ * "waitForSelector timeout" ซึ่งไม่บอกสาเหตุ ทำให้ไล่ปัญหายาก
+ */
+async function reportSaveErrors(page: Page, where: string): Promise<void> {
+  const msgs = await page.evaluate(() => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const nodes = document.querySelectorAll(
+      ".validation-summary-errors, .field-validation-error, .text-danger, [class*=alert-danger]",
+    );
+    for (const n of Array.from(nodes)) {
+      const t = (n as HTMLElement).innerText?.replace(/\s+/g, " ").trim();
+      if (t && t.length > 3 && !seen.has(t)) { seen.add(t); out.push(t); }
+    }
+    return out;
+  }).catch(() => [] as string[]);
+  if (!msgs.length) return;
+  log(`  ✗ ${where}: DCTK ไม่ยอมบันทึก —`);
+  for (const m of msgs.slice(0, 6)) log(`      ${m.slice(0, 160)}`);
 }
 
 /** Page 2 ขั้น 1 — เปิด tab ใหม่ + รอฟอร์มพร้อม (แยกออกเพื่อ inspect) */

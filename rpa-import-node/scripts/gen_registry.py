@@ -128,6 +128,10 @@ FORCE_COMPUTED = {
     # ประเภทการบรรจุ — DCTK ตั้งให้เองตามวิธีขนส่ง (ยืนยันจากการทดลองสลับค่า)
     "CargoPackingType",
 }
+# "ปัจจัยเงื่อนไข" (…TermFactor) — DCTK คำนวณจากตาราง Incoterms (Term/GetFactor)
+# "วิธีเฉลี่ยค่าใช้จ่าย" (…AverageBy) — DCTK เปิดให้เฉพาะใบหลายรายการ
+# ทั้งสองกลุ่มกรอกไม่ได้จริง (ยืนยันจากการรันจริง: ข้ามทั้ง 20 ช่อง) → ไม่ต้องพยายามกรอก
+COMPUTED_SUFFIXES = ("TermFactor", "AverageBy")
 # ยกเว้น: readonly แต่ผู้ใช้ควรตั้งค่าได้จริง (DCTK ปลดล็อกเมื่อเลือกเงื่อนไขบางอย่าง)
 #   + 2 ช่องที่ DCTK ล็อก แต่ "ระบบเรา" ต้องให้ผู้ใช้กรอกเอง:
 #     DeclarationNo = ผู้ใช้วางเลขใบขนเพื่อให้ RPA ไปค้นใบเดิมมาแก้
@@ -298,7 +302,11 @@ def main() -> int:
             #   เพราะผลสำรวจหน้า 2/3 มาจากการเปิด "ใบเก่า" ซึ่ง DCTK ล็อกหลายช่องไว้
             #   ทั้งที่ตอนสร้างใบใหม่กรอกได้ → ถ้าเชื่อ readonly จะซ่อนช่องที่ผู้ใช้ต้องกรอกจริง
             #   ใช้เฉพาะ disabled + รายชื่อที่ยืนยันแล้วว่า DCTK คำนวณให้เอง
-            computed = (f["disabled"] or name in FORCE_COMPUTED) and name not in NOT_COMPUTED
+            computed = (
+                f["disabled"]
+                or name in FORCE_COMPUTED
+                or name.endswith(COMPUTED_SUFFIXES)
+            ) and name not in NOT_COMPUTED
             out.append({
                 "key": key,
                 "label": nice_label(f),

@@ -18,9 +18,11 @@ const opts = {
   // dry run: กรอกฟอร์มจริงทุกช่อง แต่ไม่กด Save/Finalize/Print และไม่ส่งอีเมล
   //   ใช้ทดสอบว่าตัวกรอกทำงานถูกโดยไม่สร้างใบในระบบกรมฯ
   dryRun: truthy(process.env.RPA_DRY_RUN),
+  noFinalize: truthy(process.env.RPA_NO_FINALIZE),
   ...(onlyRows.length ? { onlyRows } : {}),
 };
 if (opts.dryRun) console.log("[RPA] 🧪 DRY RUN — กรอกจริงแต่ไม่บันทึก/ไม่พิมพ์");
+else if (opts.noFinalize) console.log("[RPA] 🧪 NO-FINALIZE — บันทึกครบทุกหน้าจริง แต่ไม่ finalize/พิมพ์ (เหลือใบร่างค้างใน DCTK)");
 
 runImport(opts)
   .then((r) => {

@@ -59,6 +59,13 @@ export interface RunOptions {
   /** dry run: กรอกข้อมูลจริงแต่ไม่ Save/Print และไม่ส่งอีเมล */
   dryRun?: boolean;
   /**
+   * บันทึกทุกหน้าจริง แต่ไม่ finalize/ไม่พิมพ์/ไม่ส่งอีเมล/ไม่ mark done
+   * ใช้ทดสอบหน้า 2-3 ซึ่ง dry run เข้าไม่ถึง (เพราะ dry run ไม่กด Save หน้า 1
+   * DCTK จึงไม่เปิดฟอร์มใบกำกับให้)
+   * ผลลัพธ์: ได้ "ใบร่าง" ค้างใน DCTK 1 ใบ ต้องเข้าไปลบเอง
+   */
+  noFinalize?: boolean;
+  /**
    * field rules จากภายนอก (เช่น Supabase) — { customer_name: [allowed fields] }
    * ถ้าส่งมา จะใช้แทน Google Sheet 'การกรอกข้อมูล' ทั้งหมด
    */
@@ -881,6 +888,10 @@ async function runBrowser(
       let declarationNo: string | null = null;
       if (opts.dryRun) {
         log("  🧪 dry run: ข้าม finalize/print/email — กรอกข้อมูลครบแล้วแต่ไม่บันทึก");
+      } else if (opts.noFinalize) {
+        declarationNo = typeof record.__declaration_no__ === "string" ? record.__declaration_no__ : null;
+        log(`  🧪 no-finalize: บันทึกครบ 3 หน้าแล้ว แต่ไม่ finalize/พิมพ์/ส่งอีเมล`);
+        log(`     → เหลือ "ใบร่าง" ค้างใน DCTK${declarationNo ? ` เลข ${declarationNo}` : ""} — เข้าไปลบเองได้`);
       } else {
         // เรียก finalize ครั้งเดียว (สร้างใบ + พยายามพิมพ์) — เก็บผลไว้ใช้ต่อ
         const finalizeRes = await finalizeAndPrint(page2, context, downloadDir);
@@ -943,7 +954,7 @@ async function runBrowser(
       // สถานะตามความจริง: "done" = ได้ "ใบขนจริง" (pdf) เท่านั้น
       //   ถ้าใบถูกสร้างใน DCTK แล้ว (มีเลข) แต่พิมพ์ใบขนจริงไม่ได้ (auto-reprint ก็ไม่สำเร็จ) → "partial"
       //   (ห้าม mark done ถ้าได้แค่ capture — สถานะต้องไม่โกหก user)
-      if (opts.dryRun) {
+      if (opts.dryRun || opts.noFinalize) {
         setStatus(idx, "done");
         result.done++;
       } else if (pdf) {
