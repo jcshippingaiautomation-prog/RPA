@@ -496,6 +496,18 @@ table.items-edit.fld-error { outline: 2px solid #dc2626; outline-offset: 2px; bo
   font-size: 13px; font-weight: 700; color: var(--muted2);
   padding: 6px 0 8px; margin-bottom: 6px; border-bottom: 1px solid var(--border);
 }
+/* หัวกลุ่มในฟอร์ม Master กดยุบ/กางได้ + บอกว่าตั้งค่าไปกี่ช่องแล้ว */
+summary.reg-group-title { cursor: pointer; display: flex; align-items: center; gap: 8px; list-style: none; }
+summary.reg-group-title::-webkit-details-marker { display: none; }
+summary.reg-group-title::before {
+  content: "›"; font-size: 16px; line-height: 1; transition: transform .15s; color: var(--muted);
+}
+details[open] > summary.reg-group-title::before { transform: rotate(90deg); }
+.grp-count {
+  margin-left: auto; font-size: 11px; font-weight: 600;
+  padding: 2px 8px; border-radius: 999px; background: #f1f3f7; color: var(--muted);
+}
+.grp-count.has-set { background: var(--ico-blue-bg); color: var(--primary); }
 /* ป้ายกำกับชนิดช่อง */
 .fld-new {
   font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 999px;

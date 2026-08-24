@@ -328,9 +328,13 @@ function bindRegToolbar(root) {
         fld.style.display = show ? "" : "none";
       });
       // ซ่อนกลุ่มที่ไม่เหลือช่องเลย
+      const filtering = !!q || mode !== "all";
       panel.querySelectorAll(".reg-group").forEach((g) => {
         const any = [...g.querySelectorAll(".reg-fld")].some((f) => f.style.display !== "none");
         g.style.display = any ? "" : "none";
+        // กลุ่มที่ยุบอยู่จะบังช่องที่ค้นเจอ → ระหว่างกรอง/ค้นให้กางกลุ่มที่มีผลลัพธ์
+        //   พอเลิกกรองค่อยคืนสถานะเริ่มต้น (กางเฉพาะกลุ่มที่ตั้งค่าไว้แล้ว)
+        if (g.tagName === "DETAILS") g.open = filtering ? any : g.dataset.defopen === "1";
       });
     };
     tb.querySelector(".reg-search").oninput = apply;
@@ -2356,9 +2360,18 @@ function renderMasterForm() {
 /** 1 หน้าในฟอร์ม Master = ช่อง + ตัวเลือกโหมด */
 function renderMasterPage(pageNo, row) {
   const groups = regGroups(pageNo, "header");
-  return regToolbar(pageNo) + groups.map((g) => `
-    <div class="reg-group" data-group="${escapeHtml(g.title)}">
-      <div class="reg-group-title">${escapeHtml(g.title)} <span class="muted">(${g.fields.length})</span></div>
+  return regToolbar(pageNo) + groups.map((g) => {
+    const editable = g.fields.filter((f) => !f.computed);
+    // "ตั้งแล้ว" = ช่องที่มีค่า หรือสั่ง "ไม่กรอก" ไว้ — กลุ่มที่ยังไม่แตะเลยให้ยุบไว้ก่อน
+    //   (Master เต็ม ๆ มี 221 ช่อง ถ้ากางหมดจะหาไม่เจอว่าตั้งอะไรไว้บ้าง)
+    const nSet = editable.filter((f) => String(regValue(row, f) ?? "").trim() !== ""
+      || msMode(msEditing, f.key) === "off").length;
+    return `
+    <details class="reg-group" data-group="${escapeHtml(g.title)}" data-defopen="${nSet ? 1 : 0}" ${nSet ? "open" : ""}>
+      <summary class="reg-group-title">${escapeHtml(g.title)}
+        <span class="muted">(${editable.length})</span>
+        <span class="grp-count ${nSet ? "has-set" : ""}">ตั้งแล้ว ${nSet}/${editable.length}</span>
+      </summary>
       <div class="md-grid">${g.fields.map((f) => {
         if (f.computed) return "";   // DCTK เติมเอง — ตั้งใน Master ไม่มีความหมาย
         const val = escapeHtml(regValue(row, f));
@@ -2375,7 +2388,8 @@ function renderMasterPage(pageNo, row) {
           </div>
         </div>`;
       }).join("")}</div>
-    </div>`).join("");
+    </details>`;
+  }).join("");
 }
 
 function renderMasterItems(formPage = 3) {
