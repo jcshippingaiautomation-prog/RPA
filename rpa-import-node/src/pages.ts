@@ -445,13 +445,48 @@ export async function openPortfolioAndAdd(page: Page): Promise<void> {
  *   A005-16905-.. หรือขึ้นต้นด้วยตัวเลขล้วนยาว = เลขที่ใบขนฯ
  *   ที่เหลือ (DKN 22/2026, KPV08C, MEK1314) = เลขที่ใบกำกับสินค้าที่ลูกค้าใช้
  */
-export function detectSearchColumn(value: string): { selector: string; label: string } {
+export function detectSearchColumn(value: string): { selector: string; label: string; field: string } {
   const v = String(value ?? "").trim().toUpperCase();
-  if (/^DCTK\d+$/.test(v)) return { selector: S.SEL_DECL_SEARCH_REFERENCE, label: "เลขที่อ้างอิง" };
-  if (/^[A-Z]?\d{3,}-\d+/.test(v) || /^\d{10,}$/.test(v)) {
-    return { selector: S.SEL_DECL_SEARCH_INPUT, label: "เลขที่ใบขนฯ" };
+  if (/^DCTK\d+$/.test(v)) {
+    return { selector: S.SEL_DECL_SEARCH_REFERENCE, label: "เลขที่อ้างอิง", field: "ReferenceNo" };
   }
-  return { selector: S.SEL_DECL_SEARCH_INVOICE, label: "เลขที่ใบกำกับสินค้า" };
+  if (/^[A-Z]?\d{3,}-\d+/.test(v) || /^\d{10,}$/.test(v)) {
+    return { selector: S.SEL_DECL_SEARCH_INPUT, label: "เลขที่ใบขนฯ", field: "DeclarationNo" };
+  }
+  return { selector: S.SEL_DECL_SEARCH_INVOICE, label: "เลขที่ใบกำกับสินค้า", field: "InvoiceNoText" };
+}
+
+/**
+ * ใบที่ผ่านกรมฯ แล้ว พอดับเบิลคลิก DCTK จะถามก่อนว่า
+ *   "เอกสารนี้ (DCTK…) ได้ถูกทำรายการเสร็จเรียบร้อยไปแล้ว
+ *    ต้องการปรับสถานะเอกสารให้กลายเป็นสถานะที่พร้อมแก้ไขหรือไม่ ?"  [YES] [NO] [CANCEL]
+ *
+ * ⚠ ห้ามกด YES เด็ดขาด — นั่นคือการ "เปลี่ยนสถานะใบขนจริงที่ยื่นกรมฯ ไปแล้ว"
+ *   เราแค่จะอ่านข้อมูลมาทำต้นแบบ ไม่มีเหตุผลให้ไปแตะสถานะเอกสารของลูกค้า
+ *   → ตอบ NO เสมอ (ไม่ปรับสถานะ) แล้วดูว่าเปิดอ่านได้ไหม
+ */
+async function answerReopenPrompt(page: Page): Promise<void> {
+  // ปุ่มเป็น <button class="btn btn-default">NO</button> ธรรมดา ไม่มี id
+  //   หาเองใน DOM แล้วเทียบข้อความ "เป๊ะ ๆ" — ถ้าเทียบแบบหลวมแล้วพลาดไปโดน YES
+  //   จะกลายเป็นการเปลี่ยนสถานะใบขนจริงที่ยื่นกรมฯ ไปแล้ว
+  for (let i = 0; i < 8; i++) {
+    const clicked = await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll("button, input[type=button]"));
+      const no = btns.find((b) => {
+        const t = ((b as HTMLElement).innerText || (b as HTMLInputElement).value || "").trim().toUpperCase();
+        return t === "NO";
+      }) as HTMLElement | undefined;
+      if (!no) return false;
+      no.click();
+      return true;
+    }).catch(() => false);
+    if (clicked) {
+      log(`  ℹ ใบนี้ทำรายการเสร็จแล้ว — DCTK ถามว่าจะปรับสถานะให้แก้ไขได้ไหม → ตอบ NO (ไม่แตะสถานะใบจริง)`);
+      await sleep(5000);
+      return;
+    }
+    await sleep(1500);
+  }
 }
 
 export async function openDeclarationForEdit(page: Page, declNo: string): Promise<Page> {
@@ -467,17 +502,82 @@ export async function openDeclarationForEdit(page: Page, declNo: string): Promis
     log(`  ⚠ ไม่พบช่องกรอง "${col.label}" — ใช้คอลัมน์เลขที่ใบขนฯ แทน`);
     searchSel = S.SEL_DECL_SEARCH_INPUT;
   }
-  const filterBox = page.locator(searchSel).first();
-  await filterBox.waitFor({ state: "visible", timeout: 15000 });
-  await filterBox.click();
-  await filterBox.fill(declNo);
-  await page.keyboard.press("Enter"); // Kendo filter apply
-  await sleep(4000);
-  // 3) double-click แถวผลแรก เพื่อเปิดใบ
-  const row = page.locator(S.SEL_DECL_GRID_ROW).first();
-  await row.waitFor({ state: "visible", timeout: 15000 });
-  await row.dblclick();
-  await sleep(5000);
+  // สั่งกรองผ่าน dataSource ของ Kendo ตรง ๆ
+  //   พิมพ์ในช่องกรองแล้วกด Enter "ไม่ทำงาน" กับตารางนี้ (ยืนยันแล้ว: กรองไปก็ยังได้ทั้งรายการ)
+  //   ซึ่งอันตรายมาก เพราะโค้ดเดิมกดแถวแรกต่อทันที = เปิดใบของคนอื่น
+  const filtered = await page.evaluate(({ f, v }: { f: string; v: string }) => {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const jq = (window as any).$;
+    const ds = jq?.("#grid").data("kendoGrid")?.dataSource;
+    if (!ds || typeof ds.filter !== "function") return false;
+    ds.filter({ field: f, operator: "contains", value: v });
+    return true;
+  }, { f: col.field, v: declNo }).catch(() => false);
+
+  if (filtered) {
+    await sleep(4500);
+  } else {
+    // ถอยไปใช้ช่องกรองบนหน้าจอ (เผื่อ DCTK เปลี่ยนโครง) — ตัวตรวจด้านล่างยังกันเปิดใบผิดอยู่
+    log(`  ⚠ สั่งกรองผ่านตารางไม่ได้ — ลองพิมพ์ในช่องกรองแทน`);
+    const filterBox = page.locator(searchSel).first();
+    await filterBox.waitFor({ state: "visible", timeout: 15000 });
+    await filterBox.click();
+    await filterBox.fill(declNo);
+    await page.keyboard.press("Enter");
+    await sleep(4000);
+  }
+
+  // 3) หาแถวที่ "ตรงจริง" ก่อนเปิด
+  //    ⚠ ห้ามกดแถวแรกลอย ๆ: ถ้าตัวกรองไม่ทำงาน (เลขมีอักขระพิเศษอย่าง ( ) /)
+  //      แถวแรกจะเป็นใบล่าสุดของใครก็ได้ แล้วเราจะเปิดใบผิดแบบเงียบ ๆ
+  //      (เจอจริง: สั่งดึง "MEK 19(H)/2025" แต่ได้ข้อมูลใบ "Test902" มาแทน)
+  const want = declNo.trim().toUpperCase();
+  const hit = await page.evaluate((w: string) => {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const jq = (window as any).$;
+    const view: any[] = jq?.("#grid").data("kendoGrid")?.dataSource?.view?.() ?? [];
+    const norm = (v: unknown) => String(v ?? "").trim().toUpperCase();
+    for (const m of view) {
+      if ([m.InvoiceNoText, m.DeclarationNo, m.ReferenceNo].some((v) => norm(v) === w)) {
+        return { uid: m.uid as string, invoice: norm(m.InvoiceNoText), customer: String(m.CmpNameThai ?? "") };
+      }
+    }
+    return null;
+  }, want).catch(() => null);
+
+  if (!hit) {
+    const seen = await page.evaluate(() => {
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      const jq = (window as any).$;
+      const view: any[] = jq?.("#grid").data("kendoGrid")?.dataSource?.view?.() ?? [];
+      return view.slice(0, 5).map((m) => String(m.InvoiceNoText ?? ""));
+    }).catch(() => [] as string[]);
+    throw new Error(
+      `ค้นใบ "${declNo}" ไม่เจอในรายการ (กรองแล้วได้: ${seen.join(", ") || "ไม่มีแถว"}) — ` +
+      `ตรวจว่าเลขถูกต้องไหม หรือใบอยู่หน้าอื่นของตาราง`,
+    );
+  }
+  log(`  ✓ เจอใบตรงกัน: ${hit.invoice} (${hit.customer.slice(0, 30)})`);
+
+  // ตารางนี้มีคอลัมน์ตรึง → DOM มี 2 ตารางซ้อน แถวเดียวกันจึงมี 2 element
+  //   ตัวที่อยู่ในตารางตรึงบางทีดับเบิลคลิกแล้วไม่เปิดฟอร์ม → ต้องลองทีละตัว
+  const rows = page.locator(`#grid tbody tr[data-uid="${hit.uid}"]`);
+  const n = await rows.count();
+  let opened = false;
+  for (let i = 0; i < Math.max(n, 1) && !opened; i++) {
+    const row = rows.nth(i);
+    try {
+      await row.scrollIntoViewIfNeeded({ timeout: 5000 });
+      await row.dblclick({ timeout: 8000 });
+    } catch { continue; }
+    await answerReopenPrompt(page);
+    // ฟอร์มใบขนเปิดแล้วหรือยัง — แท็บ 3 หน้าโผล่เฉพาะตอนเปิดใบ
+    opened = await page.locator("#TabStrip").first()
+      .waitFor({ state: "visible", timeout: 15000 }).then(() => true).catch(() => false);
+    if (!opened) log(`  ⚠ ดับเบิลคลิกแถว (element ${i + 1}/${n}) แล้วฟอร์มยังไม่เปิด — ลองตัวถัดไป`);
+  }
+  if (!opened) throw new Error(`เปิดใบ "${declNo}" ไม่ได้ — เจอแถวแล้วแต่ดับเบิลคลิกไม่ติด (DCTK ช้าหรือเปลี่ยนโครงตาราง)`);
+  await sleep(3000);
   return page; // หน้าแก้เปิดในหน้าเดิม (DCTK ไม่เปิด tab ใหม่ที่ขั้นนี้)
 }
 
