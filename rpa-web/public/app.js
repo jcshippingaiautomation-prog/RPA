@@ -1566,7 +1566,7 @@ $("btnClearSel").onclick = () => { selected.clear(); renderList(); };
 // ============================================================
 const PAGE_META = {
   list: { title: "รายการใบขน", sub: "จัดการใบขนสินค้าทั้งหมดในที่เดียว" },
-  masters: { title: "คลังต้นแบบข้อมูล", sub: "ชุดค่าที่ใช้ซ้ำได้ของลูกค้าแต่ละราย แยกตามผู้รับสินค้าและรหัสสินค้า" },
+  masters: { title: "คลัง Master", sub: "ชุดค่าที่ใช้ซ้ำได้ของลูกค้าแต่ละราย แยกตาม Consignee และรหัสสินค้า" },
   history: { title: "ประวัติงาน", sub: "ประวัติการนำเข้าและเอกสารที่ระบบสร้าง" },
   settings: { title: "ตั้งค่า", sub: "Allowlist · AI · ตารางเวลา · RPA · ลูกค้า" },
 };
@@ -2127,7 +2127,7 @@ let msEditing = null;      // Master ที่กำลังแก้ (null = �
 let msItems = [];          // รายการสินค้าของ Master ที่กำลังแก้
 let msPage = 1;
 
-const MODE_LABEL = { master: "ใช้ค่าต้นแบบ", ai: "อ่านจากเอกสาร", off: "ไม่กรอก" };
+const MODE_LABEL = { master: "ใช้ค่า Master", ai: "อ่านจากเอกสาร", off: "ไม่กรอก" };
 
 /** โหมดที่ใช้จริงของช่อง (ตามที่ตั้งไว้ หรือเดาจากการมีค่า) — ตรงกับ effectiveMode ฝั่ง server */
 function msMode(tpl, key) {
@@ -2159,14 +2159,14 @@ function renderMasters() {
   const body = $("mastersBody");
   if (!MASTERS.length) {
     body.innerHTML = `<tr><td colspan="5" class="empty">
-      <div style="font-weight:600;margin-bottom:6px">ยังไม่มีต้นแบบในระบบ</div>
-      <div class="muted" style="margin-bottom:12px">ต้นแบบคือชุดค่าที่ใช้ซ้ำได้ของลูกค้าแต่ละราย — สร้างใบขนใหม่แล้วแก้เฉพาะส่วนที่เปลี่ยน</div>
-      <button class="btn btn-primary btn-sm" onclick="document.getElementById('btnNewMaster').click()">สร้างต้นแบบใหม่</button>
+      <div style="font-weight:600;margin-bottom:6px">ยังไม่มี Master ในระบบ</div>
+      <div class="muted" style="margin-bottom:12px">Master คือชุดค่าที่ใช้ซ้ำได้ของลูกค้าแต่ละราย — สร้างใบขนใหม่แล้วแก้เฉพาะส่วนที่เปลี่ยน</div>
+      <button class="btn btn-primary btn-sm" onclick="document.getElementById('btnNewMaster').click()">สร้าง Master ใหม่</button>
     </td></tr>`;
     return;
   }
 
-  // จัดกลุ่มตามลูกค้า — เรียงตามชื่อ และให้กลุ่มที่มีต้นแบบมากอยู่บน
+  // จัดกลุ่มตามลูกค้า — เรียงตามชื่อ และให้กลุ่มที่มี Master มากอยู่บน
   const groups = new Map();
   for (const t of MASTERS) {
     const key = (t.customer_name || "").trim() || "— ไม่ระบุลูกค้า —";
@@ -2178,7 +2178,7 @@ function renderMasters() {
   const rowsFor = (cust, list) => list
     .sort((a, b) => (a.name || "").localeCompare(b.name || "", "th"))
     .map((t) => {
-      // นับ "โหมดที่มีผลจริง" — ช่องที่มีค่าแต่ไม่ได้ตั้งโหมด = ใช้ค่าต้นแบบโดยปริยาย
+      // นับ "โหมดที่มีผลจริง" — ช่องที่มีค่าแต่ไม่ได้ตั้งโหมด = ใช้ค่า Master โดยปริยาย
       const allKeys = new Set([...Object.keys(t.header || {}), ...Object.keys(t.field_modes || {})]);
       let nMaster = 0, nOff = 0;
       for (const k of allKeys) {
@@ -2190,7 +2190,7 @@ function renderMasters() {
       const shortName = String(t.name || "").replace(new RegExp(`^${cust}\\s*—\\s*`, "i"), "") || t.name;
       const consignees = t.consignee_names || [];
       const products = t.product_codes || [];
-      // ชื่อต้นแบบที่ระบบตั้งให้ = "ผู้รับสินค้า · สินค้า" อยู่แล้ว
+      // ชื่อ Master ที่ระบบตั้งให้ = "ผู้รับสินค้า · สินค้า" อยู่แล้ว
       //   ถ้าโชว์ป้ายซ้ำอีกจะอ่านยากและแถวสูงเกินจำเป็น → โชว์เฉพาะที่ยังไม่อยู่ในชื่อ
       const inName = (v) => shortName.toUpperCase().includes(String(v).toUpperCase());
       const chips = [
@@ -2204,22 +2204,22 @@ function renderMasters() {
             : `<span class="chip-tag chip-any">ใช้ได้กับทุกใบของลูกค้ารายนี้</span>`);
       return `<tr>
         <td>
-          <div class="ms-name">${escapeHtml(shortName)}${t.is_default ? ' <span class="st st-done" title="ใช้เมื่อไม่มีต้นแบบอื่นที่ตรงกว่า">★ ค่าเริ่มต้น</span>' : ""}</div>
+          <div class="ms-name">${escapeHtml(shortName)}${t.is_default ? ' <span class="st st-done" title="ใช้เมื่อไม่มี Master อื่นที่ตรงกว่า">★ ค่าเริ่มต้น</span>' : ""}</div>
           <div class="ms-scope">${scope}</div>
           ${t.description ? `<div class="muted-cell ms-desc">${escapeHtml(String(t.description).replace(/^ดึงจาก DCTK ด้วย ?เลขที่ใบกำกับสินค้า/, "ที่มา: ใบกำกับ"))}</div>` : ""}
         </td>
         <td class="muted-cell ms-stats">
           <div><b>${nVals}</b> ช่องมีค่า</div>
-          <div class="ms-sub">ใช้ค่าต้นแบบ ${nMaster} · ไม่กรอก ${nOff}</div>
+          <div class="ms-sub">ใช้ค่า Master ${nMaster} · ไม่กรอก ${nOff}</div>
         </td>
         <td class="muted-cell ta-center">${(t.items || []).length}</td>
         <td class="muted-cell">${fmtDate(t.updated_at)}</td>
         <td class="ta-right">
           <div class="ms-actions">
-            <button class="btn btn-primary btn-xs msUse" data-id="${t.id}" title="สร้างใบขนใหม่โดยใช้ต้นแบบนี้">${svgIcon("plus", 12)} สร้างใบขน</button>
-            <button class="btn btn-ghost btn-xs msEdit" data-id="${t.id}" title="แก้ไขค่าในต้นแบบ">${svgIcon("settings", 12)} แก้ไข</button>
-            <button class="btn btn-ghost btn-xs icon-only msDup" data-id="${t.id}" title="ทำสำเนาต้นแบบนี้">${svgIcon("copy", 12)}</button>
-            <button class="btn btn-ghost btn-xs icon-only msDel" data-id="${t.id}" title="ลบต้นแบบนี้">${svgIcon("trash", 12)}</button>
+            <button class="btn btn-primary btn-xs msUse" data-id="${t.id}" title="สร้างใบขนใหม่โดยใช้ Master นี้">${svgIcon("plus", 12)} สร้างใบขน</button>
+            <button class="btn btn-ghost btn-xs msEdit" data-id="${t.id}" title="แก้ไขค่าใน Master">${svgIcon("settings", 12)} แก้ไข</button>
+            <button class="btn btn-ghost btn-xs icon-only msDup" data-id="${t.id}" title="ทำสำเนา Master นี้">${svgIcon("copy", 12)}</button>
+            <button class="btn btn-ghost btn-xs icon-only msDel" data-id="${t.id}" title="ลบ Master นี้">${svgIcon("trash", 12)}</button>
           </div>
         </td>
       </tr>`;
@@ -2228,7 +2228,7 @@ function renderMasters() {
   body.innerHTML = ordered.map(([cust, list]) => `
     <tr class="ms-group"><td colspan="5">
       <span class="ms-group-name">${escapeHtml(cust)}</span>
-      <span class="ms-group-count">${list.length} ต้นแบบ</span>
+      <span class="ms-group-count">${list.length} Master</span>
     </td></tr>
     ${rowsFor(cust, list)}`).join("");
 
@@ -2257,7 +2257,7 @@ function openMaster(tpl) {
   msEditing = tpl ? JSON.parse(JSON.stringify(tpl)) : { name: "", customer_name: "", description: "", header: {}, items: [], field_modes: {}, is_default: false };
   msItems = Array.isArray(msEditing.items) ? msEditing.items.map((it) => ({ ...it })) : [];
   msPage = 1;
-  $("msTitle").textContent = msEditing.id ? `แก้ไขต้นแบบ — ${msEditing.name}` : "สร้าง Master ใหม่";
+  $("msTitle").textContent = msEditing.id ? `แก้ไข Master — ${msEditing.name}` : "สร้าง Master ใหม่";
   renderMasterForm();
   $("modalMaster").style.display = "flex";
 }
@@ -2273,40 +2273,40 @@ function renderMasterForm() {
 
   $("msBody").innerHTML = `
     <div class="md-grid" style="margin-bottom:12px">
-      <div class="fld"><label>ชื่อต้นแบบ *</label><input class="inp" id="msName" value="${escapeHtml(t.name || "")}" placeholder="เช่น THANAKORN — ตู้ 40ft ไปเวียดนาม" /></div>
+      <div class="fld"><label>ชื่อ Master *</label><input class="inp" id="msName" value="${escapeHtml(t.name || "")}" placeholder="เช่น THANAKORN — ตู้ 40ft ไปเวียดนาม" /></div>
       <div class="fld"><label>ลูกค้า (ว่าง = ใช้ได้ทุกลูกค้า)</label>
         <input class="inp" id="msCustomer" list="msCustList" value="${escapeHtml(t.customer_name || "")}" placeholder="เช่น THANAKORN" />
         <datalist id="msCustList">${custOpts.map((c) => `<option value="${escapeHtml(c)}">`).join("")}</datalist></div>
-      <div class="fld fld-full"><label>คำอธิบาย</label><input class="inp" id="msDesc" value="${escapeHtml(t.description || "")}" placeholder="ใช้เมื่อใด และต่างจากต้นแบบอื่นอย่างไร" /></div>
+      <div class="fld fld-full"><label>คำอธิบาย</label><input class="inp" id="msDesc" value="${escapeHtml(t.description || "")}" placeholder="ใช้เมื่อใด และต่างจาก Master อื่นอย่างไร" /></div>
     </div>
 
     <details class="reg-scope">
-      <summary><b>ต้นแบบนี้ใช้กับใคร</b> <span class="muted">${(t.consignee_names || []).length || (t.product_codes || []).length
+      <summary><b>Master นี้ใช้กับใคร</b> <span class="muted">${(t.consignee_names || []).length || (t.product_codes || []).length
         ? escapeHtml([...(t.consignee_names || []), ...(t.product_codes || [])].join(" · ").slice(0, 60))
         : "ทุก Consignee / ทุกสินค้าของลูกค้ารายนี้"}</span></summary>
     <div class="reg-mode-help">
-      ระบบเลือกต้นแบบให้อัตโนมัติจาก 3 ระดับ:
-      ลูกค้า → ผู้รับสินค้า → รหัสสินค้า · <b>ยิ่งระบุเจาะจง ยิ่งถูกเลือกก่อน</b> · เว้นว่างไว้หมายถึงใช้ได้กับทุกราย
+      ระบบเลือก Master ให้อัตโนมัติจาก 3 ระดับ:
+      ลูกค้า → Consignee → รหัสสินค้า · <b>ยิ่งระบุเจาะจง ยิ่งถูกเลือกก่อน</b> · เว้นว่างไว้หมายถึงใช้ได้กับทุกราย
     </div>
     <div class="md-grid" style="margin-bottom:12px">
-      <div class="fld fld-full"><label>ผู้รับสินค้าที่ใช้ต้นแบบนี้ <span class="muted">(หลายรายให้คั่นด้วยเครื่องหมายจุลภาค)</span></label>
+      <div class="fld fld-full"><label>Consignee ที่ใช้ Master นี้ <span class="muted">(หลายรายให้คั่นด้วยเครื่องหมายจุลภาค)</span></label>
         <input class="inp" id="msConsignees" value="${escapeHtml((t.consignee_names || []).join(", "))}"
-               placeholder="เช่น DK&amp;N VIETNAM LTD, ABC CO — หลายรายใช้ต้นแบบเดียวกันได้" /></div>
-      <div class="fld fld-full"><label>รหัสสินค้าที่ใช้ต้นแบบนี้ <span class="muted">(หลายรายการให้คั่นด้วยเครื่องหมายจุลภาค)</span></label>
+               placeholder="เช่น DK&amp;N VIETNAM LTD, ABC CO — หลายรายใช้ Master เดียวกันได้" /></div>
+      <div class="fld fld-full"><label>รหัสสินค้าที่ใช้ Master นี้ <span class="muted">(หลายรายการให้คั่นด้วยเครื่องหมายจุลภาค)</span></label>
         <input class="inp" id="msProducts" value="${escapeHtml((t.product_codes || []).join(", "))}"
                placeholder="เช่น REFINED BLEACHED — Consignee เดียวกันแต่คนละสินค้า ใช้คนละ Master ได้" /></div>
       <div class="fld"><label>ลำดับความสำคัญ <span class="muted">(ค่าสูงกว่าจะถูกเลือกก่อนเมื่อเงื่อนไขเท่ากัน)</span></label>
         <input class="inp" id="msPriority" type="number" value="${Number(t.priority || 0)}" /></div>
     </div>
     <label class="switch"><input type="checkbox" id="msDefault" ${t.is_default ? "checked" : ""} />
-      <span>ตั้งเป็นค่าเริ่มต้นของลูกค้ารายนี้ — ใช้เมื่อไม่มีต้นแบบอื่นที่ตรงกว่า (ลูกค้าหนึ่งรายตั้งได้หนึ่งต้นแบบ)</span></label>
+      <span>ตั้งเป็นค่าเริ่มต้นของลูกค้ารายนี้ — ใช้เมื่อไม่มี Master อื่นที่ตรงกว่า (ลูกค้าหนึ่งรายตั้งได้หนึ่ง Master)</span></label>
     </details>
 
     <details class="reg-scope">
       <summary><b>การกำหนดที่มาของข้อมูลรายช่อง</b> <span class="muted">ตั้งล่วงหน้าได้ว่าแต่ละช่องจะใช้ค่าจากที่ใด</span></summary>
       <div class="reg-mode-help">
-        <span class="mode-pill m-master">ใช้ค่าต้นแบบ</span> ใช้ค่านี้เสมอ แม้ AI จะอ่านค่าอื่นมา ·
-        <span class="mode-pill m-ai">อ่านจากเอกสาร</span> ใช้ค่าที่ AI อ่านได้ หากอ่านไม่ได้จึงใช้ค่าในต้นแบบ ·
+        <span class="mode-pill m-master">ใช้ค่า Master</span> ใช้ค่านี้เสมอ แม้ AI จะอ่านค่าอื่นมา ·
+        <span class="mode-pill m-ai">อ่านจากเอกสาร</span> ใช้ค่าที่ AI อ่านได้ หากอ่านไม่ได้จึงใช้ค่าใน Master ·
         <span class="mode-pill m-off">ไม่กรอก</span> ข้ามช่องนี้ ไม่กรอกลงระบบกรมฯ
       </div>
     </details>
@@ -2358,7 +2358,7 @@ function renderMasterPage(pageNo, row) {
           <div class="ms-row">
             <input class="inp ms-edit" data-key="${f.key}" value="${val}" />
             <select class="sel sel-sm ms-mode m-${mode}" data-key="${f.key}">
-              <option value="master" ${mode === "master" ? "selected" : ""}>ใช้ค่าต้นแบบ</option>
+              <option value="master" ${mode === "master" ? "selected" : ""}>ใช้ค่า Master</option>
               <option value="ai" ${mode === "ai" ? "selected" : ""}>อ่านจากเอกสาร</option>
               <option value="off" ${mode === "off" ? "selected" : ""}>ไม่กรอก</option>
             </select>
@@ -2385,7 +2385,7 @@ function renderMasterItems(formPage = 3) {
              <div class="ms-row">
                <input class="inp msi-edit" data-i="${i}" data-key="${f.key}" value="${escapeHtml(it[f.key] != null ? String(it[f.key]) : "")}" />
                <select class="sel sel-sm ms-mode m-${mode}" data-key="${f.key}">
-                 <option value="master" ${mode === "master" ? "selected" : ""}>ใช้ค่าต้นแบบ</option>
+                 <option value="master" ${mode === "master" ? "selected" : ""}>ใช้ค่า Master</option>
                  <option value="ai" ${mode === "ai" ? "selected" : ""}>อ่านจากเอกสาร</option>
                  <option value="off" ${mode === "off" ? "selected" : ""}>ไม่กรอก</option>
                </select>
@@ -2423,7 +2423,7 @@ function refreshMasterItems() {
 
 async function saveMaster() {
   const name = $("msName").value.trim();
-  if (!name) { toast("กรุณาตั้งชื่อต้นแบบก่อนบันทึก", "error"); return; }
+  if (!name) { toast("กรุณาตั้งชื่อ Master ก่อนบันทึก", "error"); return; }
   const header = {};
   $("msBody").querySelectorAll(".ms-edit").forEach((el) => {
     const v = String(el.value ?? "").trim();
@@ -2451,7 +2451,7 @@ async function saveMaster() {
   try {
     await api("/api/templates", "POST", payload);
     const sv = $("msSaved"); sv.style.display = "inline"; setTimeout(() => (sv.style.display = "none"), 2000);
-    toast("บันทึกต้นแบบ แล้ว", "success");
+    toast("บันทึก Master แล้ว", "success");
     closeMaster();
     loadMasters();
   } catch (e) { toast("บันทึกไม่สำเร็จ: " + e.message, "error"); }

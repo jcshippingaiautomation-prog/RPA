@@ -27,7 +27,7 @@
       </div>
       <nav class="nav">
         <a class="nav-item active" href="#list" data-page="list"><span class="nav-ico" data-icon="list"></span> รายการใบขน</a>
-        <a class="nav-item" href="#masters" data-page="masters"><span class="nav-ico" data-icon="copy"></span> คลังต้นแบบ</a>
+        <a class="nav-item" href="#masters" data-page="masters"><span class="nav-ico" data-icon="copy"></span> คลัง Master</a>
         <a class="nav-item" href="#history" data-page="history"><span class="nav-ico" data-icon="clock"></span> ประวัติงาน</a>
         <a class="nav-item" href="#settings" data-page="settings" data-admin="true"><span class="nav-ico" data-icon="settings"></span> ตั้งค่า</a>
       </nav>
@@ -93,9 +93,9 @@
               <tr>
                 <th class="w-chk"><input type="checkbox" id="checkAll" /></th>
                 <th>ลูกค้า</th>
-                <th>ผู้รับสินค้า</th>
-                <th>เลขที่ใบกำกับ</th>
-                <th>วันที่ส่งออก</th>
+                <th>Consignee</th>
+                <th>Invoice</th>
+                <th>ETD</th>
                 <th>มูลค่า</th>
                 <th>แหล่งที่มา</th>
                 <th>สถานะ</th>
@@ -113,19 +113,19 @@
       <div id="page-masters" class="page" style="display:none">
         <section class="card">
           <div class="card-head">
-            <h2><i data-icon="copy"></i> คลังต้นแบบข้อมูล (Master)</h2>
+            <h2><i data-icon="copy"></i> คลัง Master ข้อมูล</h2>
             <div class="head-actions">
-              <button class="btn btn-primary" id="btnNewMaster"><i data-icon="plus"></i> สร้างต้นแบบใหม่</button>
+              <button class="btn btn-primary" id="btnNewMaster"><i data-icon="plus"></i> สร้าง Master ใหม่</button>
               <button class="btn btn-ghost" id="btnReloadMasters"><i data-icon="refresh"></i> โหลดใหม่</button>
             </div>
           </div>
-          <p class="muted">ต้นแบบคือชุดค่าที่ใช้ซ้ำได้ของลูกค้าแต่ละราย เช่น ท่าเรือ เงื่อนไขการส่งมอบ พิกัดศุลกากร
-             เมื่อเอกสารใหม่เข้ามา ระบบจะเลือกต้นแบบที่ตรงที่สุดให้อัตโนมัติ (ลูกค้า → ผู้รับสินค้า → รหัสสินค้า)
+          <p class="muted">Master คือชุดค่าที่ใช้ซ้ำได้ของลูกค้าแต่ละราย เช่น ท่าเรือ เงื่อนไขการส่งมอบ พิกัดศุลกากร
+             เมื่อเอกสารใหม่เข้ามา ระบบจะเลือก Master ที่ตรงที่สุดให้อัตโนมัติ (ลูกค้า → Consignee → รหัสสินค้า)
              แล้วเติมเฉพาะช่องที่ตั้งไว้ ส่วนที่เหลือให้ AI อ่านจากเอกสาร</p>
           <div id="mastersNote" class="note"></div>
           <div class="table-wrap"><table class="tbl tbl-masters">
             <thead><tr>
-              <th>ต้นแบบ / ขอบเขตการใช้งาน</th>
+              <th>Master / ขอบเขตการใช้งาน</th>
               <th class="w-set">ค่าที่ตั้งไว้</th>
               <th class="w-items">รายการสินค้า</th>
               <th class="w-date">แก้ไขล่าสุด</th>
@@ -417,12 +417,12 @@
           </select>
         </div>
         <div class="fld" style="margin-bottom:14px">
-          <label>ต้นแบบข้อมูล</label>
+          <label>Master</label>
           <select id="upTemplate" class="sel">
             <option value="">— ให้ระบบเลือกอัตโนมัติ —</option>
           </select>
           <div class="muted" style="font-size:12px;margin-top:5px">
-            หากทราบอยู่แล้วว่าใบนี้ใช้ต้นแบบใด ให้เลือกเอง มิฉะนั้นระบบจะจับคู่ให้จากผู้รับสินค้าและรหัสสินค้าที่อ่านได้
+            หากทราบอยู่แล้วว่าใบนี้ใช้ Master ใด ให้เลือกเอง มิฉะนั้นระบบจะจับคู่ให้จาก Consignee และรหัสสินค้าที่อ่านได้
           </div>
         </div>
         <div class="dropzone" id="dropzone">
