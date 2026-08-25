@@ -7,7 +7,7 @@ import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { config } from "./config.js";
 import { splitRecord, rowToFields } from "./field-registry.js";
-import { applyTemplate, effectiveMode } from "./master-template.js";
+import { applyTemplate } from "./master-template.js";
 
 export interface DocumentRecord {
   id?: string;
@@ -916,7 +916,14 @@ export async function applyMasterToRecord(
       //   (เจอจริง: ค่าระวางหัวใบ 140 แต่รายการกลายเป็น 260 ของใบต้นแบบ)
       const base: Record<string, unknown> = {};
       for (const k of Object.keys(raw)) {
-        if (effectiveMode(tpl, k) === "master") base[k] = (raw as Record<string, unknown>)[k];
+        // ⚠ effectiveMode() เดาโหมดปริยายจาก tpl.header — ใช้กับช่อง "ในรายการ" ไม่ได้
+        //   เพราะค่าของรายการอยู่ใน tpl.items ไม่ใช่ header → จะได้ 'ai' หมดแล้วไม่มีอะไรผ่านเลย
+        //   ที่ถูกคือ: ตั้งไว้ชัดเจนก็ใช้ตามนั้น · ไม่ได้ตั้งแต่รายการมีค่า = "ใช้ค่า Master"
+        const set = tpl.field_modes?.[k];
+        const mode = (set === "master" || set === "ai" || set === "off")
+          ? set
+          : (String((raw as Record<string, unknown>)[k] ?? "").trim() ? "master" : "ai");
+        if (mode === "master") base[k] = (raw as Record<string, unknown>)[k];
       }
       const cur = await rowToFields(aiIt, "item");
       const merged = applyTemplate({ ...tpl, header: base }, cur, { includeItems: false });
