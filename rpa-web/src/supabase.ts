@@ -7,7 +7,7 @@ import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { config } from "./config.js";
 import { splitRecord, rowToFields } from "./field-registry.js";
-import { applyTemplate } from "./master-template.js";
+import { applyTemplate, effectiveMode } from "./master-template.js";
 
 export interface DocumentRecord {
   id?: string;
@@ -898,7 +898,37 @@ export async function applyMasterToRecord(
     ...split.columns,
     extra_fields: { ...((record.extra_fields ?? {}) as object), ...split.extra },
   };
-  if (!(record._items?.length) && tpl.items?.length) out._items = tpl.items.map((it) => ({ ...it }));
+  // ── รายการสินค้า ────────────────────────────────────────────────────
+  //   เดิมเป็นแบบ "ทั้งหมดหรือไม่เอาเลย": ถ้า AI อ่านรายการได้ ค่าของ Master จะไม่ถูกใช้เลย
+  //   ซึ่งทำให้ พิกัดศุลกากร / หน่วย / รหัสสินค้า ที่ตั้งไว้ใน Master ไม่มีผลกับใบที่มาจากเอกสาร
+  //   (ตรงข้ามกับที่ตกลงไว้ว่า "ของตายตัวต่อ consignee ให้มาจาก Master")
+  //   → ผสมทีละช่องตามโหมด: master = ทับค่า AI · ai = เติมเฉพาะช่องว่าง · off = ไม่กรอก
+  const tplItems = tpl.items ?? [];
+  if (!(record._items?.length)) {
+    if (tplItems.length) out._items = tplItems.map((it) => ({ ...it }));
+  } else if (tplItems.length) {
+    const aiItems = record._items as Record<string, unknown>[];
+    out._items = await Promise.all(aiItems.map(async (aiIt, i) => {
+      const raw = tplItems[Math.min(i, tplItems.length - 1)] ?? {};
+      // ระดับรายการเอาเฉพาะช่องโหมด "ใช้ค่า Master" เท่านั้น — ไม่เติมช่องว่างจาก Master
+      //   เพราะช่องที่ว่างในรายการมักเป็นยอดเงิน/ปริมาณของชิปเมนต์นั้น
+      //   ถ้าเอาค่าเก่ามาเติม จะได้ยอดที่ไม่ตรงกับหัวใบ แล้ว DCTK ตีกลับตอนกระทบยอด
+      //   (เจอจริง: ค่าระวางหัวใบ 140 แต่รายการกลายเป็น 260 ของใบต้นแบบ)
+      const base: Record<string, unknown> = {};
+      for (const k of Object.keys(raw)) {
+        if (effectiveMode(tpl, k) === "master") base[k] = (raw as Record<string, unknown>)[k];
+      }
+      const cur = await rowToFields(aiIt, "item");
+      const merged = applyTemplate({ ...tpl, header: base }, cur, { includeItems: false });
+      const sp = await splitRecord(merged.record, "item", ["line_no", "is_foc"]);
+      return {
+        ...aiIt,
+        ...sp.columns,
+        extra_fields: { ...((aiIt.extra_fields ?? {}) as object), ...sp.extra },
+      };
+    }));
+    console.log(`[master] ผสมค่าจาก Master ลงรายการสินค้า ${aiItems.length} รายการ`);
+  }
   const changed = applied.overridden.length + applied.filled.length;
   if (changed) {
     console.log(`[master] ใช้ Master "${tpl.name}" กับ ${customer}/${invoice} — ทับ ${applied.overridden.length} · เติม ${applied.filled.length} ช่อง`);

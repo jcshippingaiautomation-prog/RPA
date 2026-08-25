@@ -1,14 +1,6 @@
 {
  "fields": [
   {
-   "key": "default_reference_no",
-   "scope": "header",
-   "label": "โปรไฟล์ที่จะบันทึก",
-   "dctkName": "defaultReferenceNo",
-   "required": true,
-   "requiredMessage": "* ไม่สามารถว่างได้"
-  },
-  {
    "key": "departure_date",
    "scope": "header",
    "label": "วันที่ส่งออก",
@@ -213,14 +205,6 @@
    "scope": "header",
    "label": "วิธีขนส่ง",
    "dctkName": "TransportMode",
-   "required": true,
-   "requiredMessage": "* ไม่สามารถว่างได้"
-  },
-  {
-   "key": "cargo_packing_type",
-   "scope": "header",
-   "label": "ประเภทการบรรจุ",
-   "dctkName": "CargoPackingType",
    "required": true,
    "requiredMessage": "* ไม่สามารถว่างได้"
   },
@@ -482,7 +466,7 @@
    "dataType": "number"
   },
   {
-   "key": "reference_no",
+   "key": "reference_no_field",
    "scope": "header",
    "label": "เลขที่อ้างอิง",
    "dctkName": "ReferenceNo",
@@ -677,55 +661,6 @@
    "required": true
   },
   {
-   "key": "freight_average_by",
-   "scope": "header",
-   "label": "ค่าระวาง — วิธีเฉลี่ยค่าใช้จ่าย",
-   "dctkName": "_FreightAverageBy",
-   "required": true
-  },
-  {
-   "key": "insurance_average_by",
-   "scope": "header",
-   "label": "ค่าประกัน — วิธีเฉลี่ยค่าใช้จ่าย",
-   "dctkName": "_InsuranceAverageBy",
-   "required": true
-  },
-  {
-   "key": "pack_average_by",
-   "scope": "header",
-   "label": "ค่าบรรจุ — วิธีเฉลี่ยค่าใช้จ่าย",
-   "dctkName": "_PackAverageBy",
-   "required": true
-  },
-  {
-   "key": "inland_average_by",
-   "scope": "header",
-   "label": "Inland — วิธีเฉลี่ยค่าใช้จ่าย",
-   "dctkName": "_InlandAverageBy",
-   "required": true
-  },
-  {
-   "key": "landing_average_by",
-   "scope": "header",
-   "label": "Landing — วิธีเฉลี่ยค่าใช้จ่าย",
-   "dctkName": "_LandingAverageBy",
-   "required": true
-  },
-  {
-   "key": "extra1_average_by",
-   "scope": "header",
-   "label": "ค่าใช้จ่ายอื่น 1 — วิธีเฉลี่ยค่าใช้จ่าย",
-   "dctkName": "_Extra1AverageBy",
-   "required": true
-  },
-  {
-   "key": "extra2_average_by",
-   "scope": "header",
-   "label": "ค่าใช้จ่ายอื่น 2 — วิธีเฉลี่ยค่าใช้จ่าย",
-   "dctkName": "_Extra2AverageBy",
-   "required": true
-  },
-  {
    "key": "other_charge_detail",
    "scope": "header",
    "label": "รายละเอียดค่าใช้จ่ายอื่น ๆ",
@@ -876,7 +811,7 @@
    "dataType": "number"
   },
   {
-   "key": "net_weight_unit_code",
+   "key": "net_weight_unit_code_unit",
    "scope": "item",
    "label": "น้ำหนักสุทธิ — หน่วย",
    "dctkName": "NetWeightUnitCode_input",
@@ -949,7 +884,7 @@
    "required": true
   },
   {
-   "key": "amount",
+   "key": "amount_currency",
    "scope": "item",
    "label": "ราคา — สกุลเงิน",
    "dctkName": "_Amount_input",
@@ -974,55 +909,6 @@
    "scope": "item",
    "label": "ราคา — เงินบาท",
    "dctkName": "_AmountBaht",
-   "required": true
-  },
-  {
-   "key": "freight_average_by",
-   "scope": "item",
-   "label": "ค่าระวาง — วิธีเฉลี่ยค่าใช้จ่าย",
-   "dctkName": "_FreightAverageBy",
-   "required": true
-  },
-  {
-   "key": "insurance_average_by",
-   "scope": "item",
-   "label": "ค่าประกัน — วิธีเฉลี่ยค่าใช้จ่าย",
-   "dctkName": "_InsuranceAverageBy",
-   "required": true
-  },
-  {
-   "key": "pack_average_by",
-   "scope": "item",
-   "label": "ค่าบรรจุ — วิธีเฉลี่ยค่าใช้จ่าย",
-   "dctkName": "_PackAverageBy",
-   "required": true
-  },
-  {
-   "key": "inland_average_by",
-   "scope": "item",
-   "label": "Inland — วิธีเฉลี่ยค่าใช้จ่าย",
-   "dctkName": "_InlandAverageBy",
-   "required": true
-  },
-  {
-   "key": "landing_average_by",
-   "scope": "item",
-   "label": "Landing — วิธีเฉลี่ยค่าใช้จ่าย",
-   "dctkName": "_LandingAverageBy",
-   "required": true
-  },
-  {
-   "key": "extra1_average_by",
-   "scope": "item",
-   "label": "ค่าใช้จ่ายอื่น 1 — วิธีเฉลี่ยค่าใช้จ่าย",
-   "dctkName": "_Extra1AverageBy",
-   "required": true
-  },
-  {
-   "key": "extra2_average_by",
-   "scope": "item",
-   "label": "ค่าใช้จ่ายอื่น 2 — วิธีเฉลี่ยค่าใช้จ่าย",
-   "dctkName": "_Extra2AverageBy",
    "required": true
   },
   {
@@ -1217,15 +1103,6 @@
    "valueLabel": "2-รถไฟ",
    "effects": [
     {
-     "key": "cargo_packing_type",
-     "scope": "header",
-     "label": "ประเภทการบรรจุ",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "3",
-     "to": "1"
-    },
-    {
      "key": "vessel_name",
      "scope": "header",
      "label": "ชื่อยานพาหนะ",
@@ -1244,15 +1121,6 @@
    "value": "3-รถยนต์",
    "valueLabel": "3-รถยนต์",
    "effects": [
-    {
-     "key": "cargo_packing_type",
-     "scope": "header",
-     "label": "ประเภทการบรรจุ",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "3",
-     "to": "2"
-    },
     {
      "key": "vessel_name",
      "scope": "header",
@@ -3191,348 +3059,6 @@
      "to": "true"
     }
    ]
-  },
-  {
-   "page": 3,
-   "driverKey": "forward_term_factor",
-   "driverScope": "item",
-   "driverLabel": "ค่าขนส่ง — ปัจจัยเงื่อนไข",
-   "value": "+",
-   "valueLabel": "+",
-   "effects": [
-    {
-     "key": "amount_term_factor",
-     "scope": "item",
-     "label": "ราคา — ปัจจัยเงื่อนไข",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "-1",
-     "to": "1"
-    }
-   ]
-  },
-  {
-   "page": 3,
-   "driverKey": "forward_term_factor",
-   "driverScope": "item",
-   "driverLabel": "ค่าขนส่ง — ปัจจัยเงื่อนไข",
-   "value": "-",
-   "valueLabel": "-",
-   "effects": [
-    {
-     "key": "amount_term_factor",
-     "scope": "item",
-     "label": "ราคา — ปัจจัยเงื่อนไข",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "-1",
-     "to": "1"
-    }
-   ]
-  },
-  {
-   "page": 3,
-   "driverKey": "freight_term_factor",
-   "driverScope": "item",
-   "driverLabel": "ค่าระวาง — ปัจจัยเงื่อนไข",
-   "value": "+",
-   "valueLabel": "+",
-   "effects": [
-    {
-     "key": "forward_term_factor",
-     "scope": "item",
-     "label": "ค่าขนส่ง — ปัจจัยเงื่อนไข",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "-1",
-     "to": "1"
-    }
-   ]
-  },
-  {
-   "page": 3,
-   "driverKey": "freight_term_factor",
-   "driverScope": "item",
-   "driverLabel": "ค่าระวาง — ปัจจัยเงื่อนไข",
-   "value": "-",
-   "valueLabel": "-",
-   "effects": [
-    {
-     "key": "forward_term_factor",
-     "scope": "item",
-     "label": "ค่าขนส่ง — ปัจจัยเงื่อนไข",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "-1",
-     "to": "1"
-    }
-   ]
-  },
-  {
-   "page": 3,
-   "driverKey": "insurance_term_factor",
-   "driverScope": "item",
-   "driverLabel": "ค่าประกัน — ปัจจัยเงื่อนไข",
-   "value": "+",
-   "valueLabel": "+",
-   "effects": [
-    {
-     "key": "freight_term_factor",
-     "scope": "item",
-     "label": "ค่าระวาง — ปัจจัยเงื่อนไข",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "-1",
-     "to": "1"
-    }
-   ]
-  },
-  {
-   "page": 3,
-   "driverKey": "insurance_term_factor",
-   "driverScope": "item",
-   "driverLabel": "ค่าประกัน — ปัจจัยเงื่อนไข",
-   "value": "-",
-   "valueLabel": "-",
-   "effects": [
-    {
-     "key": "freight_term_factor",
-     "scope": "item",
-     "label": "ค่าระวาง — ปัจจัยเงื่อนไข",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "-1",
-     "to": "1"
-    }
-   ]
-  },
-  {
-   "page": 3,
-   "driverKey": "pack_term_factor",
-   "driverScope": "item",
-   "driverLabel": "ค่าบรรจุ — ปัจจัยเงื่อนไข",
-   "value": "+",
-   "valueLabel": "+",
-   "effects": [
-    {
-     "key": "insurance_term_factor",
-     "scope": "item",
-     "label": "ค่าประกัน — ปัจจัยเงื่อนไข",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "-1",
-     "to": "1"
-    }
-   ]
-  },
-  {
-   "page": 3,
-   "driverKey": "pack_term_factor",
-   "driverScope": "item",
-   "driverLabel": "ค่าบรรจุ — ปัจจัยเงื่อนไข",
-   "value": "-",
-   "valueLabel": "-",
-   "effects": [
-    {
-     "key": "insurance_term_factor",
-     "scope": "item",
-     "label": "ค่าประกัน — ปัจจัยเงื่อนไข",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "-1",
-     "to": "1"
-    }
-   ]
-  },
-  {
-   "page": 3,
-   "driverKey": "inland_term_factor",
-   "driverScope": "item",
-   "driverLabel": "Inland — ปัจจัยเงื่อนไข",
-   "value": "+",
-   "valueLabel": "+",
-   "effects": [
-    {
-     "key": "pack_term_factor",
-     "scope": "item",
-     "label": "ค่าบรรจุ — ปัจจัยเงื่อนไข",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "-1",
-     "to": "1"
-    }
-   ]
-  },
-  {
-   "page": 3,
-   "driverKey": "inland_term_factor",
-   "driverScope": "item",
-   "driverLabel": "Inland — ปัจจัยเงื่อนไข",
-   "value": "-",
-   "valueLabel": "-",
-   "effects": [
-    {
-     "key": "pack_term_factor",
-     "scope": "item",
-     "label": "ค่าบรรจุ — ปัจจัยเงื่อนไข",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "-1",
-     "to": "1"
-    }
-   ]
-  },
-  {
-   "page": 3,
-   "driverKey": "landing_term_factor",
-   "driverScope": "item",
-   "driverLabel": "Landing — ปัจจัยเงื่อนไข",
-   "value": "+",
-   "valueLabel": "+",
-   "effects": [
-    {
-     "key": "inland_term_factor",
-     "scope": "item",
-     "label": "Inland — ปัจจัยเงื่อนไข",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "-1",
-     "to": "1"
-    }
-   ]
-  },
-  {
-   "page": 3,
-   "driverKey": "landing_term_factor",
-   "driverScope": "item",
-   "driverLabel": "Landing — ปัจจัยเงื่อนไข",
-   "value": "-",
-   "valueLabel": "-",
-   "effects": [
-    {
-     "key": "inland_term_factor",
-     "scope": "item",
-     "label": "Inland — ปัจจัยเงื่อนไข",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "-1",
-     "to": "1"
-    }
-   ]
-  },
-  {
-   "page": 3,
-   "driverKey": "extra1_term_factor",
-   "driverScope": "item",
-   "driverLabel": "ค่าใช้จ่ายอื่น 1 — ปัจจัยเงื่อนไข",
-   "value": "+",
-   "valueLabel": "+",
-   "effects": [
-    {
-     "key": "landing_term_factor",
-     "scope": "item",
-     "label": "Landing — ปัจจัยเงื่อนไข",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "-1",
-     "to": "1"
-    }
-   ]
-  },
-  {
-   "page": 3,
-   "driverKey": "extra1_term_factor",
-   "driverScope": "item",
-   "driverLabel": "ค่าใช้จ่ายอื่น 1 — ปัจจัยเงื่อนไข",
-   "value": "-",
-   "valueLabel": "-",
-   "effects": [
-    {
-     "key": "landing_term_factor",
-     "scope": "item",
-     "label": "Landing — ปัจจัยเงื่อนไข",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "-1",
-     "to": "1"
-    }
-   ]
-  },
-  {
-   "page": 3,
-   "driverKey": "extra2_term_factor",
-   "driverScope": "item",
-   "driverLabel": "ค่าใช้จ่ายอื่น 2 — ปัจจัยเงื่อนไข",
-   "value": "+",
-   "valueLabel": "+",
-   "effects": [
-    {
-     "key": "extra1_term_factor",
-     "scope": "item",
-     "label": "ค่าใช้จ่ายอื่น 1 — ปัจจัยเงื่อนไข",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "-1",
-     "to": "1"
-    }
-   ]
-  },
-  {
-   "page": 3,
-   "driverKey": "extra2_term_factor",
-   "driverScope": "item",
-   "driverLabel": "ค่าใช้จ่ายอื่น 2 — ปัจจัยเงื่อนไข",
-   "value": "-",
-   "valueLabel": "-",
-   "effects": [
-    {
-     "key": "extra1_term_factor",
-     "scope": "item",
-     "label": "ค่าใช้จ่ายอื่น 1 — ปัจจัยเงื่อนไข",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "-1",
-     "to": "1"
-    }
-   ]
-  },
-  {
-   "page": 3,
-   "driverKey": "increased_term_factor",
-   "driverScope": "item",
-   "driverLabel": "ราคาเพิ่ม/หน่วย — ปัจจัยเงื่อนไข",
-   "value": "+",
-   "valueLabel": "+",
-   "effects": [
-    {
-     "key": "extra2_term_factor",
-     "scope": "item",
-     "label": "ค่าใช้จ่ายอื่น 2 — ปัจจัยเงื่อนไข",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "-1",
-     "to": "1"
-    }
-   ]
-  },
-  {
-   "page": 3,
-   "driverKey": "increased_term_factor",
-   "driverScope": "item",
-   "driverLabel": "ราคาเพิ่ม/หน่วย — ปัจจัยเงื่อนไข",
-   "value": "-",
-   "valueLabel": "-",
-   "effects": [
-    {
-     "key": "extra2_term_factor",
-     "scope": "item",
-     "label": "ค่าใช้จ่ายอื่น 2 — ปัจจัยเงื่อนไข",
-     "change": "ค่าถูกเปลี่ยนให้อัตโนมัติ",
-     "kind": "autofill",
-     "from": "-1",
-     "to": "1"
-    }
-   ]
   }
  ],
  "incoterms": [
@@ -3993,7 +3519,7 @@
      "label": "ราคา/หน่วย — สกุลเงิน"
     },
     {
-     "key": "amount",
+     "key": "amount_currency",
      "scope": "item",
      "column": null,
      "label": "ราคา — สกุลเงิน"
@@ -4005,7 +3531,7 @@
      "label": "ค่าระวาง — สกุลเงิน"
     },
     {
-     "key": "insurance",
+     "key": "insurance_currency",
      "scope": "item",
      "column": null,
      "label": "ค่าประกัน — สกุลเงิน"
@@ -4063,7 +3589,7 @@
    "truncated": false,
    "fields": [
     {
-     "key": "net_weight_unit_code",
+     "key": "net_weight_unit_code_unit",
      "scope": "item",
      "column": null,
      "label": "น้ำหนักสุทธิ — หน่วย"

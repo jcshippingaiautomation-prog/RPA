@@ -127,6 +127,17 @@ FORCE_COMPUTED = {
     "defaultReferenceNo",
     # ประเภทการบรรจุ — DCTK ตั้งให้เองตามวิธีขนส่ง (ยืนยันจากการทดลองสลับค่า)
     "CargoPackingType",
+    # ช่อง "(ชื่อ)" ที่ DCTK เติมให้เองหลังเลือกรหัส/เลขประจำตัวผู้เสียภาษี
+    #   ห้ามเก็บลง Master และห้าม RPA พิมพ์เอง — ชื่อบริษัทเต็มมักยาวเกิน 35 ตัวที่กรมฯ รับ
+    #   (เจอจริง: Master เก็บ "ห้างหุ้นส่วนจำกัด เจ.แอนด์ ซี. เทรดดิ้ง" 48 ตัว → ทุกใบติด validation)
+    #   ⚠ ยกเว้น CmpNameThai — อันนั้นคือคำค้นบริษัทที่เราใช้หาผู้ส่งออกใน DCTK
+    "BrkNameThai", "SubBrkNameThai", "TradingCmpNameThai",
+    "ManagerName", "BrokerPersonName",
+    "EstablishName", "FactoryCmpName",
+    "PayerAccountName", "BenAccountName",
+    "GuaranteeBankName", "GuaranteeAccountName", "RgsBankName",
+    "ImportTaxIncentivesName", "ExportTaxIncentivesDescription",
+    "TaxCardAccountName",
 }
 # "ปัจจัยเงื่อนไข" (…TermFactor) — DCTK คำนวณจากตาราง Incoterms (Term/GetFactor)
 # "วิธีเฉลี่ยค่าใช้จ่าย" (…AverageBy) — DCTK เปิดให้เฉพาะใบหลายรายการ
@@ -337,6 +348,26 @@ def main() -> int:
                 "options": f["options"][:100],
                 "catalogKey": None,
             })
+
+    # ── แก้ชื่อคีย์ที่ "ชนกับชื่อคอลัมน์จริง" ในขอบเขตเดียวกัน ─────────────
+    #   เจอจริง (ระดับรายการ): key "amount" = ช่องสกุลเงิน (ไม่มีคอลัมน์)
+    #   แต่คอลัมน์ amount ในฐานข้อมูล = ยอดเงิน (ตัวเลข) → คนละความหมายชื่อเดียวกัน
+    #   ผลคือ ยอด 55,230 ถูกอ่านเป็น "สกุลเงิน" แล้วตัวตรวจฟ้อง / ยอดในรายการหาย
+    #   → เติมท้ายชื่อให้ต่างกัน ตามความหมายที่ป้ายบอก (สกุลเงิน / หน่วย)
+    for scope_name in ("header", "item"):
+        cols = {r["column"] for r in out if r["scope"] == scope_name and r["column"]}
+        for r in out:
+            if r["scope"] != scope_name or r["column"] or r["key"] not in cols:
+                continue
+            lab = r.get("label") or ""
+            dn = r.get("dctkName") or ""
+            if "สกุลเงิน" in lab or dn.endswith("_input") and "Currency" in dn:
+                suffix = "_currency"
+            elif "หน่วย" in lab or "UnitCode" in dn:
+                suffix = "_unit"
+            else:
+                suffix = "_field"
+            r["key"] = r["key"] + suffix
 
     # ── ตัดช่องซ้ำ ────────────────────────────────────────────────────────
     #   ช่องเดียวกันโผล่ได้หลายหน้า (เช่น InvoiceNo อยู่ทั้งหน้า 1 และหน้า 2)

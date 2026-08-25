@@ -126,7 +126,7 @@ export async function splitRecord(
   if (bulk && typeof bulk === "object" && !Array.isArray(bulk)) {
     for (const [k, v] of Object.entries(bulk as Record<string, unknown>)) {
       const def = byKey.get(k);
-      if (def && !def.computed) extra[k] = v;
+      if (def && !def.computed && !byCol.has(k)) extra[k] = v;   // ชนชื่อคอลัมน์ = ไม่ใช่ช่องเสริม
     }
   }
 
@@ -136,8 +136,15 @@ export async function splitRecord(
     const def = byKey.get(k);
     if (def) {
       if (def.computed) continue;            // DCTK เติมเอง — ไม่รับค่าจากฟอร์ม
-      if (def.column) columns[def.column] = coerce(def.column, v);
-      else extra[k] = v;
+      if (def.column) { columns[def.column] = coerce(def.column, v); continue; }
+      // ⚠ ชื่อคีย์ในทะเบียนช่องบางตัวชนกับชื่อคอลัมน์จริง แต่คนละความหมาย
+      //    ระดับรายการ: key "amount" = ช่องสกุลเงิน (ไม่มีคอลัมน์)
+      //    แต่คอลัมน์ amount ในฐานข้อมูล = ยอดเงิน (ตัวเลข)
+      //    ถ้าเชื่อ key อย่างเดียว ยอด 55,230 จะไปนอนใน extra_fields ในฐานะ "สกุลเงิน"
+      //    แล้วตัวตรวจฟ้อง «"ราคา — สกุลเงิน" = "55230" ไม่มีในสกุลเงินที่กรมฯ รับ» (เจอจริงตอนอัปโหลด)
+      //    → ถ้าชื่อนั้นเป็นคอลัมน์จริงด้วย ให้ยึดคอลัมน์ (ความหมายเจาะจงกว่า)
+      if (byCol.has(k)) { columns[k] = coerce(k, v); continue; }
+      extra[k] = v;
       continue;
     }
     // 2) ชื่อคอลัมน์จริง (payload เก่า เช่น currency / is_foc) — ยังต้องใช้ได้
