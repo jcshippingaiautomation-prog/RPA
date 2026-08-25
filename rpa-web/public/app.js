@@ -1333,6 +1333,11 @@ $("upSubmit").onclick = async () => {
     await loadDecls();
     closeUpload();
     // → ขั้นที่ 3: เปิดหน้าตรวจสอบ (detail modal + เอกสารต้นฉบับเป็นภาพ)
+    // ระบบปรับหน่วย/สกุลเงินให้ตรงรหัสกรมฯ → บอกผู้ใช้ด้วย จะได้ตรวจว่าถูกไหม
+    if (r && Array.isArray(r.codeFixes) && r.codeFixes.length) {
+      const lines = r.codeFixes.slice(0, 4).map((f) => `${f.label}: ${f.from} → ${f.to}`).join(" · ");
+      toast(`ปรับให้ตรงรหัสกรมฯ ${r.codeFixes.length} ช่อง — ${lines}`, "success");
+    }
     if (r && r.id) {
       openDetail(r.id, { wizard: true });
     } else {

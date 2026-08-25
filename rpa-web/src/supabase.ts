@@ -8,6 +8,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { config } from "./config.js";
 import { splitRecord, rowToFields } from "./field-registry.js";
 import { applyTemplate } from "./master-template.js";
+import { normalizeToDctkCodes } from "./normalize-codes.js";
 
 export interface DocumentRecord {
   id?: string;
@@ -550,12 +551,20 @@ export async function createDeclaration(
     /** บังคับใช้ Master ตัวนี้ (ผู้ใช้เลือกเองตอนอัปโหลด) — ไม่ต้องให้ระบบจับคู่เอง */
     templateId?: string;
   } = {},
-): Promise<{ id: string } | null> {
+): Promise<{ id: string; codeFixes?: { label: string; from: string; to: string }[] } | null> {
   const sb = getClient();
   if (!sb) return null;
   try {
     // ── ผสม Master ก่อนบันทึก ────────────────────────────────────────────
     //   เดิมขั้นนี้อยู่ใน insertDeclaration ซึ่งไม่มีใครเรียก → อัปโหลดเอกสารแล้วไม่เคยได้ค่าจาก Master
+    // ── ปรับหน่วย/สกุลเงิน/รหัสประเทศ ให้ตรงรหัสที่กรมฯ รับ ก่อนบันทึก ──
+    //   AI อ่านตามที่เขียนในเอกสาร ("TON", "KGS") แต่ DCTK รับเฉพาะรหัสของตัวเอง
+    //   ปรับตั้งแต่ตอนนี้ ผู้ใช้จะเห็นค่าที่ถูกในหน้าตรวจสอบ และ RPA ค้นคอมโบเจอ
+    const codeFixes = await normalizeToDctkCodes(record);
+    for (const f of codeFixes) {
+      console.log(`[code] ${f.scope === "item" ? `รายการ ${f.itemLine}: ` : ""}${f.label}: "${f.from}" → "${f.to}" (${f.listLabel})`);
+    }
+
     const mastered = await applyMasterToRecord(
       record,
       String(record.customer_name ?? ""),
@@ -594,7 +603,8 @@ export async function createDeclaration(
     const declId = ins.data?.id as string;
     const items = record._items ?? [];
     if (declId && items.length) await insertItems(declId, items);
-    return { id: declId };
+    // คืนรายการที่ระบบปรับค่าให้ด้วย — ผู้ใช้ควรรู้ว่าเราแก้อะไรไป ไม่ใช่แก้เงียบ ๆ
+    return { id: declId, codeFixes: codeFixes.map((f) => ({ label: f.label, from: f.from, to: f.to })) };
   } catch (err) {
     console.error("[supabase] createDeclaration error:", errMsg(err));
     return null;

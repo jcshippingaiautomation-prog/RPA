@@ -503,7 +503,7 @@ app.post("/api/upload", async (req, res) => {
     }
     broadcast("log", { line: `[UPLOAD] ✓ สร้างรายการ: ${customer} / ${inv || "(ไม่มี invoice)"}` });
     broadcast("decl-status", { id: created.id, status: needsReview ? "new" : "ready" });
-    res.json({ ok: true, id: created.id, customer, invoice: inv, needsReview });
+    res.json({ ok: true, id: created.id, customer, invoice: inv, needsReview, codeFixes: created.codeFixes ?? [] });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     broadcast("log", { line: "[UPLOAD] ✗ " + msg });

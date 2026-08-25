@@ -130,12 +130,35 @@ def parse_codes(items):
         # กันคำอังกฤษธรรมดาที่ไม่ใช่รหัส (ยาวเกินและมีตัวพิมพ์เล็กปน)
         if len(code) > 12:
             continue
-        codes.append(code)
+        codes.append((code, t[m.end():].strip()))
     # คงลำดับ + ตัดซ้ำ
     seen, out = set(), []
-    for c in codes:
+    for c, _n in codes:
         if c not in seen:
             seen.add(c); out.append(c)
+    return out
+
+
+def parse_code_names(items):
+    """รหัส → ชื่อเต็มตามที่ DCTK แสดง (เช่น TNE → "TONNE (METRIC TON)")
+
+    ใช้จับค่าที่ AI อ่านมาผิดรูปให้เข้ารหัสที่ถูก โดยไม่ต้องเขียนตารางเดาเอง
+    (เจอจริง: AI อ่าน "TON" เป็น "TO" ซึ่งกรมฯ ไม่รับ แต่ตรงกับชื่อ TONNE)
+    """
+    out = {}
+    for raw in items:
+        t = (raw or "").strip()
+        if not t or re.match(r"^[ก-๙]", t):
+            continue
+        m = CODE_RE.match(t)
+        if not m:
+            continue
+        code = m.group(1)
+        if len(code) > 12:
+            continue
+        name = t[m.end():].strip()
+        if code not in out and name:
+            out[code] = name
     return out
 
 
@@ -309,7 +332,8 @@ def main() -> int:
         for tid, tlabel, rx in LIST_TYPE:
             if not rx.match(c["dctkName"]):
                 continue
-            m = merged.setdefault(tid, {"id": tid, "label": tlabel, "codes": [], "deep": False, "fromFields": []})
+            m = merged.setdefault(tid, {"id": tid, "label": tlabel, "codes": [], "names": {}, "deep": False, "fromFields": []})
+            m["names"].update(parse_code_names(c.get("items") or []))
             for x in codes:
                 if x not in m["codes"]:
                     m["codes"].append(x)
@@ -336,6 +360,7 @@ def main() -> int:
         value_lists.append({
             "id": tid, "label": tlabel,
             "codes": sorted(m["codes"]), "count": len(m["codes"]),
+            "names": {c: m["names"][c] for c in sorted(m["codes"]) if c in m.get("names", {})},
             "deepSwept": m["deep"],
             "reliable": tid in RELIABLE and m["deep"] and not m.get("truncated"),
             "truncated": bool(m.get("truncated")),
