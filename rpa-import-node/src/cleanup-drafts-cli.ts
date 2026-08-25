@@ -28,6 +28,15 @@ const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } }
 const page = await ctx.newPage();
 page.setDefaultTimeout(30000);
 
+// ⚠ DCTK ยืนยันการลบด้วย confirm() ของเบราว์เซอร์ ไม่ใช่กล่องในหน้าเว็บ
+//   ถ้าไม่ดักไว้ Playwright จะกด "ยกเลิก" ให้อัตโนมัติ → กดลบเท่าไหร่ก็ไม่มีอะไรเกิดขึ้น
+//   และถ้าสั่ง element.click() ผ่าน evaluate จะค้างที่ confirm() เงียบ ๆ ด้วย
+const dialogs: string[] = [];
+page.on("dialog", async (d) => {
+  dialogs.push(d.message().replace(/\s+/g, " ").trim().slice(0, 80));
+  await d.accept();
+});
+
 try {
   await page.goto(cfg.url!, { waitUntil: "domcontentloaded", timeout: 45000 });
   await login(page, cfg.username, cfg.password);
@@ -67,31 +76,25 @@ try {
     log(`   ${APPLY ? "🗑" : "•"} ${ref}  ${t.invoice.padEnd(24)} ${t.customer.slice(0, 32)}`);
     if (!APPLY) continue;
 
+    // เลือกแถว (ไฮไลต์) แล้วกดปุ่มลบด้วย "คลิกจริง" — ตัวดัก dialog ด้านบนจะกดยืนยันให้
     await page.locator(`#grid tbody tr[data-uid="${t.uid}"]`).first().click({ timeout: 10000 });
     await sleep(1500);
-    const clicked = await page.evaluate(() => {
-      const b = document.querySelector("#BtnDelete") as HTMLElement | null;
-      if (!b) return false;
-      b.click(); return true;
-    });
-    if (!clicked) { log(`      ⚠ ไม่พบปุ่มลบ`); skipped++; continue; }
-    await sleep(3000);
-    for (let i = 0; i < 6; i++) {
-      const ok = await page.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll("button, input[type=button]"));
-        const yes = btns.find((b) => {
-          const s = ((b as HTMLElement).innerText || (b as HTMLInputElement).value || "").trim().toUpperCase();
-          return s === "YES" || s === "ตกลง" || s === "OK";
-        }) as HTMLElement | undefined;
-        if (!yes) return false;
-        yes.click(); return true;
-      }).catch(() => false);
-      if (ok) break;
-      await sleep(1500);
-    }
-    await sleep(5000);
-    log(`      ✓ ลบแล้ว`);
-    done++;
+    dialogs.length = 0;
+    try {
+      await page.locator("#BtnDelete").click({ timeout: 10000 });
+    } catch { log(`      ⚠ กดปุ่มลบไม่ได้`); skipped++; continue; }
+    await sleep(8000);
+    if (dialogs.length) log(`      DCTK ถาม: ${dialogs.join(" → ")}`);
+    // ต้องตรวจจริงว่าหายไปแล้ว — ห้ามรายงานสำเร็จลอย ๆ
+    const gone = await page.evaluate((v: string) => {
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      const ds = (window as any).$("#grid").data("kendoGrid")?.dataSource;
+      ds?.read?.();
+      const view: any[] = ds?.view?.() ?? [];
+      return !view.some((x) => String(x.ReferenceNo ?? "") === v);
+    }, ref).catch(() => false);
+    if (gone) { log(`      ✓ ลบแล้ว (ตรวจซ้ำว่าหายจริง)`); done++; }
+    else { log(`      ✗ กดลบแล้วแต่ใบยังอยู่`); skipped++; }
   }
 
   log(`\nสรุป: ${APPLY ? `ลบ ${done} ใบ` : `จะลบ ${REFS.length - skipped} ใบ`} · ข้าม ${skipped}`);
