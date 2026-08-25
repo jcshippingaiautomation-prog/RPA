@@ -251,6 +251,40 @@ async function deleteCopy(page: Page, ref: string): Promise<boolean> {
   }
 }
 
+
+/**
+ * ช่องที่เป็น "ข้อมูลของชิปเมนต์นั้น ๆ" — เปลี่ยนทุกใบ ไม่ใช่ค่าต้นแบบ
+ *
+ * ทำไมต้องมี: Master ที่ดึงจากใบจริงมีค่าครบ "ทุกช่อง" รวมเลขใบกำกับกับยอดเงิน
+ *   โหมดปริยายคือ "มีค่า = ใช้ค่า Master (ทับ AI)" → พอเอาไปใช้กับเอกสารใบใหม่
+ *   มันจะทับเลขใบกำกับและยอดเงินที่ AI อ่านมาด้วยค่าของใบต้นแบบ (เจอจริงตอนทดสอบ)
+ *
+ * → ตั้งช่องพวกนี้เป็นโหมด 'ai' ตอนดึง: AI ได้ค่ามาก็ใช้ของ AI
+ *   ถ้า AI อ่านไม่ได้ค่อยเอาค่าใน Master มาเติมช่องว่างให้ (ยังเป็นตัวช่วยอยู่)
+ *   ผู้ใช้ปรับเป็น "ใช้ค่า Master" เองได้ทีหลังในหน้าคลัง Master
+ */
+const SHIPMENT_EXACT = new Set([
+  "invoice_no", "invoice_date", "departure_date",
+  "vessel_name", "voyage", "mawb", "hawb", "po_number", "reference_no_common",
+  "total_gross_weight", "total_net_weight", "total_quantity", "total_package",
+  // ระดับรายการสินค้า
+  "net_weight", "gross_weight", "package", "quantity", "inv_quantity",
+]);
+/** ตัวเลขเงินทุกแถวในตารางราคา (…_foreign / …_baht / …_exchange_rate) เปลี่ยนทุกใบเหมือนกัน */
+const SHIPMENT_SUFFIX = ["_foreign", "_baht", "_exchange_rate"];
+
+function isShipmentField(key: string): boolean {
+  return SHIPMENT_EXACT.has(key) || SHIPMENT_SUFFIX.some((sfx) => key.endsWith(sfx));
+}
+
+/** สร้างโหมดรายช่องสำหรับ Master ที่เพิ่งดึงมา */
+function buildFieldModes(header: { [k: string]: string }, items: { [k: string]: string }[]): { [k: string]: string } {
+  const modes: { [k: string]: string } = {};
+  const keys = new Set([...Object.keys(header), ...items.flatMap((it) => Object.keys(it))]);
+  for (const k of keys) if (isShipmentField(k)) modes[k] = "ai";
+  return modes;
+}
+
 const browser = await chromium.launch({ headless: process.env.PULL_HEADLESS !== "0" });
 const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
 const page = await context.newPage();
@@ -369,7 +403,7 @@ try {
     product_codes: [...new Set(products)],
     header,
     items,
-    field_modes: {},
+    field_modes: buildFieldModes(header, items),
     is_default: false,
     source: { pulledBy: col.label, value: INVOICE },
   };
@@ -396,7 +430,8 @@ try {
       const body = {
         name: master.name, customer_name: master.customer_name, description: master.description,
         consignee_names: master.consignee_names, product_codes: master.product_codes,
-        header: master.header, items: master.items, field_modes: {}, is_default: false,
+        header: master.header, items: master.items,
+        field_modes: buildFieldModes(master.header, master.items), is_default: false,
       };
       const resp = await fetch(`${url}/rest/v1/declaration_templates`, {
         method: "POST",
