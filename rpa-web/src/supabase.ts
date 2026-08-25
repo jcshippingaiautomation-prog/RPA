@@ -545,11 +545,26 @@ export async function getDeclaration(id: string): Promise<Record<string, unknown
 /** สร้าง declaration ใหม่ (manual create หรือ upload) — คืน id */
 export async function createDeclaration(
   record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
-  opts: { source?: string; status?: string; fieldModes?: { [k: string]: string } } = {},
+  opts: {
+    source?: string; status?: string; fieldModes?: { [k: string]: string };
+    /** บังคับใช้ Master ตัวนี้ (ผู้ใช้เลือกเองตอนอัปโหลด) — ไม่ต้องให้ระบบจับคู่เอง */
+    templateId?: string;
+  } = {},
 ): Promise<{ id: string } | null> {
   const sb = getClient();
   if (!sb) return null;
   try {
+    // ── ผสม Master ก่อนบันทึก ────────────────────────────────────────────
+    //   เดิมขั้นนี้อยู่ใน insertDeclaration ซึ่งไม่มีใครเรียก → อัปโหลดเอกสารแล้วไม่เคยได้ค่าจาก Master
+    const mastered = await applyMasterToRecord(
+      record,
+      String(record.customer_name ?? ""),
+      String(record.invoice_number ?? ""),
+      opts.templateId,
+    );
+    record = mastered.record;
+    const fieldModes = { ...(mastered.fieldModes ?? {}), ...(opts.fieldModes ?? {}) };
+
     const payload: Record<string, unknown> = {};
     for (const col of DECL_COLUMNS) if (record[col] !== undefined) payload[col] = record[col] ?? null;
     const extra = await availableExtraColumns();
@@ -563,8 +578,8 @@ export async function createDeclaration(
       payload.extra_fields = split.extra;
     }
     // โหมดรายช่องที่ติดมาจาก Master ('master'/'ai'/'off') — worker ใช้ตอนกรอก
-    if (opts.fieldModes && Object.keys(opts.fieldModes).length && (await fieldModesEnabled())) {
-      payload.field_modes = opts.fieldModes;
+    if (Object.keys(fieldModes).length && (await fieldModesEnabled())) {
+      payload.field_modes = fieldModes;
     }
     payload.source = opts.source ?? "manual";
     payload.doc_status = false;
@@ -834,6 +849,63 @@ async function declarationExists(customer: string, invoice: string): Promise<boo
  * insert declaration + items (จาก Get Email) — คืน { inserted, skipped }
  * record มี _items?: [] แนบมาด้วย
  */
+
+/**
+ * เลือก Master ที่เหมาะกับใบนี้แล้วผสมค่าลงไป
+ *
+ * ลำดับการเลือก:
+ *   1. Master ที่ผู้ใช้เลือกเองตอนอัปโหลด (templateId) — ชนะทุกอย่าง ไม่ต้องเดา
+ *   2. จับคู่ 3 ระดับ: ลูกค้า → consignee → รหัสสินค้า (ตามที่ตกลงในที่ประชุม)
+ *   3. Master ค่าเริ่มต้นของลูกค้า
+ * โหมดรายช่องตัดสินว่าใช้ค่าไหน: 'master' ทับค่า AI · 'ai' เติมเฉพาะช่องว่าง · 'off' ไม่กรอก
+ *
+ * แยกออกมาเป็นฟังก์ชันเพราะเดิมโค้ดนี้ฝังอยู่ใน insertDeclaration ตัวเดียว
+ * ซึ่ง "ไม่มีใครเรียก" → การอัปโหลดเอกสารจึงไม่เคยใช้ Master เลย
+ */
+export async function applyMasterToRecord(
+  record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
+  customer: string,
+  invoice: string,
+  templateId?: string,
+): Promise<{
+  record: Record<string, unknown> & { _items?: Record<string, unknown>[] };
+  fieldModes?: { [k: string]: FieldMode };
+  templateName?: string;
+}> {
+  const consigneeName = String(record.consignee_name ?? "");
+  const productCodes = (record._items ?? [])
+    .map((it) => String((it as Record<string, unknown>).description_eng ?? ""))
+    .filter(Boolean);
+
+  let tpl: DeclarationTemplate | null = null;
+  if (templateId) {
+    tpl = await getTemplate(templateId);
+    if (tpl) console.log(`[master] ใช้ Master ที่ผู้ใช้เลือก: "${tpl.name}"`);
+    else console.warn(`[master] ไม่พบ Master id=${templateId} — ถอยไปจับคู่อัตโนมัติ`);
+  }
+  if (!tpl) {
+    tpl = (await templateLevelsEnabled())
+      ? (await findBestTemplate(customer, consigneeName, productCodes)) ?? (await getDefaultTemplate(customer))
+      : await getDefaultTemplate(customer);
+  }
+  if (!tpl) return { record };
+
+  const cur = await rowToFields(record, "header");             // คอลัมน์ → key ของ registry
+  const applied = applyTemplate(tpl, cur, { includeItems: false });
+  const split = await splitRecord(applied.record, "header");   // กลับเป็นคอลัมน์ + extra
+  const out: Record<string, unknown> & { _items?: Record<string, unknown>[] } = {
+    ...record,
+    ...split.columns,
+    extra_fields: { ...((record.extra_fields ?? {}) as object), ...split.extra },
+  };
+  if (!(record._items?.length) && tpl.items?.length) out._items = tpl.items.map((it) => ({ ...it }));
+  const changed = applied.overridden.length + applied.filled.length;
+  if (changed) {
+    console.log(`[master] ใช้ Master "${tpl.name}" กับ ${customer}/${invoice} — ทับ ${applied.overridden.length} · เติม ${applied.filled.length} ช่อง`);
+  }
+  return { record: out, fieldModes: applied.fieldModes, templateName: tpl.name };
+}
+
 export async function insertDeclaration(
   record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
 ): Promise<{ inserted: boolean; reason?: string; id?: string }> {
@@ -848,30 +920,9 @@ export async function insertDeclaration(
     // ── ผสม Master ที่ตั้งเป็นค่าเริ่มต้นของลูกค้า (ถ้ามี) ──────────────
     //   โหมดรายช่องตัดสินว่าใช้ค่าไหน: 'master' ทับค่า AI · 'ai' เติมเฉพาะช่องว่าง · 'off' ไม่กรอก
     let rec: Record<string, unknown> & { _items?: Record<string, unknown>[] } = record;
-    let fieldModes: { [k: string]: FieldMode } | undefined;
-    // เลือก Master 3 ระดับ: ลูกค้า → consignee → รหัสสินค้า (ตามที่ตกลงในที่ประชุม)
-    //   ไม่มีตัวไหนตรง → ถอยไปใช้ Master ค่าเริ่มต้นของลูกค้า (พฤติกรรมเดิม)
-    const consigneeName = String(record.consignee_name ?? "");
-    const productCodes = (record._items ?? [])
-      .map((it) => String((it as Record<string, unknown>).description_eng ?? ""))
-      .filter(Boolean);
-    const tpl = (await templateLevelsEnabled())
-      ? (await findBestTemplate(customer, consigneeName, productCodes)) ?? (await getDefaultTemplate(customer))
-      : await getDefaultTemplate(customer);
-    if (tpl) {
-      const cur = await rowToFields(record, "header");             // คอลัมน์ → key ของ registry
-      const applied = applyTemplate(tpl, cur, { includeItems: false });
-      const split = await splitRecord(applied.record, "header");   // กลับเป็นคอลัมน์ + extra
-      fieldModes = applied.fieldModes;
-      rec = {
-        ...record,
-        ...split.columns,
-        extra_fields: { ...((record.extra_fields ?? {}) as object), ...split.extra },
-      };
-      if (!(record._items?.length) && tpl.items?.length) rec._items = tpl.items.map((it) => ({ ...it }));
-      const changed = applied.overridden.length + applied.filled.length;
-      if (changed) console.log(`[master] ใช้ Master "${tpl.name}" กับ ${customer}/${invoice} — ทับ ${applied.overridden.length} · เติม ${applied.filled.length} ช่อง`);
-    }
+    const applied = await applyMasterToRecord(record, customer, invoice);
+    let fieldModes = applied.fieldModes;
+    rec = applied.record;
 
     const payload: Record<string, unknown> = {};
     for (const col of DECL_COLUMNS) payload[col] = rec[col] ?? null;

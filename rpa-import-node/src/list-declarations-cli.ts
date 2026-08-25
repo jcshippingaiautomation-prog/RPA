@@ -50,6 +50,35 @@ try {
   await page.click(S.SEL_PORTFOLIO_MENU);
   await sleep(6000);
 
+  // ⚠ หน้ารายการกรองตาม "วันที่สร้าง" อยู่แล้ว (ปริยาย ~9 เดือนล่าสุด)
+  //    ถ้าไม่ขยายช่วง จะไม่เห็นใบเก่า → นึกว่าลูกค้ารายนั้นไม่มีใบเลย
+  const FROM = (process.env.LIST_FROM ?? "").trim();   // dd/mm/yyyy
+  const TO = (process.env.LIST_TO ?? "").trim();
+  if (FROM || TO) {
+    log(`→ ขยายช่วงวันที่สร้าง: ${FROM || "(เดิม)"} ถึง ${TO || "(เดิม)"}`);
+    await page.evaluate(({ f, t }: { f: string; t: string }) => {
+      const set = (id: string, v: string) => {
+        if (!v) return;
+        const el = document.getElementById(id) as HTMLInputElement | null;
+        if (!el) return;
+        el.value = v;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      };
+      set("SearchStartDate", f);
+      set("SearchFinishDate", t);
+    }, { f: FROM, t: TO });
+    await sleep(1200);
+    const searched = await page.evaluate(() => {
+      const b = Array.from(document.querySelectorAll("button, a"))
+        .find((x) => /ค้นหา/.test((x as HTMLElement).innerText || "")) as HTMLElement | undefined;
+      if (!b) return false;
+      b.click(); return true;
+    });
+    log(searched ? `   ✓ กดค้นหาแล้ว` : `   ⚠ ไม่พบปุ่มค้นหา — ใช้ช่วงเดิม`);
+    await sleep(9000);
+  }
+
   // ขยายจำนวนแถวต่อหน้าให้มากที่สุด แล้วไล่ทีละหน้าจนครบ
   //   (ค่าปริยาย 30 แถว/หน้า — ลูกค้าบางรายอยู่หน้าหลัง ๆ)
   const readPage = async () => await page.evaluate(() => {
@@ -79,6 +108,15 @@ try {
       };
     });
   }).catch(() => [] as Row[]);
+
+  // ขยายแถวต่อหน้าก่อนไล่ — 30 แถว/หน้าตามค่าปริยายทำให้ต้องวนเป็นสิบ ๆ รอบ
+  const PAGE_SIZE = Number(process.env.LIST_PAGE_SIZE ?? 300);
+  await page.evaluate((n: number) => {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const ds = (window as any).$("#grid").data("kendoGrid")?.dataSource;
+    if (ds && typeof ds.pageSize === "function") ds.pageSize(n);
+  }, PAGE_SIZE).catch(() => { /* ใช้ค่าเดิม */ });
+  await sleep(6000);
 
   // ไล่ทุกหน้าของตาราง (Kendo dataSource) — หยุดเมื่อหมดหน้าหรือชนเพดาน
   const rows: Row[] = [];

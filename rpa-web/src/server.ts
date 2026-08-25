@@ -475,9 +475,13 @@ app.post("/api/declarations/:id/edit", async (req, res) => {
 app.post("/api/upload", async (req, res) => {
   if (!supabaseEnabled()) { res.status(400).json({ error: "ยังไม่ได้ตั้งค่า Supabase" }); return; }
   if (!config.gemini.enabled) { res.status(400).json({ error: "ยังไม่ได้ตั้งค่า Gemini (AI)" }); return; }
-  const body = (req.body || {}) as { files?: { filename: string; mimeType?: string; dataBase64: string }[]; customer?: string };
+  const body = (req.body || {}) as {
+    files?: { filename: string; mimeType?: string; dataBase64: string }[];
+    customer?: string; templateId?: string;
+  };
   const files = Array.isArray(body.files) ? body.files : [];
   const customerHint = (body.customer || "").trim();
+  const templateId = (body.templateId || "").trim() || undefined;
   if (!files.length) { res.status(400).json({ error: "ไม่มีไฟล์" }); return; }
   try {
     const attachments = files.map((f) => ({
@@ -488,7 +492,9 @@ app.post("/api/upload", async (req, res) => {
     broadcast("log", { line: `[UPLOAD] 📤 ประมวลผล ${attachments.length} ไฟล์ด้วย AI…` });
     const { record, customer } = await extractFromAttachments(attachments, (line) => broadcast("log", { line: "[UPLOAD] " + line }), customerHint);
     const needsReview = record._needs_review === true;
-    const created = await createDeclaration(record, { source: "upload", status: needsReview ? "new" : "ready" });
+    const created = await createDeclaration(record, {
+      source: "upload", status: needsReview ? "new" : "ready", templateId,
+    });
     if (!created) { res.status(500).json({ error: "บันทึกรายการไม่สำเร็จ" }); return; }
     // เก็บไฟล์ต้นฉบับ ผูกด้วย customer+invoice
     const inv = String(record.invoice_number ?? "");

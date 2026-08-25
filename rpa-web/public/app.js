@@ -1217,6 +1217,26 @@ async function loadCustomerNames() {
   const sel = $("upCustomer");
   if (sel) sel.innerHTML = '<option value="">— ให้ AI ระบุเอง —</option>' +
     customerNames.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
+  if (sel) sel.onchange = () => fillUploadTemplates(sel.value);
+  await fillUploadTemplates("");
+}
+
+/** เติมรายการ Master ในหน้าอัปโหลด — กรองตามลูกค้าที่เลือก */
+let uploadTemplates = [];
+async function fillUploadTemplates(customer) {
+  const sel = $("upTemplate");
+  if (!sel) return;
+  if (!uploadTemplates.length) {
+    try {
+      const r = await api("/api/templates");
+      uploadTemplates = r.enabled === false ? [] : (r.templates || []);
+    } catch { uploadTemplates = []; }
+  }
+  const c = (customer || "").trim().toUpperCase();
+  const list = c ? uploadTemplates.filter((t) => (t.customer_name || "").toUpperCase() === c) : uploadTemplates;
+  sel.innerHTML = '<option value="">— เลือกให้อัตโนมัติจาก Consignee/สินค้า —</option>' +
+    list.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}</option>`).join("");
+  sel.disabled = !list.length;
 }
 // ---- จัดการขั้นตอน wizard ของ modal อัปโหลด ----
 function setUploadStep(n) {
@@ -1281,7 +1301,8 @@ $("upSubmit").onclick = async () => {
     }
     $("upProcTitle").textContent = "AI กำลังอ่านและสกัดข้อมูลจากเอกสาร…";
     const customer = $("upCustomer").value || "";
-    const r = await api("/api/upload", "POST", { files, customer });
+    const templateId = ($("upTemplate") || {}).value || "";
+    const r = await api("/api/upload", "POST", { files, customer, templateId });
     await loadDecls();
     closeUpload();
     // → ขั้นที่ 3: เปิดหน้าตรวจสอบ (detail modal + เอกสารต้นฉบับเป็นภาพ)
