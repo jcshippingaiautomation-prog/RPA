@@ -492,9 +492,13 @@ async function answerReopenPrompt(page: Page): Promise<void> {
 export async function openDeclarationForEdit(page: Page, declNo: string): Promise<Page> {
   const col = detectSearchColumn(declNo);
   log(`portfolio → ค้นใบ ${declNo} (คอลัมน์ ${col.label}) เพื่อแก้`);
-  // 1) เปิดหน้ารายการใบขน
-  await page.click(S.SEL_PORTFOLIO_MENU);
-  await sleep(5000);
+  // 1) เปิดหน้ารายการใบขน — ถ้าอยู่หน้านี้อยู่แล้ว (เช่นเพิ่งกดสำเนา) ไม่ต้องกดเมนูซ้ำ
+  const onPortfolio = await page.locator("#grid").first()
+    .isVisible({ timeout: 3000 }).catch(() => false);
+  if (!onPortfolio) {
+    await page.click(S.SEL_PORTFOLIO_MENU);
+    await sleep(5000);
+  }
   // 2) filter คอลัมน์ที่ตรงกับชนิดเลข (Kendo grid filter — auto apply)
   //    ถ้าคอลัมน์ที่เดาไว้ไม่มี ให้ถอยไปใช้คอลัมน์เลขที่ใบขนฯ (พฤติกรรมเดิม)
   let searchSel = col.selector;

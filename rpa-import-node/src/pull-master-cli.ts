@@ -32,6 +32,11 @@ setLogSink(null);
 const INVOICE = (process.env.PULL_INVOICE ?? "").trim();
 const CUSTOMER = (process.env.PULL_CUSTOMER ?? "").trim();
 const DRY = process.env.PULL_DRY === "1";
+// ทำสำเนาก่อนอ่าน — จำเป็นกับใบที่ผ่านกรมฯ แล้ว (ไม่งั้นเข้ารายการสินค้าไม่ได้)
+const VIA_COPY = process.env.PULL_VIA_COPY === "1";
+// ลบใบร่างสำเนาทิ้งหลังอ่านเสร็จ (ค่าปริยาย: ลบ) — ใส่ PULL_CLEANUP=0 ถ้าอยากเก็บไว้ดู
+const CLEANUP = process.env.PULL_CLEANUP !== "0";
+let copyRef: string | null = null;
 if (!INVOICE) { console.error("✗ ต้องระบุ PULL_INVOICE (เลขที่ใบกำกับสินค้า)"); process.exit(1); }
 
 const cfg = await loadConfig();
@@ -98,6 +103,154 @@ function normalizeDates(rec: { [k: string]: string }, scope: "header" | "item"):
   return rec;
 }
 
+
+/**
+ * ทำ "สำเนา" ใบใน DCTK แล้วเปิดสำเนานั้นแทนตัวจริง
+ *
+ * ทำไมต้องมี: ใบที่ผ่านกรมฯ แล้วเปิดได้แค่โหมดอ่าน → เข้ารายการสินค้า (หน้า 3) ไม่ได้
+ *   ซึ่งเป็นส่วนที่สำคัญที่สุดของ Master (รหัสสินค้า พิกัด หน่วย น้ำหนักต่อรายการ)
+ *   DCTK มีปุ่ม "สำเนา" (#BtnCopy) สร้างใบร่างที่มีข้อมูลครบเหมือนต้นฉบับ → อ่านได้เต็ม
+ *   วิธีนี้ไม่แตะต้นฉบับเลย (ตรงข้ามกับการตอบ YES ปรับสถานะใบจริง)
+ *
+ * ⚠ ผลข้างเคียง: เหลือ "ใบร่างสำเนา" ค้างใน DCTK 1 ใบ (คืนเลขอ้างอิงกลับไปให้ลบทีหลัง)
+ */
+async function copyThenOpen(page: Page, invoice: string): Promise<string | null> {
+  const col = detectSearchColumn(invoice);
+  log(`สำเนาใบ ${invoice} เพื่ออ่านข้อมูลให้ครบ (ไม่แตะใบต้นฉบับ)`);
+  await page.click(S.SEL_PORTFOLIO_MENU);
+  await sleep(5000);
+
+  const setFilter = async () => await page.evaluate(({ f, v }: { f: string; v: string }) => {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const ds = (window as any).$("#grid").data("kendoGrid")?.dataSource;
+    if (!ds) return false;
+    ds.filter({ field: f, operator: "contains", value: v });
+    return true;
+  }, { f: col.field, v: invoice });
+
+  const readRows = async () => await page.evaluate(() => {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const v: any[] = (window as any).$("#grid").data("kendoGrid")?.dataSource?.view?.() ?? [];
+    return v.map((m) => ({
+      uid: String(m.uid ?? ""),
+      ref: String(m.ReferenceNo ?? ""),
+      status: String(m.DeclarationStatusName ?? ""),
+    }));
+  }).catch(() => [] as { uid: string; ref: string; status: string }[]);
+
+  await setFilter();
+  await sleep(4500);
+  const before = await readRows();
+  if (!before.length) throw new Error(`ค้นใบ "${invoice}" ไม่เจอ — ตรวจเลขอีกที`);
+  const beforeRefs = new Set(before.map((r) => r.ref));
+  log(`  พบใบเดิม ${before.length} ใบ: ${before.map((r) => `${r.ref}(${r.status})`).join(", ")}`);
+
+  // เลือกใบต้นฉบับ (ตัวที่ทำรายการเสร็จแล้วก่อน ถ้าไม่มีก็ตัวแรก) แล้วกดสำเนา
+  const src = before.find((r) => !/กำลังทำข้อมูล/.test(r.status)) ?? before[0];
+  await page.locator(`#grid tbody tr[data-uid="${src.uid}"]`).first().click({ timeout: 10000 });
+  await sleep(1500);
+  const clicked = await page.evaluate(() => {
+    const b = document.querySelector("#BtnCopy") as HTMLElement | null;
+    if (!b) return false;
+    b.click(); return true;
+  });
+  if (!clicked) throw new Error(`ไม่พบปุ่ม "สำเนา" (#BtnCopy) ในหน้ารายการใบขน`);
+  await sleep(9000);
+
+  // หาใบใหม่ที่เพิ่งเกิด — เลขอ้างอิงที่ไม่เคยมีก่อนกดสำเนา
+  await setFilter();
+  await sleep(4500);
+  const after = await readRows();
+  const fresh = after.find((r) => !beforeRefs.has(r.ref));
+  if (!fresh) throw new Error(`กดสำเนาแล้วแต่หาใบสำเนาใหม่ไม่เจอ (ใบที่มี: ${after.map((r) => r.ref).join(", ")})`);
+  log(`  ✓ ได้ใบสำเนา ${fresh.ref} (${fresh.status})`);
+
+  // เปิดใบสำเนา (เป็นใบร่าง → เปิดได้เต็ม ไม่มีกล่องถามปรับสถานะ)
+  await openDeclarationForEdit(page, fresh.ref);
+  return fresh.ref;
+}
+
+
+/**
+ * ลบ "ใบร่างสำเนา" ที่เราสร้างขึ้นเพื่ออ่านข้อมูล
+ *
+ * ปลอดภัยเพราะตรวจ 2 ชั้นก่อนลบ:
+ *   1. เลขอ้างอิงต้องตรงกับใบที่ "เราเพิ่งสร้าง" เป๊ะ ๆ
+ *   2. สถานะต้องเป็น "กำลังทำข้อมูล" (ใบร่าง) — ถ้าเป็นใบที่ยื่นกรมฯ แล้วจะไม่แตะ
+ * ใส่ PULL_CLEANUP=0 ถ้าอยากเก็บสำเนาไว้ดูเอง
+ */
+async function deleteCopy(page: Page, ref: string): Promise<boolean> {
+  log(`\n🧹 ลบใบร่างสำเนา ${ref} (สำเนาที่สร้างเพื่ออ่านข้อมูล ไม่ใช่ใบจริง)`);
+  try {
+    // ตอนนี้เราอยู่ลึกในฟอร์มใบขน (บางทีคนละแท็บ) — กดเมนูอาจไม่ติด
+    //   ไปหน้ารายการด้วย URL ตรง ๆ ชัวร์กว่า
+    const base = new URL(cfg.url!).origin;
+    await page.goto(`${base}/DCTK/ExDec/Index`, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.locator("#grid").first().waitFor({ state: "visible", timeout: 30000 });
+    await sleep(3000);
+
+    await page.evaluate((v: string) => {
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      (window as any).$("#grid").data("kendoGrid")?.dataSource
+        ?.filter({ field: "ReferenceNo", operator: "eq", value: v });
+    }, ref);
+    await sleep(4500);
+
+    const target = await page.evaluate((v: string) => {
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      const view: any[] = (window as any).$("#grid").data("kendoGrid")?.dataSource?.view?.() ?? [];
+      const m = view.find((x) => String(x.ReferenceNo ?? "") === v);
+      if (!m) return null;
+      return { uid: String(m.uid ?? ""), status: String(m.DeclarationStatusName ?? "") };
+    }, ref).catch(() => null);
+
+    if (!target) { log(`   ⚠ หาใบ ${ref} ไม่เจอ — ข้ามการลบ`); return false; }
+    if (!/กำลังทำข้อมูล/.test(target.status)) {
+      log(`   ⚠ ใบ ${ref} สถานะ "${target.status}" ไม่ใช่ใบร่าง — ไม่ลบ (กันลบใบจริง)`);
+      return false;
+    }
+
+    await page.locator(`#grid tbody tr[data-uid="${target.uid}"]`).first().click({ timeout: 10000 });
+    await sleep(1500);
+    const clicked = await page.evaluate(() => {
+      const b = document.querySelector("#BtnDelete") as HTMLElement | null;
+      if (!b) return false;
+      b.click(); return true;
+    });
+    if (!clicked) { log(`   ⚠ ไม่พบปุ่ม "ลบข้อมูล" — ข้าม`); return false; }
+    await sleep(3000);
+
+    // ยืนยันการลบ (DCTK ถามก่อน) — กดปุ่มยืนยันแบบเทียบข้อความเป๊ะ ๆ
+    for (let i = 0; i < 6; i++) {
+      const ok = await page.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll("button, input[type=button]"));
+        const yes = btns.find((b) => {
+          const t = ((b as HTMLElement).innerText || (b as HTMLInputElement).value || "").trim().toUpperCase();
+          return t === "YES" || t === "ตกลง" || t === "OK";
+        }) as HTMLElement | undefined;
+        if (!yes) return false;
+        yes.click(); return true;
+      }).catch(() => false);
+      if (ok) break;
+      await sleep(1500);
+    }
+    await sleep(5000);
+
+    const gone = await page.evaluate((v: string) => {
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      const ds = (window as any).$("#grid").data("kendoGrid")?.dataSource;
+      ds?.read?.();
+      const view: any[] = ds?.view?.() ?? [];
+      return !view.some((x) => String(x.ReferenceNo ?? "") === v);
+    }, ref).catch(() => false);
+    log(gone ? `   ✓ ลบใบสำเนา ${ref} แล้ว` : `   ⚠ ยังเห็นใบ ${ref} อยู่ — ตรวจในเว็บอีกที`);
+    return gone;
+  } catch (e) {
+    log(`   ⚠ ลบไม่สำเร็จ: ${e instanceof Error ? e.message.slice(0, 80) : ""} — ลบเองได้ในเว็บ`);
+    return false;
+  }
+}
+
 const browser = await chromium.launch({ headless: process.env.PULL_HEADLESS !== "0" });
 const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
 const page = await context.newPage();
@@ -121,7 +274,11 @@ try {
 
   await page.goto(cfg.url, { waitUntil: "domcontentloaded", timeout: 45000 });
   await login(page, cfg.username, cfg.password);
-  await openDeclarationForEdit(page, INVOICE);
+  if (VIA_COPY) {
+    copyRef = await copyThenOpen(page, INVOICE);
+  } else {
+    await openDeclarationForEdit(page, INVOICE);
+  }
   await sleep(2500);
 
   // ── หน้า 1: หัวใบขน ──
@@ -256,5 +413,13 @@ try {
 } catch (e) {
   log(`✗ error: ${e instanceof Error ? e.message : String(e)}`);
 } finally {
+  // เก็บกวาดใบร่างสำเนาเสมอ ไม่ว่าจะอ่านสำเร็จหรือพัง — ไม่งั้นจะทิ้งขยะไว้ใน DCTK
+  if (copyRef) {
+    const cleaned = CLEANUP ? await deleteCopy(page, copyRef).catch(() => false) : false;
+    if (!cleaned) {
+      log(`\n⚠ เหลือ "ใบร่างสำเนา" ค้างใน DCTK: ${copyRef}`);
+      log(`   เป็นสำเนาที่สร้างเพื่ออ่านข้อมูล ไม่ใช่ใบจริง — ลบทิ้งได้ (เลือกแถวแล้วกด "ลบข้อมูล")`);
+    }
+  }
   await browser.close();
 }
