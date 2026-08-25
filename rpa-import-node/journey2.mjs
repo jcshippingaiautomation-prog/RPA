@@ -25,7 +25,7 @@ try {
   await page.waitForTimeout(3000);
 
   // ตัวเลขสรุปในตาราง — ตรงกับความจริงไหม
-  const summary = await page.locator("#mastersBody tr").first().locator("td").nth(2).innerText().catch(() => "");
+  const summary = await page.locator("#mastersBody tr:not(.ms-group)").first().locator("td").nth(2).innerText().catch(() => "");
   console.log(`   ตัวเลขสรุปในตาราง: "${summary.replace(/\n/g, " ")}"`);
   const api = await page.evaluate(async () => {
     const r = await fetch("/api/templates").then((x) => x.json());
@@ -50,7 +50,7 @@ try {
     }
   }
 
-  await page.locator("#mastersBody tr").first().locator("button:has-text('แก้ไข')").first().click();
+  await page.locator("#mastersBody tr:not(.ms-group)").first().locator("button:has-text('แก้ไข')").first().click();
   await page.waitForTimeout(2500);
 
   // ระยะที่ต้องเลื่อนกว่าจะถึงช่องแรก
@@ -120,7 +120,7 @@ try {
   if (stillOpen) note("ux", "ทั้งเว็บ", "กด Escape แล้วยังปิดหน้าต่างไม่ได้");
   else console.log("   ✓ กด Escape ปิดหน้าต่างได้แล้ว");
   await page.waitForTimeout(1200);
-  await page.locator("#mastersBody tr").first().locator("button:has-text('สร้างใบ')").first().click();
+  await page.locator("#mastersBody tr:not(.ms-group)").first().locator("button:has-text('สร้างใบ')").first().click();
   await page.waitForTimeout(3000);
   await shot("create-from-master");
   const cr = await page.evaluate(() => {
@@ -146,7 +146,7 @@ try {
   console.log("\n═══ D. ปิดแล้วเปิดใหม่ ข้อมูลค้างไหม ═══");
   await page.locator("#modalCreate .modal-x").first().click().catch(() => {});
   await page.waitForTimeout(1200);
-  await page.locator("#mastersBody tr").nth(1).locator("button:has-text('สร้างใบ')").first().click();
+  await page.locator("#mastersBody tr:not(.ms-group)").nth(1).locator("button:has-text('สร้างใบ')").first().click();
   await page.waitForTimeout(3000);
   const cr2 = await page.evaluate(() => {
     const modal = document.querySelector("#modalCreate");

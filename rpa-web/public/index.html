@@ -27,7 +27,7 @@
       </div>
       <nav class="nav">
         <a class="nav-item active" href="#list" data-page="list"><span class="nav-ico" data-icon="list"></span> รายการใบขน</a>
-        <a class="nav-item" href="#masters" data-page="masters"><span class="nav-ico" data-icon="copy"></span> คลัง Master</a>
+        <a class="nav-item" href="#masters" data-page="masters"><span class="nav-ico" data-icon="copy"></span> คลังต้นแบบ</a>
         <a class="nav-item" href="#history" data-page="history"><span class="nav-ico" data-icon="clock"></span> ประวัติงาน</a>
         <a class="nav-item" href="#settings" data-page="settings" data-admin="true"><span class="nav-ico" data-icon="settings"></span> ตั้งค่า</a>
       </nav>
@@ -42,7 +42,7 @@
       <header class="topbar">
         <div>
           <h1 id="pageTitle">รายการใบขน</h1>
-          <p class="subtitle" id="pageSubtitle">จัดการใบขนสินค้าทั้งหมดในที่เดียว</p>
+          <p class="subtitle" id="pageSubtitle">ติดตามและนำเข้าใบขนสินค้าขาออกทั้งหมดในที่เดียว</p>
         </div>
         <div class="topbar-right">
           <span class="poll-status" id="pollStatus" title="สถานะการดึงอีเมลอัตโนมัติ"></span>
@@ -72,8 +72,8 @@
           </div>
           <div class="toolbar-right">
             <button class="btn btn-ghost" id="btnPollEmail"><i data-icon="mail"></i> ดึงอีเมลตอนนี้</button>
-            <button class="btn btn-ghost" id="btnUpload"><i data-icon="upload"></i> อัปโหลดไฟล์</button>
-            <button class="btn btn-ghost" id="btnCreate"><i data-icon="plus"></i> สร้างรายการ</button>
+            <button class="btn btn-ghost" id="btnUpload"><i data-icon="upload"></i> อัปโหลดเอกสาร</button>
+            <button class="btn btn-ghost" id="btnCreate"><i data-icon="plus"></i> สร้างใบขนเอง</button>
             <button class="btn btn-ghost icon-only" id="btnRefresh" title="รีเฟรช"><i data-icon="refresh"></i></button>
           </div>
         </div>
@@ -81,7 +81,7 @@
         <!-- bulk action bar (โผล่เมื่อเลือก) -->
         <div id="bulkBar" class="bulk-bar" style="display:none">
           <span><b id="bulkCount">0</b> รายการที่เลือก</span>
-          <button class="btn btn-primary btn-sm" id="btnRunSel"><i data-icon="play"></i> รัน RPA ที่เลือก</button>
+          <button class="btn btn-primary btn-sm" id="btnRunSel"><i data-icon="play"></i> นำเข้าระบบกรมฯ ที่เลือก</button>
           <button class="btn btn-danger btn-sm" id="btnDeleteSel"><i data-icon="trash"></i> ลบที่เลือก</button>
           <button class="btn btn-ghost btn-sm" id="btnClearSel">ยกเลิกเลือก</button>
         </div>
@@ -93,11 +93,11 @@
               <tr>
                 <th class="w-chk"><input type="checkbox" id="checkAll" /></th>
                 <th>ลูกค้า</th>
-                <th>Consignee</th>
-                <th>Invoice</th>
-                <th>ETD</th>
+                <th>ผู้รับสินค้า</th>
+                <th>เลขที่ใบกำกับ</th>
+                <th>วันที่ส่งออก</th>
                 <th>มูลค่า</th>
-                <th>ที่มา</th>
+                <th>แหล่งที่มา</th>
                 <th>สถานะ</th>
                 <th class="ta-right">จัดการ</th>
               </tr>
@@ -113,18 +113,25 @@
       <div id="page-masters" class="page" style="display:none">
         <section class="card">
           <div class="card-head">
-            <h2><i data-icon="copy"></i> คลัง Master ข้อมูล</h2>
+            <h2><i data-icon="copy"></i> คลังต้นแบบข้อมูล (Master)</h2>
             <div class="head-actions">
-              <button class="btn btn-primary" id="btnNewMaster"><i data-icon="plus"></i> สร้าง Master ใหม่</button>
+              <button class="btn btn-primary" id="btnNewMaster"><i data-icon="plus"></i> สร้างต้นแบบใหม่</button>
               <button class="btn btn-ghost" id="btnReloadMasters"><i data-icon="refresh"></i> โหลดใหม่</button>
             </div>
           </div>
-          <p class="muted">ชุดค่าตั้งต้นที่บันทึกไว้ — สร้างใบขนใหม่จาก Master แล้วแก้เล็กน้อยก็นำเข้าได้เลย<br>
-             Master ที่ตั้งเป็น <b>ค่าเริ่มต้น (★)</b> ของลูกค้า จะถูกใช้เติมใบที่เข้ามาจากอีเมลอัตโนมัติ ตามโหมดที่ตั้งไว้รายช่อง</p>
+          <p class="muted">ต้นแบบคือชุดค่าที่ใช้ซ้ำได้ของลูกค้าแต่ละราย เช่น ท่าเรือ เงื่อนไขการส่งมอบ พิกัดศุลกากร
+             เมื่อเอกสารใหม่เข้ามา ระบบจะเลือกต้นแบบที่ตรงที่สุดให้อัตโนมัติ (ลูกค้า → ผู้รับสินค้า → รหัสสินค้า)
+             แล้วเติมเฉพาะช่องที่ตั้งไว้ ส่วนที่เหลือให้ AI อ่านจากเอกสาร</p>
           <div id="mastersNote" class="note"></div>
-          <div class="table-wrap"><table class="tbl">
-            <thead><tr><th>ชื่อ Master</th><th>ลูกค้า</th><th>ช่องที่ตั้งไว้</th><th>รายการสินค้า</th><th>แก้ล่าสุด</th><th class="w-act">จัดการ</th></tr></thead>
-            <tbody id="mastersBody"><tr><td colspan="6" class="empty">กำลังโหลด…</td></tr></tbody>
+          <div class="table-wrap"><table class="tbl tbl-masters">
+            <thead><tr>
+              <th>ต้นแบบ / ขอบเขตการใช้งาน</th>
+              <th class="w-set">ค่าที่ตั้งไว้</th>
+              <th class="w-items">รายการสินค้า</th>
+              <th class="w-date">แก้ไขล่าสุด</th>
+              <th class="w-act">จัดการ</th>
+            </tr></thead>
+            <tbody id="mastersBody"><tr><td colspan="5" class="empty">กำลังโหลด…</td></tr></tbody>
           </table></div>
         </section>
       </div>
@@ -137,8 +144,8 @@
             <div style="display:flex; gap:8px; align-items:center">
               <select id="jobFilterType" class="sel sel-sm">
                 <option value="">ทุกประเภท</option>
-                <option value="rpa_import">นำเข้าข้อมูล (สร้างใบ)</option>
-                <option value="rpa_edit">แก้ไขใบเดิม</option>
+                <option value="rpa_import">นำเข้าใบขนใหม่</option>
+                <option value="rpa_edit">แก้ไขใบขนเดิม</option>
                 <option value="get_email">ดึงอีเมล</option>
               </select>
               <button class="btn btn-ghost btn-sm" id="btnRefreshJobs"><i data-icon="refresh"></i> โหลด</button>
@@ -281,7 +288,7 @@
         <!-- Field Rules -->
         <section class="card">
           <div class="card-head"><h2><i data-icon="list"></i> ข้อมูลที่ต้องกรอกของแต่ละลูกค้า</h2></div>
-          <p class="muted">เลือกว่าช่องไหนใช้ค่าจาก AI หรือกำหนดเอง (config) — ตอนรัน RPA จะกรอกเฉพาะช่องที่ติ๊ก</p>
+          <p class="muted">กำหนดกฎที่ใช้สั่ง AI ตอนอ่านเอกสารของลูกค้าแต่ละราย</p>
           <div id="rulesNote" class="note"></div>
           <div class="row-flex" style="margin:12px 0">
             <input type="text" id="newCustomer" placeholder="ชื่อลูกค้าใหม่ (เช่น THANAKORN)" class="inp" style="flex:1;max-width:320px" />
@@ -335,8 +342,8 @@
         <button class="btn btn-ghost" id="mdDelete"><i data-icon="x"></i> ลบรายการ</button>
         <button class="btn btn-ghost" id="mdSaveMaster" title="บันทึกค่าทั้งใบนี้ไว้เป็น Master ใช้สร้างใบใหม่ครั้งหน้า"><i data-icon="copy"></i> บันทึกเป็น Master</button>
         <button class="btn btn-primary" id="mdSave"><i data-icon="save"></i> บันทึก</button>
-        <button class="btn btn-warn" id="mdEdit" title="ต้องมีเลขใบขน DCTK ก่อน"><i data-icon="refresh"></i> แก้ไขและรัน RPA</button>
-        <button class="btn btn-success" id="mdRun"><i data-icon="play"></i> รัน RPA (สร้าง)</button>
+        <button class="btn btn-warn" id="mdEdit" title="ต้องมีเลขที่อ้างอิงของกรมฯ ก่อน"><i data-icon="refresh"></i> แก้ไขใบเดิมในระบบกรมฯ</button>
+        <button class="btn btn-success" id="mdRun"><i data-icon="play"></i> นำเข้าระบบกรมฯ</button>
       </div>
     </div>
   </div>
@@ -391,18 +398,18 @@
   <!-- ===== Modal: อัปโหลดไฟล์ ===== -->
   <div id="modalUpload" class="modal" style="display:none">
     <div class="modal-box">
-      <div class="modal-head"><h3>เพิ่มใบขนจากเอกสาร</h3><button class="modal-x" id="upClose"><i data-icon="x"></i></button></div>
+      <div class="modal-head"><h3>สร้างใบขนจากเอกสาร</h3><button class="modal-x" id="upClose"><i data-icon="x"></i></button></div>
       <!-- ตัวบอกขั้นตอน wizard -->
       <div class="wizard-steps" id="upSteps">
         <div class="wz-step active" data-step="1"><span class="wz-dot">1</span><span class="wz-label">เลือกไฟล์</span></div>
         <span class="wz-line"></span>
-        <div class="wz-step" data-step="2"><span class="wz-dot">2</span><span class="wz-label">AI สกัดข้อมูล</span></div>
+        <div class="wz-step" data-step="2"><span class="wz-dot">2</span><span class="wz-label">AI อ่านเอกสาร</span></div>
         <span class="wz-line"></span>
-        <div class="wz-step" data-step="3"><span class="wz-dot">3</span><span class="wz-label">ตรวจสอบ</span></div>
+        <div class="wz-step" data-step="3"><span class="wz-dot">3</span><span class="wz-label">ตรวจทานข้อมูล</span></div>
       </div>
       <!-- ขั้นที่ 1: เลือกไฟล์ -->
       <div class="modal-body" id="upStep1">
-        <p class="muted">เลือกลูกค้า + ไฟล์เอกสาร (PDF / รูป / Excel / Word) ระบบจะให้ AI อ่านตามกฎของลูกค้าแล้วสร้างรายการให้</p>
+        <p class="muted">เลือกลูกค้าและแนบเอกสาร (PDF, รูปภาพ, Excel หรือ Word) ระบบจะอ่านข้อมูลตามกฎที่ตั้งไว้ของลูกค้ารายนั้น แล้วสร้างใบขนให้ตรวจทาน</p>
         <div class="fld" style="margin-bottom:14px">
           <label>ลูกค้า</label>
           <select id="upCustomer" class="sel">
@@ -410,36 +417,36 @@
           </select>
         </div>
         <div class="fld" style="margin-bottom:14px">
-          <label>ต้นแบบ (Master)</label>
+          <label>ต้นแบบข้อมูล</label>
           <select id="upTemplate" class="sel">
-            <option value="">— เลือกให้อัตโนมัติจาก Consignee/สินค้า —</option>
+            <option value="">— ให้ระบบเลือกอัตโนมัติ —</option>
           </select>
           <div class="muted" style="font-size:12px;margin-top:5px">
-            เลือกเองได้ถ้ารู้อยู่แล้วว่าใบนี้ใช้ต้นแบบไหน · ปล่อยว่างระบบจะจับคู่ให้จากสิ่งที่ AI อ่านได้
+            หากทราบอยู่แล้วว่าใบนี้ใช้ต้นแบบใด ให้เลือกเอง มิฉะนั้นระบบจะจับคู่ให้จากผู้รับสินค้าและรหัสสินค้าที่อ่านได้
           </div>
         </div>
         <div class="dropzone" id="dropzone">
           <i data-icon="upload"></i>
-          <div>ลากไฟล์มาวาง หรือคลิกเพื่อเลือก</div>
+          <div>ลากเอกสารมาวางที่นี่ หรือคลิกเพื่อเลือกไฟล์</div>
           <input type="file" id="fileInput" multiple accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,.docx,.doc" hidden />
         </div>
         <div id="fileList" class="file-list"></div>
-        <div class="eta-note" id="upEta" style="display:none">⏱ AI ใช้เวลาสกัดข้อมูลประมาณ <b>&nbsp;1–2 นาที</b></div>
+        <div class="eta-note" id="upEta" style="display:none">⏱ ใช้เวลาประมาณ <b>&nbsp;1–2 นาที</b></div>
         <div id="upErr" class="note"></div>
       </div>
       <!-- ขั้นที่ 2: กำลังประมวลผล -->
       <div class="modal-body" id="upStep2" style="display:none">
         <div class="wz-processing">
           <div class="wz-spinner"></div>
-          <div style="font-weight:600;margin-bottom:6px" id="upProcTitle">AI กำลังอ่านและสกัดข้อมูลจากเอกสาร…</div>
-          <div class="eta-note" style="display:inline-flex">⏱ ประมาณ <b>&nbsp;1–2 นาที</b> — กรุณาอย่าปิดหน้านี้</div>
+          <div style="font-weight:600;margin-bottom:6px" id="upProcTitle">กำลังอ่านข้อมูลจากเอกสาร…</div>
+          <div class="eta-note" style="display:inline-flex">⏱ ประมาณ <b>&nbsp;1–2 นาที</b>  — กรุณาอย่าปิดหน้าต่างนี้</div>
           <div id="upProgress" class="note" style="margin-top:12px"></div>
         </div>
       </div>
       <div class="modal-foot" id="upFoot1">
         <div style="flex:1"></div>
         <button class="btn btn-ghost" id="upCancel">ยกเลิก</button>
-        <button class="btn btn-primary" id="upSubmit"><i data-icon="upload"></i> ถัดไป — ให้ AI สกัด</button>
+        <button class="btn btn-primary" id="upSubmit"><i data-icon="upload"></i> ถัดไป — ให้ AI อ่านเอกสาร</button>
       </div>
     </div>
   </div>

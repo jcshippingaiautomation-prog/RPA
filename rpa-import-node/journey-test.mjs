@@ -114,7 +114,7 @@ try {
   await page.waitForTimeout(3000);
   await shot("masters-list");
 
-  const mRows = await page.locator("#mastersBody tr").count().catch(() => 0);
+  const mRows = await page.locator("#mastersBody tr:not(.ms-group)").count().catch(() => 0);
   console.log(`   Master ในรายการ: ${mRows}`);
   const mNote = await page.locator("#mastersNote").innerText().catch(() => "");
   if (mNote.trim()) console.log(`   ข้อความเตือน: "${mNote.slice(0, 80)}"`);
@@ -124,7 +124,7 @@ try {
   if (mRows > 0) {
     console.log("\n═══ 4. เปิดแก้ Master ═══");
     // ★ ปุ่มแรกของแถวคือ "สร้างใบ" ไม่ใช่ "แก้ไข" — ต้องเจาะจงด้วยข้อความ
-    const editBtn = page.locator("#mastersBody tr").first().locator("button:has-text('แก้ไข')").first();
+    const editBtn = page.locator("#mastersBody tr:not(.ms-group)").first().locator("button:has-text('แก้ไข')").first();
     if (!(await editBtn.count())) { note("bug", "คลัง Master", "ไม่มีปุ่มแก้ไขในแถว"); }
     await editBtn.click();
     await page.waitForTimeout(2500);

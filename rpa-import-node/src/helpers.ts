@@ -660,12 +660,48 @@ async function fuzzyPickFromMaster(
  * เปิด Kendo dropdown แล้วเลือก item ที่ขึ้นต้นด้วยรหัส (เช่น 'A' → 'A - ...')
  * (kendo_dropdown_pick ใน Python)
  */
+
+/**
+ * หา element ที่ "คลิกแล้วเปิด dropdown ได้จริง"
+ *   - ถ้า selector ชี้ไปที่ element ที่มองเห็นอยู่แล้ว → ใช้ตัวนั้น
+ *   - ถ้าเป็น <select> ที่ Kendo ซ่อนไว้ → ใช้ span ของ Kendo ที่อยู่ข้าง ๆ แทน
+ * ทำเครื่องหมายชั่วคราวไว้บน element เพื่อให้ Playwright คลิกได้แน่นอน
+ */
+async function resolveKendoTarget(page: Page, selector: string): Promise<string> {
+  const MARK = "data-rpa-click";
+  const ok = await page.evaluate(({ sel, mark }: { sel: string; mark: string }) => {
+    document.querySelectorAll(`[${mark}]`).forEach((e) => e.removeAttribute(mark));
+    const el = document.querySelector(sel) as HTMLElement | null;
+    if (!el) return false;
+    const visible = (e: HTMLElement) => {
+      const r = e.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && getComputedStyle(e).display !== "none";
+    };
+    if (visible(el)) return false;                       // มองเห็นอยู่แล้ว ใช้ selector เดิม
+    // Kendo วาง span ครอบไว้ "ก่อนหน้า" <select> ที่ซ่อนไว้
+    let sib = el.previousElementSibling as HTMLElement | null;
+    while (sib && !/\bk-(widget|dropdown|picker)/.test(sib.className || "")) {
+      sib = sib.previousElementSibling as HTMLElement | null;
+    }
+    const target = sib ?? (el.closest(".k-widget") as HTMLElement | null);
+    if (!target || !visible(target)) return false;
+    target.setAttribute(mark, "1");
+    return true;
+  }, { sel: selector, mark: MARK }).catch(() => false);
+  return ok ? `[${MARK}="1"]` : selector;
+}
+
 export async function kendoDropdownPick(
   page: Page,
   dropdownSelector: string,
   code: string,
 ): Promise<void> {
-  await page.click(dropdownSelector);
+  // ⚠ ตัวที่ต้องคลิกคือ "กล่องของ Kendo" ไม่ใช่ <select> ตัวจริง
+  //   Kendo ซ่อน <select> ไว้ (display:none) แล้ววาด span ครอบไว้แทน
+  //   คลิก #TransportMode ตรง ๆ จึง timeout — เจอจริงตอน Master เริ่มเติมค่าช่องนี้ให้
+  //   (ก่อนหน้านี้ช่องนี้มักว่าง โค้ดเลยไม่เคยวิ่งมาถึง บั๊กจึงซ่อนอยู่)
+  const clickTarget = await resolveKendoTarget(page, dropdownSelector);
+  await page.click(clickTarget);
   await sleep(800);
   const codeNorm = code.trim().toUpperCase();
   const wordBoundary = new RegExp(`^${escapeRegExp(codeNorm)}\\b`);

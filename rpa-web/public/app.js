@@ -431,7 +431,7 @@ function renderList() {
           ${(() => {
             // เปิดดูไฟล์ได้เมื่อ: มีไฟล์ (doc_status) หรือ รันเสร็จแล้ว/มีเลขใบขน (กันเคส doc_status ยังไม่ sync)
             const canView = d.doc_status || effStatus(d) === "done" || effStatus(d) === "partial" || !!String(d.declaration_no ?? "").trim();
-            return `<button class="btn btn-ghost btn-xs actFiles ${canView ? "" : "is-empty"}" data-id="${d.id}" ${canView ? "" : "disabled"} title="${canView ? "ดูไฟล์ใบขน PDF + แคปหน้าจอ" : "ยังไม่มีไฟล์ (ต้องรัน RPA ก่อน)"}">${svgIcon("file", 13)} ดูไฟล์</button>`;
+            return `<button class="btn btn-ghost btn-xs actFiles ${canView ? "" : "is-empty"}" data-id="${d.id}" ${canView ? "" : "disabled"} title="${canView ? "ดูใบขน PDF และภาพหน้าจอขั้นตอนการนำเข้า" : "ยังไม่มีไฟล์ — ต้องนำเข้าระบบกรมฯ ก่อน"}">${svgIcon("file", 13)} ดูไฟล์</button>`;
           })()}
         </div>
       </td>
@@ -489,7 +489,7 @@ async function runDeclaration(id) {
   const d = DECLS.find((x) => x.id === id);
   const name = d ? `${d.customer_name || ""} / ${d.invoice_number || ""}` : "";
   const est = estImportMinutes(d);
-  if (!confirm(`รัน RPA กรอกใบขนนี้เข้าระบบ DCTK?\n\n${name}\n\n⏱ ใช้เวลาประมาณ ${est} — ระบบจะกรอกให้อัตโนมัติ (ถ้ามีงานในคิวก่อนหน้าอาจนานกว่านี้)`)) return;
+  if (!confirm(`ยืนยันการนำเข้าใบขนนี้สู่ระบบกรมศุลกากร?\n\n${name}\n\n⏱ ใช้เวลาประมาณ ${est}  — ระบบจะกรอกข้อมูลให้อัตโนมัติ หากมีงานรออยู่ในคิวอาจใช้เวลานานกว่านี้`)) return;
   try {
     await api(`/api/declarations/${encodeURIComponent(id)}/run`, "POST", {});
     toast(`ส่งเข้าคิว RPA แล้ว — กำลังรัน (⏱ ประมาณ ${est})`, "info");
@@ -553,7 +553,7 @@ async function runSelected() {
   const ids = [...selected];
   if (!ids.length) return;
   const totalEst = `${ids.length * 3}–${ids.length * 5} นาที`;
-  if (!confirm(`รัน RPA ${ids.length} รายการที่เลือก?\n\n⏱ ใช้เวลารวมประมาณ ${totalEst} (ทำทีละใบต่อกัน)`)) return;
+  if (!confirm(`ยืนยันการนำเข้าใบขน ${ids.length} รายการที่เลือก?\n\n⏱ ใช้เวลารวมประมาณ ${totalEst} (ระบบดำเนินการทีละใบตามลำดับ)`)) return;
   for (const id of ids) {
     try {
       await api(`/api/declarations/${encodeURIComponent(id)}/run`, "POST", {});
@@ -612,12 +612,12 @@ async function openDetail(id, opts) {
     const running = d.status === "running" || d.status === "queued";
     const invalid = r.validation && r.validation.ok === false;
     $("mdRun").disabled = running || invalid;
-    $("mdRun").title = invalid ? "ข้อมูลไม่ครบ — แก้ไขตามรายการ 'ข้อมูลที่ต้องแก้ก่อนรัน' ด้านบน" : "";
+    $("mdRun").title = invalid ? "ข้อมูลยังไม่ครบ — กรุณาแก้ไขตามรายการด้านบนก่อนนำเข้า" : "";
     // ปุ่ม "แก้ไขและรัน RPA" — เปิดเฉพาะเมื่อมีเลขใบขน DCTK (ใช้ค้นใบเดิม)
     const hasDeclNo = !!String(d.declaration_no ?? "").trim();
     const mdEdit = $("mdEdit");
     mdEdit.disabled = running || !hasDeclNo;
-    mdEdit.title = hasDeclNo ? "ค้นใบใน DCTK ด้วยเลขใบขน แล้วแก้ไข" : "ต้องกรอกเลขใบขน DCTK ก่อน";
+    mdEdit.title = hasDeclNo ? "ค้นใบเดิมในระบบกรมฯ ด้วยเลขที่อ้างอิง แล้วแก้ไขข้อมูล" : "ต้องมีเลขที่อ้างอิงของกรมฯ ก่อน";
   } catch (e) { box.innerHTML = `<p class="note">โหลดไม่ได้: ${escapeHtml(e.message)}</p>`; }
 }
 
@@ -810,7 +810,7 @@ function renderDetailForm(d, errorSummary, validation) {
   // แบนเนอร์ขั้น wizard (แสดงเฉพาะตอนเข้ามาจากการอัปโหลด → ขั้นที่ 3 ตรวจสอบ)
   const wizardBanner = detailWizard
     ? `<div class="eta-note" style="width:100%;box-sizing:border-box;margin-bottom:14px">
-         ✓ AI สกัดข้อมูลเสร็จแล้ว — <b>&nbsp;ตรวจข้อมูล 3 หน้า (แท็บด้านล่าง) ให้ตรงกับเอกสารซ้าย</b>&nbsp; แล้วกด "บันทึก" → "รัน RPA"
+         AI อ่านเอกสารเรียบร้อยแล้ว — <b>&nbsp;กรุณาตรวจทานข้อมูลทั้ง 4 หน้าให้ตรงกับเอกสารด้านซ้าย</b>&nbsp; จากนั้นกด "บันทึก" แล้วจึง "นำเข้าระบบกรมฯ"
        </div>`
     : "";
   // แท็บ 3 หน้า ตาม DCTK (Page 1/2/3)
@@ -971,7 +971,7 @@ async function loadDetailDocs(customer, invoice, declRan) {
   const box = $("mdDocs");
   if (!box) return;
   // ใบนี้ยังไม่รัน → ไม่ต้องดึงไฟล์ (กันเอาไฟล์ของใบอื่นที่ invoice ซ้ำมาโชว์)
-  if (!declRan) { box.innerHTML = '<span class="muted">ยังไม่มีไฟล์ผลลัพธ์ — ใบนี้ยังไม่ได้รัน (ไฟล์จะปรากฏหลังรัน RPA)</span>'; return; }
+  if (!declRan) { box.innerHTML = '<span class="muted">ยังไม่มีไฟล์ — ไฟล์ใบขนจะปรากฏหลังนำเข้าระบบกรมฯ สำเร็จ</span>'; return; }
   try {
     // ผูก declId → ดึงเฉพาะไฟล์ผลลัพธ์ของใบนี้ (กันไฟล์ปนใบ invoice ซ้ำ)
     const res = await api(`/api/declaration-documents?customer=${encodeURIComponent(customer || "")}&invoice=${encodeURIComponent(invoice || "")}&declId=${encodeURIComponent(detailId || "")}`);
@@ -980,7 +980,7 @@ async function loadDetailDocs(customer, invoice, declRan) {
     const out = docs.filter((doc) => doc.kind !== "source");
     box.innerHTML = out.length
       ? out.map((doc) => `<a href="${dlUrl(doc.storage_path, doc.public_url)}" target="_blank" rel="noopener" class="att">${svgIcon("file", 14)} ${escapeHtml(doc.filename)}</a>`).join("")
-      : '<span class="muted">ยังไม่มีไฟล์ผลลัพธ์ (รัน RPA เพื่อสร้างใบขน)</span>';
+      : '<span class="muted">ยังไม่มีไฟล์ — กด "นำเข้าระบบกรมฯ" เพื่อสร้างใบขน</span>';
   } catch { box.textContent = "โหลดเอกสารไม่ได้"; }
 }
 
@@ -1566,8 +1566,8 @@ $("btnClearSel").onclick = () => { selected.clear(); renderList(); };
 // ============================================================
 const PAGE_META = {
   list: { title: "รายการใบขน", sub: "จัดการใบขนสินค้าทั้งหมดในที่เดียว" },
-  masters: { title: "คลัง Master ข้อมูล", sub: "ชุดค่าตั้งต้น — สร้างสำเนา แก้เล็กน้อย แล้วนำเข้าได้เลย" },
-  history: { title: "ประวัติงาน", sub: "ประวัติการรัน RPA + เอกสารที่สร้าง" },
+  masters: { title: "คลังต้นแบบข้อมูล", sub: "ชุดค่าที่ใช้ซ้ำได้ของลูกค้าแต่ละราย แยกตามผู้รับสินค้าและรหัสสินค้า" },
+  history: { title: "ประวัติงาน", sub: "ประวัติการนำเข้าและเอกสารที่ระบบสร้าง" },
   settings: { title: "ตั้งค่า", sub: "Allowlist · AI · ตารางเวลา · RPA · ลูกค้า" },
 };
 function isAdmin() { return CURRENT_USER && CURRENT_USER.role === "admin"; }
@@ -2127,7 +2127,7 @@ let msEditing = null;      // Master ที่กำลังแก้ (null = �
 let msItems = [];          // รายการสินค้าของ Master ที่กำลังแก้
 let msPage = 1;
 
-const MODE_LABEL = { master: "ใช้ค่า Master", ai: "จาก AI", off: "ไม่กรอก" };
+const MODE_LABEL = { master: "ใช้ค่าต้นแบบ", ai: "อ่านจากเอกสาร", off: "ไม่กรอก" };
 
 /** โหมดที่ใช้จริงของช่อง (ตามที่ตั้งไว้ หรือเดาจากการมีค่า) — ตรงกับ effectiveMode ฝั่ง server */
 function msMode(tpl, key) {
@@ -2158,38 +2158,79 @@ async function loadMasters() {
 function renderMasters() {
   const body = $("mastersBody");
   if (!MASTERS.length) {
-    body.innerHTML = '<tr><td colspan="6" class="empty">ยังไม่มี Master — กด "สร้าง Master ใหม่" หรือกดปุ่ม “บันทึกเป็น Master” จากใบขนที่ทำสำเร็จแล้ว</td></tr>';
+    body.innerHTML = `<tr><td colspan="5" class="empty">
+      <div style="font-weight:600;margin-bottom:6px">ยังไม่มีต้นแบบในระบบ</div>
+      <div class="muted" style="margin-bottom:12px">ต้นแบบคือชุดค่าที่ใช้ซ้ำได้ของลูกค้าแต่ละราย — สร้างใบขนใหม่แล้วแก้เฉพาะส่วนที่เปลี่ยน</div>
+      <button class="btn btn-primary btn-sm" onclick="document.getElementById('btnNewMaster').click()">สร้างต้นแบบใหม่</button>
+    </td></tr>`;
     return;
   }
-  body.innerHTML = MASTERS.map((t) => {
-    // ⚠ ต้องนับ "โหมดที่มีผลจริง" ไม่ใช่เฉพาะที่ตั้งไว้ชัดเจนใน field_modes
-    //   ช่องที่มีค่าแต่ไม่ได้ตั้งโหมด = "ใช้ค่า Master" โดยปริยาย (ดู msMode)
-    //   ถ้านับแค่ที่ตั้งไว้ ตารางจะขึ้น "ทับ AI 0" ทั้งที่จริงมีหลายสิบช่องที่จะทับค่า AI
-    const modes = t.field_modes || {};
-    const allKeys = new Set([...Object.keys(t.header || {}), ...Object.keys(modes)]);
-    let nMaster = 0, nOff = 0;
-    for (const k of allKeys) {
-      const m = msMode(t, k);
-      if (m === "master") nMaster++; else if (m === "off") nOff++;
-    }
-    const nVals = Object.keys(t.header || {}).length;
-    return `<tr>
-      <td><b>${escapeHtml(t.name)}</b>${t.is_default ? ' <span class="st st-done" title="ใช้เติมใบที่มาจากอีเมลอัตโนมัติ">★ ค่าเริ่มต้น</span>' : ""}
-        ${t.description ? `<div class="muted-cell">${escapeHtml(t.description)}</div>` : ""}</td>
-      <td class="muted-cell">${escapeHtml(t.customer_name || "— ทุกลูกค้า —")}
-        ${(t.consignee_names || []).length ? `<div class="muted-cell">👤 ${escapeHtml((t.consignee_names || []).join(", ").slice(0, 46))}</div>` : ""}
-        ${(t.product_codes || []).length ? `<div class="muted-cell">📦 ${escapeHtml((t.product_codes || []).join(", ").slice(0, 46))}</div>` : ""}</td>
-      <td class="muted-cell">${nVals} ช่องมีค่า · ทับ AI ${nMaster} · ไม่กรอก ${nOff}</td>
-      <td class="muted-cell">${(t.items || []).length} รายการ</td>
-      <td class="muted-cell">${fmtDate(t.updated_at)}</td>
-      <td class="ta-right">
-        <button class="btn btn-ghost btn-xs msUse" data-id="${t.id}" title="สร้างใบขนใหม่จาก Master นี้">${svgIcon("plus", 13)} สร้างใบ</button>
-        <button class="btn btn-ghost btn-xs msEdit" data-id="${t.id}">${svgIcon("settings", 13)} แก้ไข</button>
-        <button class="btn btn-ghost btn-xs msDup" data-id="${t.id}" title="ทำสำเนา Master">${svgIcon("copy", 13)}</button>
-        <button class="btn btn-ghost btn-xs msDel" data-id="${t.id}">${svgIcon("trash", 13)}</button>
-      </td>
-    </tr>`;
-  }).join("");
+
+  // จัดกลุ่มตามลูกค้า — เรียงตามชื่อ และให้กลุ่มที่มีต้นแบบมากอยู่บน
+  const groups = new Map();
+  for (const t of MASTERS) {
+    const key = (t.customer_name || "").trim() || "— ไม่ระบุลูกค้า —";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  }
+  const ordered = [...groups.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0], "th"));
+
+  const rowsFor = (cust, list) => list
+    .sort((a, b) => (a.name || "").localeCompare(b.name || "", "th"))
+    .map((t) => {
+      // นับ "โหมดที่มีผลจริง" — ช่องที่มีค่าแต่ไม่ได้ตั้งโหมด = ใช้ค่าต้นแบบโดยปริยาย
+      const allKeys = new Set([...Object.keys(t.header || {}), ...Object.keys(t.field_modes || {})]);
+      let nMaster = 0, nOff = 0;
+      for (const k of allKeys) {
+        const m = msMode(t, k);
+        if (m === "master") nMaster++; else if (m === "off") nOff++;
+      }
+      const nVals = Object.keys(t.header || {}).length;
+      // ชื่อขึ้นต้นด้วยชื่อลูกค้าอยู่แล้ว — ตัดออกเพราะอยู่ในหัวกลุ่มแล้ว
+      const shortName = String(t.name || "").replace(new RegExp(`^${cust}\\s*—\\s*`, "i"), "") || t.name;
+      const consignees = t.consignee_names || [];
+      const products = t.product_codes || [];
+      // ชื่อต้นแบบที่ระบบตั้งให้ = "ผู้รับสินค้า · สินค้า" อยู่แล้ว
+      //   ถ้าโชว์ป้ายซ้ำอีกจะอ่านยากและแถวสูงเกินจำเป็น → โชว์เฉพาะที่ยังไม่อยู่ในชื่อ
+      const inName = (v) => shortName.toUpperCase().includes(String(v).toUpperCase());
+      const chips = [
+        ...consignees.filter((c) => !inName(c)).map((c) => `<span class="chip-tag chip-consignee">${escapeHtml(c)}</span>`),
+        ...products.filter((c) => !inName(c)).map((c) => `<span class="chip-tag chip-product">${escapeHtml(c)}</span>`),
+      ];
+      const scope = chips.length
+        ? chips.join("")
+        : (consignees.length || products.length
+            ? ""
+            : `<span class="chip-tag chip-any">ใช้ได้กับทุกใบของลูกค้ารายนี้</span>`);
+      return `<tr>
+        <td>
+          <div class="ms-name">${escapeHtml(shortName)}${t.is_default ? ' <span class="st st-done" title="ใช้เมื่อไม่มีต้นแบบอื่นที่ตรงกว่า">★ ค่าเริ่มต้น</span>' : ""}</div>
+          <div class="ms-scope">${scope}</div>
+          ${t.description ? `<div class="muted-cell ms-desc">${escapeHtml(String(t.description).replace(/^ดึงจาก DCTK ด้วย ?เลขที่ใบกำกับสินค้า/, "ที่มา: ใบกำกับ"))}</div>` : ""}
+        </td>
+        <td class="muted-cell ms-stats">
+          <div><b>${nVals}</b> ช่องมีค่า</div>
+          <div class="ms-sub">ใช้ค่าต้นแบบ ${nMaster} · ไม่กรอก ${nOff}</div>
+        </td>
+        <td class="muted-cell ta-center">${(t.items || []).length}</td>
+        <td class="muted-cell">${fmtDate(t.updated_at)}</td>
+        <td class="ta-right">
+          <div class="ms-actions">
+            <button class="btn btn-primary btn-xs msUse" data-id="${t.id}" title="สร้างใบขนใหม่โดยใช้ต้นแบบนี้">${svgIcon("plus", 12)} สร้างใบขน</button>
+            <button class="btn btn-ghost btn-xs msEdit" data-id="${t.id}" title="แก้ไขค่าในต้นแบบ">${svgIcon("settings", 12)} แก้ไข</button>
+            <button class="btn btn-ghost btn-xs icon-only msDup" data-id="${t.id}" title="ทำสำเนาต้นแบบนี้">${svgIcon("copy", 12)}</button>
+            <button class="btn btn-ghost btn-xs icon-only msDel" data-id="${t.id}" title="ลบต้นแบบนี้">${svgIcon("trash", 12)}</button>
+          </div>
+        </td>
+      </tr>`;
+    }).join("");
+
+  body.innerHTML = ordered.map(([cust, list]) => `
+    <tr class="ms-group"><td colspan="5">
+      <span class="ms-group-name">${escapeHtml(cust)}</span>
+      <span class="ms-group-count">${list.length} ต้นแบบ</span>
+    </td></tr>
+    ${rowsFor(cust, list)}`).join("");
 
   body.querySelectorAll(".msEdit").forEach((b) => (b.onclick = () => openMaster(MASTERS.find((t) => t.id === b.dataset.id))));
   body.querySelectorAll(".msUse").forEach((b) => (b.onclick = () => useMaster(b.dataset.id)));
@@ -2216,7 +2257,7 @@ function openMaster(tpl) {
   msEditing = tpl ? JSON.parse(JSON.stringify(tpl)) : { name: "", customer_name: "", description: "", header: {}, items: [], field_modes: {}, is_default: false };
   msItems = Array.isArray(msEditing.items) ? msEditing.items.map((it) => ({ ...it })) : [];
   msPage = 1;
-  $("msTitle").textContent = msEditing.id ? `แก้ไข Master — ${msEditing.name}` : "สร้าง Master ใหม่";
+  $("msTitle").textContent = msEditing.id ? `แก้ไขต้นแบบ — ${msEditing.name}` : "สร้าง Master ใหม่";
   renderMasterForm();
   $("modalMaster").style.display = "flex";
 }
@@ -2232,41 +2273,41 @@ function renderMasterForm() {
 
   $("msBody").innerHTML = `
     <div class="md-grid" style="margin-bottom:12px">
-      <div class="fld"><label>ชื่อ Master *</label><input class="inp" id="msName" value="${escapeHtml(t.name || "")}" placeholder="เช่น THANAKORN — ตู้ 40ft ไปเวียดนาม" /></div>
+      <div class="fld"><label>ชื่อต้นแบบ *</label><input class="inp" id="msName" value="${escapeHtml(t.name || "")}" placeholder="เช่น THANAKORN — ตู้ 40ft ไปเวียดนาม" /></div>
       <div class="fld"><label>ลูกค้า (ว่าง = ใช้ได้ทุกลูกค้า)</label>
         <input class="inp" id="msCustomer" list="msCustList" value="${escapeHtml(t.customer_name || "")}" placeholder="เช่น THANAKORN" />
         <datalist id="msCustList">${custOpts.map((c) => `<option value="${escapeHtml(c)}">`).join("")}</datalist></div>
-      <div class="fld fld-full"><label>คำอธิบาย</label><input class="inp" id="msDesc" value="${escapeHtml(t.description || "")}" placeholder="ใช้เมื่อไหร่ / ต่างจาก Master อื่นตรงไหน" /></div>
+      <div class="fld fld-full"><label>คำอธิบาย</label><input class="inp" id="msDesc" value="${escapeHtml(t.description || "")}" placeholder="ใช้เมื่อใด และต่างจากต้นแบบอื่นอย่างไร" /></div>
     </div>
 
     <details class="reg-scope">
-      <summary><b>ใช้ Master นี้กับใคร</b> <span class="muted">${(t.consignee_names || []).length || (t.product_codes || []).length
+      <summary><b>ต้นแบบนี้ใช้กับใคร</b> <span class="muted">${(t.consignee_names || []).length || (t.product_codes || []).length
         ? escapeHtml([...(t.consignee_names || []), ...(t.product_codes || [])].join(" · ").slice(0, 60))
         : "ทุก Consignee / ทุกสินค้าของลูกค้ารายนี้"}</span></summary>
     <div class="reg-mode-help">
-      ระบบเลือก Master ให้อัตโนมัติจาก 3 ระดับ:
-      ลูกค้า → Consignee → รหัสสินค้า · <b>ยิ่งระบุละเอียด ยิ่งถูกเลือกก่อน</b> · เว้นว่าง = ใช้ได้ทุกราย
+      ระบบเลือกต้นแบบให้อัตโนมัติจาก 3 ระดับ:
+      ลูกค้า → ผู้รับสินค้า → รหัสสินค้า · <b>ยิ่งระบุเจาะจง ยิ่งถูกเลือกก่อน</b> · เว้นว่างไว้หมายถึงใช้ได้กับทุกราย
     </div>
     <div class="md-grid" style="margin-bottom:12px">
-      <div class="fld fld-full"><label>Consignee ที่ใช้ Master นี้ (คั่นด้วยจุลภาค)</label>
+      <div class="fld fld-full"><label>ผู้รับสินค้าที่ใช้ต้นแบบนี้ <span class="muted">(หลายรายให้คั่นด้วยเครื่องหมายจุลภาค)</span></label>
         <input class="inp" id="msConsignees" value="${escapeHtml((t.consignee_names || []).join(", "))}"
                placeholder="เช่น DK&amp;N VIETNAM LTD, ABC CO — หลายรายใช้ต้นแบบเดียวกันได้" /></div>
-      <div class="fld fld-full"><label>รหัสสินค้าที่ใช้ Master นี้ (คั่นด้วยจุลภาค)</label>
+      <div class="fld fld-full"><label>รหัสสินค้าที่ใช้ต้นแบบนี้ <span class="muted">(หลายรายการให้คั่นด้วยเครื่องหมายจุลภาค)</span></label>
         <input class="inp" id="msProducts" value="${escapeHtml((t.product_codes || []).join(", "))}"
                placeholder="เช่น REFINED BLEACHED — Consignee เดียวกันแต่คนละสินค้า ใช้คนละ Master ได้" /></div>
-      <div class="fld"><label>ลำดับความสำคัญ (สูง = ถูกเลือกก่อนเมื่อคะแนนเท่ากัน)</label>
+      <div class="fld"><label>ลำดับความสำคัญ <span class="muted">(ค่าสูงกว่าจะถูกเลือกก่อนเมื่อเงื่อนไขเท่ากัน)</span></label>
         <input class="inp" id="msPriority" type="number" value="${Number(t.priority || 0)}" /></div>
     </div>
     <label class="switch"><input type="checkbox" id="msDefault" ${t.is_default ? "checked" : ""} />
-      <span>ตั้งเป็นค่าเริ่มต้นของลูกค้านี้ — ใช้เติมใบที่เข้ามาจากอีเมลอัตโนมัติ (1 ลูกค้ามีได้ 1 อัน)</span></label>
+      <span>ตั้งเป็นค่าเริ่มต้นของลูกค้ารายนี้ — ใช้เมื่อไม่มีต้นแบบอื่นที่ตรงกว่า (ลูกค้าหนึ่งรายตั้งได้หนึ่งต้นแบบ)</span></label>
     </details>
 
     <details class="reg-scope">
-      <summary><b>โหมดรายช่องคืออะไร</b> <span class="muted">ตั้งไว้ล่วงหน้าว่าแต่ละช่องเอาค่าจากไหน</span></summary>
+      <summary><b>การกำหนดที่มาของข้อมูลรายช่อง</b> <span class="muted">ตั้งล่วงหน้าได้ว่าแต่ละช่องจะใช้ค่าจากที่ใด</span></summary>
       <div class="reg-mode-help">
-        <span class="mode-pill m-master">ใช้ค่า Master</span> ทับค่าที่ AI สกัดมาเสมอ ·
-        <span class="mode-pill m-ai">จาก AI</span> ปล่อย AI สกัด (Master เติมให้เฉพาะตอน AI ไม่ได้ค่า) ·
-        <span class="mode-pill m-off">ไม่กรอก</span> ข้ามช่องนี้ ไม่กรอกลง DCTK
+        <span class="mode-pill m-master">ใช้ค่าต้นแบบ</span> ใช้ค่านี้เสมอ แม้ AI จะอ่านค่าอื่นมา ·
+        <span class="mode-pill m-ai">อ่านจากเอกสาร</span> ใช้ค่าที่ AI อ่านได้ หากอ่านไม่ได้จึงใช้ค่าในต้นแบบ ·
+        <span class="mode-pill m-off">ไม่กรอก</span> ข้ามช่องนี้ ไม่กรอกลงระบบกรมฯ
       </div>
     </details>
 
@@ -2317,8 +2358,8 @@ function renderMasterPage(pageNo, row) {
           <div class="ms-row">
             <input class="inp ms-edit" data-key="${f.key}" value="${val}" />
             <select class="sel sel-sm ms-mode m-${mode}" data-key="${f.key}">
-              <option value="master" ${mode === "master" ? "selected" : ""}>ใช้ค่า Master</option>
-              <option value="ai" ${mode === "ai" ? "selected" : ""}>จาก AI</option>
+              <option value="master" ${mode === "master" ? "selected" : ""}>ใช้ค่าต้นแบบ</option>
+              <option value="ai" ${mode === "ai" ? "selected" : ""}>อ่านจากเอกสาร</option>
               <option value="off" ${mode === "off" ? "selected" : ""}>ไม่กรอก</option>
             </select>
           </div>
@@ -2344,8 +2385,8 @@ function renderMasterItems(formPage = 3) {
              <div class="ms-row">
                <input class="inp msi-edit" data-i="${i}" data-key="${f.key}" value="${escapeHtml(it[f.key] != null ? String(it[f.key]) : "")}" />
                <select class="sel sel-sm ms-mode m-${mode}" data-key="${f.key}">
-                 <option value="master" ${mode === "master" ? "selected" : ""}>ใช้ค่า Master</option>
-                 <option value="ai" ${mode === "ai" ? "selected" : ""}>จาก AI</option>
+                 <option value="master" ${mode === "master" ? "selected" : ""}>ใช้ค่าต้นแบบ</option>
+                 <option value="ai" ${mode === "ai" ? "selected" : ""}>อ่านจากเอกสาร</option>
                  <option value="off" ${mode === "off" ? "selected" : ""}>ไม่กรอก</option>
                </select>
              </div></div>`;
@@ -2382,7 +2423,7 @@ function refreshMasterItems() {
 
 async function saveMaster() {
   const name = $("msName").value.trim();
-  if (!name) { toast("ตั้งชื่อ Master ก่อน", "error"); return; }
+  if (!name) { toast("กรุณาตั้งชื่อต้นแบบก่อนบันทึก", "error"); return; }
   const header = {};
   $("msBody").querySelectorAll(".ms-edit").forEach((el) => {
     const v = String(el.value ?? "").trim();
@@ -2410,7 +2451,7 @@ async function saveMaster() {
   try {
     await api("/api/templates", "POST", payload);
     const sv = $("msSaved"); sv.style.display = "inline"; setTimeout(() => (sv.style.display = "none"), 2000);
-    toast("บันทึก Master แล้ว", "success");
+    toast("บันทึกต้นแบบ แล้ว", "success");
     closeMaster();
     loadMasters();
   } catch (e) { toast("บันทึกไม่สำเร็จ: " + e.message, "error"); }
