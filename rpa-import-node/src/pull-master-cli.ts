@@ -285,6 +285,17 @@ function buildFieldModes(header: { [k: string]: string }, items: { [k: string]: 
   return modes;
 }
 
+
+/** ย่อชื่อสินค้าให้พอดีหัวข้อ แต่ตัดที่ช่องว่าง ไม่ตัดกลางคำ
+ *  (เดิม slice(0,24) ทำให้ได้ "SOYBEAN LECITHIN (COOK L" ซึ่งอ่านแล้วงง) */
+function shortName(v: string, max = 34): string {
+  const t = String(v ?? "").trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const sp = cut.lastIndexOf(" ");
+  return (sp > max * 0.6 ? cut.slice(0, sp) : cut).trimEnd() + "…";
+}
+
 const browser = await chromium.launch({ headless: process.env.PULL_HEADLESS !== "0" });
 const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
 const page = await context.newPage();
@@ -393,7 +404,7 @@ try {
   const consignee = header.consignee_name ?? "";
   const products = items.map((it) => it.product_code || it.description_eng).filter(Boolean);
   const name = (process.env.PULL_NAME ?? "").trim()
-    || `${CUSTOMER || header.customer_name || "Master"}${consignee ? " — " + consignee : ""}${products[0] ? " · " + products[0].slice(0, 24) : ""}`;
+    || `${CUSTOMER || header.customer_name || "Master"}${consignee ? " — " + consignee : ""}${products[0] ? " · " + shortName(products[0]) : ""}`;
 
   const master = {
     name,

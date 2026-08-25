@@ -558,3 +558,16 @@ select.ms-mode.m-off { background: #f9eaea; color: var(--red); }
   border-radius: 8px; padding: 10px 12px; margin-bottom: 14px;
 }
 .cs-note a { color: var(--primary); font-weight: 600; }
+
+/* กล่องอธิบาย/ตั้งขอบเขตในหน้าแก้ Master — ยุบไว้ก่อน ให้เห็นช่องกรอกทันทีที่เปิด */
+details.reg-scope { border: 1px solid var(--border); border-radius: 9px; margin-bottom: 12px; background: #fbfcfe; }
+details.reg-scope > summary {
+  cursor: pointer; padding: 9px 12px; font-size: 13px; list-style: none;
+  display: flex; align-items: center; gap: 8px;
+}
+details.reg-scope > summary::-webkit-details-marker { display: none; }
+details.reg-scope > summary::before { content: "›"; font-size: 15px; color: var(--muted); transition: transform .15s; }
+details.reg-scope[open] > summary::before { transform: rotate(90deg); }
+details.reg-scope > summary .muted { font-weight: 400; }
+details.reg-scope > *:not(summary) { padding: 0 12px; }
+details.reg-scope > *:last-child { padding-bottom: 12px; }

@@ -399,7 +399,13 @@ function renderList() {
   const rows = filteredDecls();
   const body = $("listBody");
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="9" class="empty">ยังไม่มีรายการ — กด "ดึงอีเมล" / "อัปโหลดไฟล์" / "สร้างรายการ"</td></tr>`;
+    // ชี้ทางต่อให้ชัด — และไม่พูดถึง "ดึงอีเมล" เพราะปิดถาวรแล้ว
+    body.innerHTML = `<tr><td colspan="9" class="empty">
+      <div style="font-weight:600;margin-bottom:6px">ยังไม่มีใบขนในระบบ</div>
+      <div class="muted" style="margin-bottom:12px">เริ่มจากอัปโหลดเอกสารของลูกค้า แล้วให้ AI อ่านข้อมูลให้</div>
+      <button class="btn btn-primary btn-sm" onclick="document.getElementById('btnUpload').click()">อัปโหลดเอกสาร</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('btnCreate').click()">สร้างเอง</button>
+    </td></tr>`;
     updateStats(); updateBulkBar();
     return;
   }
@@ -1059,6 +1065,22 @@ async function renderExcelInto(elId, url, name) {
 }
 
 function closeDetail() { $("modalDetail").style.display = "none"; detailId = null; }
+
+// ── กด Escape ปิดหน้าต่างที่เปิดอยู่ ────────────────────────────────────
+//   ผู้ใช้คาดหวังแบบนี้กับทุกเว็บ ก่อนหน้านี้ต้องเล็งกดปุ่ม × มุมขวาบนอย่างเดียว
+//   ปิดเฉพาะตัวที่อยู่บนสุด (ซ้อนกันได้ เช่น กล่องยืนยันบนหน้าต่างแก้ไข)
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  // ⚠ ห้ามใช้ offsetParent เช็คว่ามองเห็นไหม — .modal เป็น position:fixed
+  //   ซึ่ง offsetParent เป็น null เสมอ ทำให้กรองทิ้งหมดทุกอัน
+  const open = [...document.querySelectorAll(".modal")]
+    .filter((m) => getComputedStyle(m).display !== "none");
+  if (!open.length) return;
+  const top = open[open.length - 1];
+  // ใช้ปุ่มปิดของหน้าต่างนั้นถ้ามี เพื่อให้ logic เคลียร์ค่าทำงานเหมือนกดเอง
+  const x = top.querySelector(".modal-x");
+  if (x) x.click(); else top.style.display = "none";
+});
 $("mdClose").onclick = closeDetail;
 
 // ---- Modal ดูไฟล์ (ใบขน PDF + แคปหน้าจอ) จากหน้ารายการเลย ----
@@ -1234,8 +1256,13 @@ async function fillUploadTemplates(customer) {
   }
   const c = (customer || "").trim().toUpperCase();
   const list = c ? uploadTemplates.filter((t) => (t.customer_name || "").toUpperCase() === c) : uploadTemplates;
+  // เลือกลูกค้าแล้วไม่ต้องเอาชื่อลูกค้ามาซ้ำในทุกบรรทัด — เหลือแค่ Consignee · สินค้า จะอ่านง่ายกว่ามาก
+  const label = (t) => {
+    const n = String(t.name || "");
+    return c ? n.replace(new RegExp(`^${t.customer_name}\\s*—\\s*`, "i"), "") || n : n;
+  };
   sel.innerHTML = '<option value="">— เลือกให้อัตโนมัติจาก Consignee/สินค้า —</option>' +
-    list.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}</option>`).join("");
+    list.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(label(t))}</option>`).join("");
   sel.disabled = !list.length;
 }
 // ---- จัดการขั้นตอน wizard ของ modal อัปโหลด ----
@@ -1332,7 +1359,7 @@ let createPage = 1;         // แท็บที่เปิดอยู่ใ�
 let createItems = [];       // รายการสินค้าของใบที่กำลังสร้าง
 let createFromTemplateId = ""; // Master ที่เลือกเป็นฐาน ("" = เริ่มจากว่าง)
 
-function openCreate() {
+function openCreate(templateId) {
   createPage = 1;
   createItems = [];
   createFromTemplateId = "";
@@ -1349,7 +1376,15 @@ function openCreate() {
   }
   renderCreateForm({});
   $("modalCreate").style.display = "flex";
-  loadCreateTemplates();
+  // ⚠ ต้อง await — เดิมยิงทิ้งไว้ ทำให้ตอนกด "สร้างใบ" จาก Master
+  //   การโหลดรอบนี้มาเขียนทับ <select> ทีหลัง แล้วตัวที่เลือกไว้หายกลายเป็นว่าง
+  return loadCreateTemplates().then(async () => {
+    if (!templateId) return;
+    const sel = $("crTemplate");
+    if (!sel) return;
+    sel.value = templateId;
+    await applyCreateTemplate();
+  });
 }
 
 /** ฟอร์มสร้างใบใหม่ = ทุกช่อง 3 หน้า (เหมือนหน้า DCTK จริง) + เลือก Master เป็นฐานได้ */
@@ -1431,7 +1466,8 @@ async function loadCreateTemplates() {
     if (!r.enabled) { $("crTplNote").textContent = "ยังไม่ได้สร้างตาราง Master (รัน sql/11)"; return; }
     sel.innerHTML = '<option value="">— เริ่มจากฟอร์มว่าง —</option>' +
       (r.templates || []).map((t) =>
-        `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}${t.customer_name ? " · " + escapeHtml(t.customer_name) : ""}${t.is_default ? " ★" : ""}</option>`).join("");
+        // ชื่อ Master ขึ้นต้นด้วยชื่อลูกค้าอยู่แล้ว — ไม่ต้องต่อท้ายซ้ำอีก
+        `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}${t.is_default ? " ★" : ""}</option>`).join("");
   } catch { /* ไม่มี Master ก็สร้างจากว่างได้ */ }
 }
 
@@ -1453,13 +1489,17 @@ async function applyCreateTemplate() {
     }
     if (!createItems.length && Array.isArray(t.items) && t.items.length) createItems = t.items.map((it) => ({ ...it }));
     renderCreateForm(merged);
+    // renderCreateForm วาด #crBody ใหม่ทั้งก้อน → <select> รายการ Master ถูกล้างไปด้วย
+    //   ต้องเติมรายการกลับก่อน ไม่งั้น .value = id ไม่ติด (ไม่มี option ให้เลือก)
+    //   แล้วผู้ใช้จะเห็นช่องว่าง ทั้งที่เติมค่าจาก Master ไปแล้ว
+    await loadCreateTemplates();
     $("crTemplate").value = id;
     $("crTplNote").textContent = `ใช้ค่าจาก "${t.name}" แล้ว — แก้ได้ตามต้องการ`;
     toast(`เติมค่าจาก Master "${t.name}" แล้ว`, "success");
   } catch (e) { toast("ใช้ Master ไม่สำเร็จ: " + e.message, "error"); }
 }
 function closeCreate() { $("modalCreate").style.display = "none"; }
-$("btnCreate").onclick = openCreate;
+$("btnCreate").onclick = () => openCreate();   // ห้ามส่ง event เข้าไปเป็น templateId
 $("crClose").onclick = closeCreate;
 $("crCancel").onclick = closeCreate;
 $("crSubmit").onclick = async () => {
@@ -2117,9 +2157,16 @@ function renderMasters() {
     return;
   }
   body.innerHTML = MASTERS.map((t) => {
+    // ⚠ ต้องนับ "โหมดที่มีผลจริง" ไม่ใช่เฉพาะที่ตั้งไว้ชัดเจนใน field_modes
+    //   ช่องที่มีค่าแต่ไม่ได้ตั้งโหมด = "ใช้ค่า Master" โดยปริยาย (ดู msMode)
+    //   ถ้านับแค่ที่ตั้งไว้ ตารางจะขึ้น "ทับ AI 0" ทั้งที่จริงมีหลายสิบช่องที่จะทับค่า AI
     const modes = t.field_modes || {};
-    const nMaster = Object.values(modes).filter((m) => m === "master").length;
-    const nOff = Object.values(modes).filter((m) => m === "off").length;
+    const allKeys = new Set([...Object.keys(t.header || {}), ...Object.keys(modes)]);
+    let nMaster = 0, nOff = 0;
+    for (const k of allKeys) {
+      const m = msMode(t, k);
+      if (m === "master") nMaster++; else if (m === "off") nOff++;
+    }
     const nVals = Object.keys(t.header || {}).length;
     return `<tr>
       <td><b>${escapeHtml(t.name)}</b>${t.is_default ? ' <span class="st st-done" title="ใช้เติมใบที่มาจากอีเมลอัตโนมัติ">★ ค่าเริ่มต้น</span>' : ""}
@@ -2156,12 +2203,7 @@ function renderMasters() {
 /** สร้างใบขนใหม่จาก Master → เปิดฟอร์มสร้างพร้อมค่าที่เติมไว้ให้ (แก้ได้ก่อนบันทึก) */
 async function useMaster(id) {
   showPage("list");
-  openCreate();
-  setTimeout(async () => {
-    await loadCreateTemplates();
-    $("crTemplate").value = id;
-    await applyCreateTemplate();
-  }, 60);
+  await openCreate(id);   // openCreate จัดลำดับโหลด→เลือก→เติมค่าให้ครบในรอบเดียว
 }
 
 // ---- Modal สร้าง/แก้ Master ----
@@ -2192,8 +2234,12 @@ function renderMasterForm() {
       <div class="fld fld-full"><label>คำอธิบาย</label><input class="inp" id="msDesc" value="${escapeHtml(t.description || "")}" placeholder="ใช้เมื่อไหร่ / ต่างจาก Master อื่นตรงไหน" /></div>
     </div>
 
+    <details class="reg-scope">
+      <summary><b>ใช้ Master นี้กับใคร</b> <span class="muted">${(t.consignee_names || []).length || (t.product_codes || []).length
+        ? escapeHtml([...(t.consignee_names || []), ...(t.product_codes || [])].join(" · ").slice(0, 60))
+        : "ทุก Consignee / ทุกสินค้าของลูกค้ารายนี้"}</span></summary>
     <div class="reg-mode-help">
-      <b>ใช้ Master นี้กับใคร</b> — ระบบเลือก Master ให้อัตโนมัติจาก 3 ระดับ:
+      ระบบเลือก Master ให้อัตโนมัติจาก 3 ระดับ:
       ลูกค้า → Consignee → รหัสสินค้า · <b>ยิ่งระบุละเอียด ยิ่งถูกเลือกก่อน</b> · เว้นว่าง = ใช้ได้ทุกราย
     </div>
     <div class="md-grid" style="margin-bottom:12px">
@@ -2208,13 +2254,16 @@ function renderMasterForm() {
     </div>
     <label class="switch"><input type="checkbox" id="msDefault" ${t.is_default ? "checked" : ""} />
       <span>ตั้งเป็นค่าเริ่มต้นของลูกค้านี้ — ใช้เติมใบที่เข้ามาจากอีเมลอัตโนมัติ (1 ลูกค้ามีได้ 1 อัน)</span></label>
+    </details>
 
-    <div class="reg-mode-help">
-      <b>โหมดรายช่อง</b> — ตั้งไว้ล่วงหน้าว่าแต่ละช่องจะเอาค่าจากไหน:
-      <span class="mode-pill m-master">ใช้ค่า Master</span> ทับค่าที่ AI สกัดมาเสมอ ·
-      <span class="mode-pill m-ai">จาก AI</span> ปล่อย AI สกัด (Master เติมให้เฉพาะตอน AI ไม่ได้ค่า) ·
-      <span class="mode-pill m-off">ไม่กรอก</span> ข้ามช่องนี้ ไม่กรอกลง DCTK
-    </div>
+    <details class="reg-scope">
+      <summary><b>โหมดรายช่องคืออะไร</b> <span class="muted">ตั้งไว้ล่วงหน้าว่าแต่ละช่องเอาค่าจากไหน</span></summary>
+      <div class="reg-mode-help">
+        <span class="mode-pill m-master">ใช้ค่า Master</span> ทับค่าที่ AI สกัดมาเสมอ ·
+        <span class="mode-pill m-ai">จาก AI</span> ปล่อย AI สกัด (Master เติมให้เฉพาะตอน AI ไม่ได้ค่า) ·
+        <span class="mode-pill m-off">ไม่กรอก</span> ข้ามช่องนี้ ไม่กรอกลง DCTK
+      </div>
+    </details>
 
     <div class="md-tabs">
       <button class="md-tab" data-page="1">หน้า 1 · ใบขนสินค้าขาออก</button>
@@ -2243,6 +2292,7 @@ function renderMasterPage(pageNo, row) {
   const groups = regGroups(pageNo, "header");
   return regToolbar(pageNo) + groups.map((g) => {
     const editable = g.fields.filter((f) => !f.computed);
+    if (!editable.length) return "";   // กลุ่มที่ DCTK เติมเองทั้งหมด — ไม่ต้องโชว์หัวข้อเปล่า ๆ
     // "ตั้งแล้ว" = ช่องที่มีค่า หรือสั่ง "ไม่กรอก" ไว้ — กลุ่มที่ยังไม่แตะเลยให้ยุบไว้ก่อน
     //   (Master เต็ม ๆ มี 221 ช่อง ถ้ากางหมดจะหาไม่เจอว่าตั้งอะไรไว้บ้าง)
     const nSet = editable.filter((f) => String(regValue(row, f) ?? "").trim() !== ""
@@ -2281,9 +2331,20 @@ function renderMasterItems(formPage = 3) {
         ${isP4 ? "" : `<button class="btn btn-ghost btn-xs msi-del" data-i="${i}">${svgIcon("trash", 13)} ลบ</button>`}</div>
       <div class="item-grid">${regGroups(formPage, "item").map((g) =>
         `<div class="item-sec-title fld-full">${escapeHtml(g.title)}</div>` +
-        g.fields.filter((f) => !f.computed).map((f) =>
-          `<div class="fld"><label>${escapeHtml(f.label)}</label>
-             <input class="inp msi-edit" data-i="${i}" data-key="${f.key}" value="${escapeHtml(it[f.key] != null ? String(it[f.key]) : "")}" /></div>`).join("")
+        // ช่องระดับรายการก็ต้องตั้งโหมดได้เหมือนช่องหัวใบ
+        //   (รหัสสินค้า/พิกัด/หน่วย = ของตายตัวต่อ consignee · น้ำหนัก/ยอดเงิน = ต้องมาจากเอกสาร)
+        g.fields.filter((f) => !f.computed).map((f) => {
+          const mode = msMode(msEditing, f.key);
+          return `<div class="fld"><label>${escapeHtml(f.label)}</label>
+             <div class="ms-row">
+               <input class="inp msi-edit" data-i="${i}" data-key="${f.key}" value="${escapeHtml(it[f.key] != null ? String(it[f.key]) : "")}" />
+               <select class="sel sel-sm ms-mode m-${mode}" data-key="${f.key}">
+                 <option value="master" ${mode === "master" ? "selected" : ""}>ใช้ค่า Master</option>
+                 <option value="ai" ${mode === "ai" ? "selected" : ""}>จาก AI</option>
+                 <option value="off" ${mode === "off" ? "selected" : ""}>ไม่กรอก</option>
+               </select>
+             </div></div>`;
+        }).join("")
       ).join("")}</div>
     </div>`).join("") || '<div class="muted" style="padding:6px 0">ยังไม่มีรายการสินค้าใน Master นี้</div>';
   return `<div class="md-section">
