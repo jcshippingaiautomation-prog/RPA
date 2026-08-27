@@ -822,17 +822,30 @@ export async function kendoPickDate(
 
   for (let i = 0; i < 36; i++) {
     // safety cap (~3 yrs each direction)
-    const header = page
-      .locator(
-        "div.k-calendar:visible a.k-nav-fast, " +
-          "div.k-calendar:visible .k-header .k-link",
-      )
-      .first();
-    const current = ((await header.innerText()) || "").trim();
-    if (current.startsWith(targetText) || current.includes(targetText)) break;
+    // ⚠ ห้ามใช้ ".k-header .k-link" รวมกับ .first()
+    //   เพราะลูกศร "ย้อนกลับ" (a.k-nav-prev) ก็เป็น .k-header .k-link และอยู่ก่อนในหน้า
+    //   .first() จึงได้ลูกศรที่ไม่มีข้อความ → อ่านเดือนไม่ออก → เลิกเลื่อนแล้วไปคลิกวันในเดือนผิด
+    //   (เจอจริง: ปฏิทินเปิดที่ September แต่ต้องการ August → ได้วันที่ผิดเดือนแบบเงียบ ๆ
+    //    และถ้าเดือนนั้นไม่มีวันที่ 31 ก็ล้มทั้งใบ)
+    const current = await page.evaluate(() => {
+      const cal = Array.from(document.querySelectorAll("div.k-calendar"))
+        .find((c) => (c as HTMLElement).getBoundingClientRect().width > 0);
+      if (!cal) return "";
+      const fast = cal.querySelector("a.k-nav-fast") as HTMLElement | null;
+      if (fast) return (fast.innerText || "").trim();
+      // สำรอง: ลิงก์ในหัวปฏิทินที่ "มีข้อความ" (ไม่ใช่ปุ่มลูกศร)
+      const link = Array.from(cal.querySelectorAll(".k-header .k-link"))
+        .map((e) => (e as HTMLElement).innerText.trim())
+        .find((t) => t.length > 3);
+      return link ?? "";
+    }).catch(() => "");
+    if (current && (current.startsWith(targetText) || current.includes(targetText))) break;
 
     const curDt = parseMonthYear(current);
-    if (curDt === null) break;
+    if (curDt === null) {
+      log(`  ⚠ อ่านเดือนบนปฏิทินไม่ได้ (ได้ "${current}") — จะไม่เลื่อนเดือน`);
+      break;
+    }
     if (target.getTime() < curDt.getTime()) {
       await page.click("div.k-calendar:visible a.k-nav-prev");
     } else {
@@ -841,9 +854,31 @@ export async function kendoPickDate(
     await page.waitForTimeout(150);
   }
 
+  // คลิกวันที่ต้องการ — ถ้าไม่เจอ ให้บอกว่าปฏิทินกำลังโชว์เดือนอะไรอยู่
+  //   (เจอจริง: ETD 31/08/2026 แล้ว timeout เฉย ๆ ไม่รู้เลยว่าเพราะอะไร)
+  const day = target.getDate();
   const dayLink =
-    `div.k-calendar:visible td:not(.k-other-month) a.k-link:text-is('${target.getDate()}')`;
-  await page.click(dayLink);
+    `div.k-calendar:visible td:not(.k-other-month) a.k-link:text-is('${day}')`;
+  try {
+    await page.click(dayLink, { timeout: 8000 });
+    return;
+  } catch { /* ลองวิธีสำรองด้านล่าง */ }
+
+  // สำรอง: ไล่หา cell ที่ข้อความตรงกับวันที่ (บาง theme ใส่ช่องว่าง/ตัวเลขนำหน้า)
+  const clicked = await page.evaluate((d: number) => {
+    const cal = Array.from(document.querySelectorAll("div.k-calendar"))
+      .find((c) => (c as HTMLElement).getBoundingClientRect().width > 0);
+    if (!cal) return "ไม่พบปฏิทินที่เปิดอยู่";
+    const links = Array.from(cal.querySelectorAll("td:not(.k-other-month) a.k-link")) as HTMLElement[];
+    const hit = links.find((a) => (a.textContent || "").trim() === String(d));
+    if (!hit) {
+      const head = (cal.querySelector("a.k-nav-fast, .k-header .k-link") as HTMLElement)?.innerText?.trim() || "?";
+      return `ปฏิทินโชว์ "${head}" แต่ไม่มีวันที่ ${d} ให้กด (มี ${links.length} วัน)`;
+    }
+    hit.click();
+    return "";
+  }, day);
+  if (clicked) throw new Error(`เลือกวันที่ ${day} ไม่ได้ — ${clicked}`);
 }
 
 // ---- date utilities (replace Python datetime/strftime) -------------

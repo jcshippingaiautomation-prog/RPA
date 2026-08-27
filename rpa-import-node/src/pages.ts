@@ -318,6 +318,8 @@ async function assertDepartureDate(page: Page, r: Record): Promise<void> {
     }
     log(`  ⚠ วันที่ส่งออกในช่อง = "${got}" ไม่ตรงกับ "${want}" — พิมพ์ใหม่ (รอบ ${attempt}/3)`);
     try {
+      // ปฏิทินอาจค้างเปิดอยู่จากรอบที่แล้ว → บังช่องไม่ให้พิมพ์
+      await page.keyboard.press("Escape").catch(() => { /* */ });
       await page.click("#DepartureDate");
       await page.fill("#DepartureDate", "");
       await page.type("#DepartureDate", want.replace(/\//g, ""), { delay: 60 });
@@ -733,7 +735,14 @@ export async function fillPage1(page: Page, r: Record): Promise<void> {
   await fillFromRegistry(page, r, 1, "header");
 
   // ---- วันที่ส่งออก: ช่องบังคับของ DCTK — ตั้งท้ายสุดเสมอ กันโดนทับ
-  await putDate(page, r, "etd", S.SEL_ETD_DATEPICKER, String(r.etd_date ?? ""));
+  //   เลือกจากปฏิทินก่อน แต่ "ห้ามให้ล้มทั้งใบ" ถ้าปฏิทินมีปัญหา
+  //   (เจอจริง: ETD 31/08/2026 → หา td ของวันที่ 31 ไม่เจอ แล้ว timeout ทำใบตก)
+  //   เพราะเรามีทางสำรองที่พิมพ์ลงช่องตรง ๆ อยู่แล้ว ให้ assertDepartureDate จัดการต่อ
+  try {
+    await putDate(page, r, "etd", S.SEL_ETD_DATEPICKER, String(r.etd_date ?? ""));
+  } catch (e) {
+    log(`  ⚠ เลือกวันที่ส่งออกจากปฏิทินไม่สำเร็จ (${e instanceof Error ? e.message.slice(0, 70) : ""}) — จะพิมพ์ลงช่องแทน`);
+  }
   await assertDepartureDate(page, r);
 
   await captureIfRequested(page, r, "page1");
