@@ -269,6 +269,10 @@ const SHIPMENT_EXACT = new Set([
   "total_gross_weight", "total_net_weight", "total_quantity", "total_package",
   // ระดับรายการสินค้า
   "net_weight", "gross_weight", "package", "quantity", "inv_quantity",
+  // ท่าเรือ: ให้ยึดเอกสารก่อน (ลูกค้าแจ้งเองว่า "สถานที่ตรวจปล่อยอ่านจาก Paperless code
+  //   ส่วนสถานที่รับบรรทุกเค้าไปแก้ไขเอง") — Master เติมให้เฉพาะตอนเอกสารไม่มี
+  //   ถ้าปล่อยเป็นโหมดปริยาย Master จะทับค่าจากเอกสารทุกใบ
+  "released_port", "loaded_port",
 ]);
 /** ตัวเลขเงินทุกแถวในตารางราคา (…_foreign / …_baht / …_exchange_rate) เปลี่ยนทุกใบเหมือนกัน */
 const SHIPMENT_SUFFIX = ["_foreign", "_baht", "_exchange_rate"];

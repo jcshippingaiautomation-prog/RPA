@@ -999,7 +999,10 @@ export async function applyMasterToRecord(
   } else if (tplItems.length) {
     const aiItems = record._items as Record<string, unknown>[];
     out._items = await Promise.all(aiItems.map(async (aiIt, i) => {
-      const raw = tplItems[Math.min(i, tplItems.length - 1)] ?? {};
+      // ชิปเมนต์ใหม่มีรายการมากกว่าที่ Master เก็บไว้ → ใช้ "แถวแรก" เป็นต้นแบบ ไม่ใช่แถวสุดท้าย
+      //   แถวสุดท้ายของ Master มักเป็นแถวตัวอย่าง/ของแถม (หน่วย LTR · หีบห่อ 0)
+      //   ถ้าเอามาเป็นต้นแบบให้สินค้าจริง จะได้หน่วยผิดและจำนวนหีบห่อเป็น 0
+      const raw = tplItems[i] ?? tplItems[0] ?? {};
       // ระดับรายการเอาเฉพาะช่องโหมด "ใช้ค่า Master" เท่านั้น — ไม่เติมช่องว่างจาก Master
       //   เพราะช่องที่ว่างในรายการมักเป็นยอดเงิน/ปริมาณของชิปเมนต์นั้น
       //   ถ้าเอาค่าเก่ามาเติม จะได้ยอดที่ไม่ตรงกับหัวใบ แล้ว DCTK ตีกลับตอนกระทบยอด
@@ -1484,17 +1487,30 @@ export function scoreTemplate(
 
   // null = Master ไม่ได้ระบุระดับนี้ → ใช้ได้กับทุกค่า
   const consMatch = tCons.length ? (!!cons && tCons.some((c) => consHit(c, cons))) : null;
-  // ชื่อสินค้าก็ต้องเทียบแบบผ่อนปรนเหมือนชื่อผู้รับ
-  //   ชื่อใน DCTK กับชื่อในเอกสารมักยาวไม่เท่ากัน
-  //   (เจอจริง: DCTK เก็บ "REFINED BLEACHED" แต่ในใบกำกับเขียน
-  //    "REFINED BLEACHED DEODORIZED SOYBEAN OIL (RBDSBO)" → เทียบเป๊ะแล้วไม่ตรง
-  //    Master ถูกทิ้งทั้งใบ แล้วใบขนขาดข้อมูลที่ Master ควรเติมให้ทั้งหมด)
-  const prodMatch = tProds.length
-    ? tProds.some((p) => [...prods].some((q) => consHit(p, q)))
+
+  // ชื่อสินค้าเทียบเป๊ะไม่ได้ — ชื่อที่ลงทะเบียนใน DCTK กับที่เขียนในใบกำกับคนละแบบเสมอ
+  //   DCTK "REFINED BLEACHED"        ↔ ใบกำกับ "REFINED BLEACHED DEODORIZED SOYBEAN OIL (RBDSBO)"
+  //   DCTK "FROZEN COCONUT WATER"    ↔ ใบกำกับ "100% Raw Coconut Water by Mono 470ml"
+  //   → ให้คะแนนความใกล้เคียงด้วยคำที่ใช้ร่วมกัน แทนการเทียบตัวอักษร
+  //   วัดแบบ "คำที่ตรงกัน ÷ จำนวนคำของฝั่งที่สั้นกว่า" เพราะฝั่ง DCTK มักสั้นกว่ามาก
+  const words = (s: string) =>
+    new Set(s.replace(/[^A-Z0-9ก-๙ ]/g, " ").split(/\s+/).filter((w) => w.length >= 2));
+  const similarity = (a: string, b: string): number => {
+    const A = words(a), B = words(b);
+    if (!A.size || !B.size) return 0;
+    let hit = 0;
+    for (const w of A) if (B.has(w)) hit++;
+    return hit / Math.min(A.size, B.size);
+  };
+  const prodSim = tProds.length && prods.size
+    ? Math.max(...tProds.map((p) => Math.max(...[...prods].map((q) => similarity(p, q)))))
     : null;
 
-  // ระบุไว้แล้วแต่ไม่ตรง → ใช้ Master นี้ไม่ได้
-  if (consMatch === false || prodMatch === false) return null;
+  // ผู้รับสินค้าระบุไว้แล้วไม่ตรง → ใช้ Master นี้ไม่ได้ (ชื่อผู้รับเชื่อถือได้)
+  if (consMatch === false) return null;
+  // สินค้าคนละอย่างชัดเจน (แทบไม่มีคำร่วมกันเลย) → ไม่ใช้
+  //   กันเคสผู้รับรายเดียวซื้อหลายสินค้า แล้วเอา Master ของสินค้าอื่นมาใส่พิกัดผิด
+  if (prodSim !== null && prodSim < 0.25) return null;
 
   // ประเทศปลายทาง — ใช้ "เพิ่มคะแนน" อย่างเดียว ไม่ใช้ตัดทิ้ง
   //   จำเป็นเมื่อผู้รับรายเดียวส่งหลายประเทศ (เจอจริง: FFF ส่งทั้ง NL และ IT)
@@ -1503,7 +1519,7 @@ export function scoreTemplate(
   const destMatch = tDest && norm(destCountry) ? tDest === norm(destCountry) : null;
 
   let score = 0;
-  if (prodMatch === true) score += 4;      // ระดับ 3 ตรง = ละเอียดสุด
+  if (prodSim !== null) score += prodSim >= 0.6 ? 4 : prodSim >= 0.4 ? 2 : 1;  // ระดับ 3 = สินค้า
   if (destMatch === true) score += 3;      // ปลายทางตรง
   if (consMatch === true) score += 2;      // ระดับ 2 ตรง
   if (t.is_default) score += 1;            // ค่าเริ่มต้นของลูกค้า

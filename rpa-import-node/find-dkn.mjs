@@ -70,7 +70,9 @@ try {
   if (process.env.GROUP) {
     const by = new Map();
     for (const r of rows) {
-      const k = (r.inv.match(/^[A-Za-z-]+/) || ["(อื่น ๆ)"])[0].toUpperCase();
+      const k = process.env.GROUPBY === "seg"
+        ? (r.inv.match(/^[A-Za-z]+-[A-Za-z]+/) || [r.inv.slice(0, 8)])[0].toUpperCase()
+        : (r.inv.match(/^[A-Za-z-]+/) || ["(อื่น ๆ)"])[0].toUpperCase();
       const g = by.get(k) ?? { n: 0, last: "", dest: new Set() };
       g.n++; if (!g.last) g.last = `${r.inv} (${r.ref})`; g.dest.add(r.dest);
       by.set(k, g);
