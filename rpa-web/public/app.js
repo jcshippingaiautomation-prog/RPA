@@ -713,6 +713,14 @@ function renderRegItemCell(it, idx, f) {
     <input class="inp it-edit" data-i="${idx}" data-key="${f.key}" value="${val}" ${ruleAttrs(f)} /></div>`;
 }
 
+/** รหัสสินค้าของรายการหนึ่ง ๆ — ใน DCTK เก็บที่ช่อง "รหัสสินค้า" (คอลัมน์ description_eng)
+ *  ใช้โชว์ที่หัวการ์ด เพื่อให้รู้ว่ากำลังดูรายการไหนโดยไม่ต้องเลื่อนหาในช่องนับสิบ */
+function itemCodeBadge(it) {
+  const code = String(it?.description_eng ?? it?.product_code ?? "").trim();
+  if (!code) return "";
+  return `<span class="chip-tag chip-product item-code" title="${escapeHtml(code)}">${escapeHtml(code)}</span>`;
+}
+
 function renderItemCard(it, idx, formPage = 3) {
   let html = "";
   if (REG_READY) {
@@ -730,6 +738,7 @@ function renderItemCard(it, idx, formPage = 3) {
   return `<div class="item-card">
     <div class="item-card-head">
       <span class="item-card-no">รายการ ${idx + 1}</span>
+      ${itemCodeBadge(it)}
       <label class="item-foc-lbl"><input type="checkbox" class="it-foc" data-i="${idx}" ${it.is_foc ? "checked" : ""}> ของแถม (FOC)</label>
       <div style="flex:1"></div>
       <button class="btn btn-ghost btn-xs it-del" data-i="${idx}" title="ลบรายการ">${svgIcon("trash", 13)} ลบ</button>
@@ -1447,7 +1456,7 @@ function renderCreateItems(formPage = 3) {
   const isP4 = formPage === 4;
   const cards = createItems.map((it, i) => `
     <div class="item-card">
-      <div class="item-card-head"><b>รายการที่ ${i + 1}</b><div style="flex:1"></div>
+      <div class="item-card-head"><b>รายการที่ ${i + 1}</b>${itemCodeBadge(it)}<div style="flex:1"></div>
         ${isP4 ? "" : `<button class="btn btn-ghost btn-xs cri-del" data-i="${i}">${svgIcon("trash", 13)} ลบ</button>`}</div>
       <div class="item-grid">${regGroups(formPage, "item").map((g) =>
         `<div class="item-sec-title fld-full">${escapeHtml(g.title)}</div>` +
@@ -2392,7 +2401,7 @@ function renderMasterItems(formPage = 3) {
   const isP4 = formPage === 4;
   const cards = msItems.map((it, i) => `
     <div class="item-card">
-      <div class="item-card-head"><b>รายการที่ ${i + 1}</b><div style="flex:1"></div>
+      <div class="item-card-head"><b>รายการที่ ${i + 1}</b>${itemCodeBadge(it)}<div style="flex:1"></div>
         ${isP4 ? "" : `<button class="btn btn-ghost btn-xs msi-del" data-i="${i}">${svgIcon("trash", 13)} ลบ</button>`}</div>
       <div class="item-grid">${regGroups(formPage, "item").map((g) =>
         `<div class="item-sec-title fld-full">${escapeHtml(g.title)}</div>` +

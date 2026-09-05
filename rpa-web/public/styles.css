@@ -604,3 +604,6 @@ tr.ms-group > td {
 /* คอลัมน์รหัสสินค้าในรายการใบขน — หลายรายการก็ยังอ่านง่าย */
 .dt td.prod-cell { max-width: 210px; }
 .dt td.prod-cell .chip-tag { margin: 1px 3px 1px 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+
+/* รหัสสินค้าที่หัวการ์ดรายการ — บอกว่ากำลังดูรายการไหนโดยไม่ต้องเลื่อนหา */
+.item-card-head .item-code { margin-left: 8px; font-weight: 600; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
