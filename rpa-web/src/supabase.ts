@@ -1484,7 +1484,14 @@ export function scoreTemplate(
 
   // null = Master ไม่ได้ระบุระดับนี้ → ใช้ได้กับทุกค่า
   const consMatch = tCons.length ? (!!cons && tCons.some((c) => consHit(c, cons))) : null;
-  const prodMatch = tProds.length ? tProds.some((p) => prods.has(p)) : null;
+  // ชื่อสินค้าก็ต้องเทียบแบบผ่อนปรนเหมือนชื่อผู้รับ
+  //   ชื่อใน DCTK กับชื่อในเอกสารมักยาวไม่เท่ากัน
+  //   (เจอจริง: DCTK เก็บ "REFINED BLEACHED" แต่ในใบกำกับเขียน
+  //    "REFINED BLEACHED DEODORIZED SOYBEAN OIL (RBDSBO)" → เทียบเป๊ะแล้วไม่ตรง
+  //    Master ถูกทิ้งทั้งใบ แล้วใบขนขาดข้อมูลที่ Master ควรเติมให้ทั้งหมด)
+  const prodMatch = tProds.length
+    ? tProds.some((p) => [...prods].some((q) => consHit(p, q)))
+    : null;
 
   // ระบุไว้แล้วแต่ไม่ตรง → ใช้ Master นี้ไม่ได้
   if (consMatch === false || prodMatch === false) return null;
