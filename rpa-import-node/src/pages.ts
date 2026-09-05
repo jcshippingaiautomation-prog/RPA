@@ -1208,10 +1208,44 @@ async function fillOneGoodsItem(
     item.customs_unit || item.customs_unit_code || r.customs_unit_code || "",
   ).trim();
 
+  // ⚠ ตัวเลขในช่องปริมาณ ต้อง "อยู่ในหน่วยของช่องนั้น" ไม่ใช่ใส่ตันเสมอ
+  //   ของเดิมกรอก net_weight_ton ลงทั้งสองช่องโดยไม่ดูหน่วย → ผิดทุกใบที่หน่วยไม่ใช่ตัน
+  //   ลูกค้าแจ้งจริง: ช่องปริมาณในใบขนของ AUSTRALASIAN (หน่วย KGM) ได้ 110.000
+  //   ทั้งที่ต้องเป็น 110,000.000 (คือ 110 ตัน = 110,000 กก.)
+  //   เทียบกับใบขนจริงแล้วรูปแบบคือ:  TNE→ตัน · KGM/LTR→กิโลกรัม · หน่วยหีบห่อ(BX/CS)→จำนวนหีบห่อ
+  const numOf = (v: unknown) => {
+    const n = Number(String(v ?? "").replace(/,/g, ""));
+    return Number.isFinite(n) ? n : 0;
+  };
+  const netKg = numOf(item.net_weight_kg);
+  const packQty = numOf(item.volume ?? item.container_or_volume_qty);
+  const packUnit = String(item.container_unit ?? item.container_unit_code ?? "").trim().toUpperCase();
+  /** ค่าปริมาณที่ต้องกรอก เมื่อช่องนั้นใช้หน่วย unitCode */
+  const qtyFor = (unitCode: string, label: string): string => {
+    const u = unitCode.trim().toUpperCase();
+    if (!u) return netTon;                                   // ไม่รู้หน่วย → เหมือนเดิม
+    if (["TNE", "TON", "TO", "MT"].includes(u)) return netTon;
+    if (["KGM", "KG", "LTR", "L"].includes(u)) {
+      // LTR ของน้ำมะพร้าว/น้ำมัน = ใช้ตัวเลขน้ำหนักสุทธิเป็นกิโลกรัม (ตรงกับใบขนจริง)
+      if (netKg > 0) {
+        if (String(netKg) !== netTon) log(`  📐 ปริมาณ${label}: หน่วย ${u} → ใช้ ${netKg.toLocaleString()} (ไม่ใช่ ${netTon} ซึ่งเป็นตัน)`);
+        return String(netKg);
+      }
+      return netTon;
+    }
+    // หน่วยหีบห่อ (BX/CS/CT/…) — ใช้จำนวนหีบห่อ เฉพาะเมื่อหน่วยตรงกับหน่วยหีบห่อจริง
+    //   ไม่เดาเมื่อหน่วยแปลก (เช่น C62 ของไข่) → คงพฤติกรรมเดิมไว้
+    if (packQty > 0 && u === packUnit) {
+      log(`  📐 ปริมาณ${label}: หน่วย ${u} → ใช้จำนวนหีบห่อ ${packQty.toLocaleString()}`);
+      return String(packQty);
+    }
+    return netTon;
+  };
+
   // Python กรอกหน่วยช่อง 1 ด้วย unit (net_weight_unit_code) — ทำตามเป๊ะ
-  await put(page, r, "net_weight_ton", S.SEL_NET_TON_1, netTon);
+  await put(page, r, "net_weight_ton", S.SEL_NET_TON_1, qtyFor(unit, "ในใบกำกับ"));
   await putCombo(page, r, "net_weight_unit_code", S.SEL_UNIT_1, unit);
-  await put(page, r, "net_weight_ton", S.SEL_NET_TON_2, netTon);
+  await put(page, r, "net_weight_ton", S.SEL_NET_TON_2, qtyFor(customsUnit || unit, "ในใบขน"));
   // ช่อง 2: กรอกเฉพาะเมื่อมี customs_unit ระบุชัด — ไม่งั้นปล่อย C62 ที่ DCTK เติมตามพิกัด
   if (customsUnit) {
     await putCombo(page, r, "customs_unit_code", S.SEL_UNIT_2, customsUnit);
