@@ -20,7 +20,7 @@ import {
   isTruthy,
   SHEET_HEADER_MAP,
 } from "./data.js";
-import { login, openPortfolioAndAdd, fillPage1, fillPage2, fillPage2Open, fillPage2Fill, fillPage3, openDeclarationForEdit, saveDeclarationEdit } from "./pages.js";
+import { login, goHome, openPortfolioAndAdd, fillPage1, fillPage2, fillPage2Open, fillPage2Fill, fillPage3, openDeclarationForEdit, saveDeclarationEdit } from "./pages.js";
 import * as S from "./selectors.js";
 import { dumpPage, dumpGridColumns } from "./inspect.js";
 import { finalizeAndPrint, reprintDeclaration } from "./finalize.js";
@@ -887,6 +887,9 @@ async function runBrowser(
     }
 
     try {
+      // ใบก่อนหน้าอาจทิ้งหน้าจอไว้กลางฟอร์ม (โหมดทดสอบที่ไม่ finalize ค้างที่หน้า 2 เสมอ)
+      //   → พากลับหน้าแรกก่อน และ login ใหม่ให้ถ้าเซสชันหลุด
+      await goHome(page, { url: cfg.url!, username: cfg.username, password: cfg.password });
       await openPortfolioAndAdd(page);
       await fillPage1(page, record);
       const page2 = await fillPage2(page, record);

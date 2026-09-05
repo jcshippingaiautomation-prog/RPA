@@ -194,12 +194,12 @@ export async function fillFromRegistry(
           if (norm(idOf(el)) === norm(want)) return "ok";
           // Kendo NumericTextBox/ComboBox: input ที่ "เห็นบนจอ" ไม่มี id — ตัวที่มีชื่อจริงเป็น input ซ่อนข้าง ๆ
           //   ในกล่อง widget เดียวกัน → ถือว่าถูกช่อง ถ้าเจอ input ชื่อตรงกันในกล่องเดียวกัน
-          const box = el.closest(".k-widget, .k-numerictextbox, .k-numeric-wrap, span");
-          if (box) {
-            for (const sib of Array.from(box.querySelectorAll("input"))) {
-              if (norm(idOf(sib)) === norm(want)) return "ok";
-            }
-          }
+          // ⚠ เกณฑ์ต้อง "เข้ม" คือ input ตัวนั้นต้องชื่อตรงกับ dctkName เท่านั้น
+          //   เคยลองผ่อนให้ยอมรับ "input ชื่อตรงกันที่อยู่ในกล่อง widget เดียวกัน"
+          //   แต่ DCTK ครอบหลายช่องไว้ในกล่องเดียว → ช่องอัตราอากรผ่านการตรวจ
+          //   แล้วพิมพ์ 0.00 ทับพิกัดศุลกากร/รหัสสินค้ากรมฯ อีกรอบ (ยืนยันจาก log จริง 2 รอบ)
+          //   ช่องที่ input ที่เห็นไม่มี id (Kendo numeric) จะถูกข้าม — ยอมข้ามดีกว่าพิมพ์ผิดช่อง
+          //   ช่องพวกนั้นเป็นค่าที่ DCTK เติมเอง/เป็น 0 อยู่แล้ว ข้ามได้ไม่กระทบ (ทดสอบจริงผ่านครบ)
           return `ไปโดน "${idOf(el) || el.tagName}"`;
         },
         { s: sel, want: f.dctkName },
@@ -458,8 +458,52 @@ export async function login(
   }
 }
 
+/**
+ * พากลับ "หน้าแรก" ของ DCTK (หน้าที่มีไอคอน portfolio)
+ *
+ * ต้องมีเพราะทุกใบเริ่มด้วยการคลิกไอคอนในหน้าแรก แต่ใบก่อนหน้าอาจทิ้งเบราว์เซอร์
+ * ไว้กลางฟอร์ม (โหมดทดสอบที่ไม่ finalize จะค้างที่หน้า 2 เสมอ)
+ * ถ้ามี username/password ส่งมาด้วย จะ login ใหม่ให้เมื่อเซสชันหลุด
+ */
+export async function goHome(
+  page: Page,
+  cred?: { url: string; username: string; password: string },
+): Promise<boolean> {
+  const origin = new URL(page.url() || cred?.url || "http://localhost").origin;
+  const seen = await page.locator(S.SEL_PORTFOLIO_MENU).first().isVisible().catch(() => false);
+  if (seen) return true;
+  const candidates = [`${origin}/DCTK/`, `${origin}/DCTK/Home/Index`, `${origin}/DCTK/Account/Login`];
+  if (cred?.url) candidates.push(cred.url);
+  for (const url of candidates) {
+    try {
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+      await page.waitForSelector(S.SEL_PORTFOLIO_MENU, { state: "visible", timeout: 12000 });
+      return true;
+    } catch { /* ลองที่อยู่ถัดไป */ }
+  }
+  if (cred) {
+    // เซสชันหลุด — login ใหม่ (เป็นทางที่ได้ผลจริงเมื่อ goto เฉย ๆ ไม่พอ)
+    try {
+      await page.goto(cred.url, { waitUntil: "domcontentloaded", timeout: 45000 });
+      await login(page, cred.username, cred.password);
+      return await page.locator(S.SEL_PORTFOLIO_MENU).first().isVisible().catch(() => false);
+    } catch { return false; }
+  }
+  return false;
+}
+
 export async function openPortfolioAndAdd(page: Page): Promise<void> {
   log("portfolio → Add");
+  // ⚠ ใบก่อนหน้าอาจทิ้งเบราว์เซอร์ไว้กลางฟอร์ม (เช่นโหมดทดสอบที่ไม่ finalize จะค้างที่หน้า 2)
+  //   ถ้าไม่พากลับหน้าแรกก่อน จะหาไอคอน portfolio ไม่เจอแล้วใบนี้พังทั้งที่ข้อมูลไม่มีปัญหา
+  //   เช็คก่อน ถ้าอยู่หน้าแรกอยู่แล้วก็ไม่ต้องโหลดใหม่ (ประหยัดเวลา)
+  const atHome = await page.locator(S.SEL_PORTFOLIO_MENU).first().isVisible().catch(() => false);
+  if (!atHome) {
+    log("  ↩ ไม่ได้อยู่หน้าแรก — กลับหน้าแรกก่อน");
+    if (!(await goHome(page))) {
+      throw new Error("กลับหน้าแรกของ DCTK ไม่ได้ (เซสชันอาจหลุด) — ใบนี้ยังไม่ได้เริ่ม");
+    }
+  }
   // DCTK ช้า → ให้ click รอเมนูได้นาน (เดิม default 30s บางรอบไม่พอเมื่อ login เพิ่งผ่าน)
   await page.click(S.SEL_PORTFOLIO_MENU, { timeout: 30000 });
   await sleep(5000);
