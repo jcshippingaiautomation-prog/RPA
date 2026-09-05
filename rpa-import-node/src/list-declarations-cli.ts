@@ -41,6 +41,9 @@ interface Row {
   customer: string; invoice: string; declarationNo: string; reference: string;
   departure: string; status: string; vessel: string; destCountry: string;
   fobCurrency: string; fobForeign: string; items: string;
+  releasedPort: string; loadedPort: string; transportMode: string;
+  packUnit: string; netUnit: string; buyerCountry: string;
+  taxIncentives: string; docType: string; shippingMark: string;
 }
 
 try {
@@ -54,8 +57,22 @@ try {
   //    ถ้าไม่ขยายช่วง จะไม่เห็นใบเก่า → นึกว่าลูกค้ารายนั้นไม่มีใบเลย
   const FROM = (process.env.LIST_FROM ?? "").trim();   // dd/mm/yyyy
   const TO = (process.env.LIST_TO ?? "").trim();
-  if (FROM || TO) {
-    log(`→ ขยายช่วงวันที่สร้าง: ${FROM || "(เดิม)"} ถึง ${TO || "(เดิม)"}`);
+  // ⚠ หน้ารายการติ๊ก "แสดงรายการเฉพาะผู้ใช้งาน" ไว้เป็นค่าปริยาย
+  //    → เห็นเฉพาะใบที่ user นี้สร้าง ใบที่คนอื่นในทีมทำจะไม่โผล่
+  //    (เจอจริง: หาใบของโคโคส์ไม่เจอ ทั้งที่มีอยู่ในระบบ)
+  const ALL_USERS = process.env.LIST_ALL_USERS === "1";
+  if (ALL_USERS) {
+    const un = await page.evaluate(() => {
+      const cb = document.getElementById("SearchIsSpecificallyUser") as HTMLInputElement | null;
+      if (!cb) return "ไม่พบตัวกรอง";
+      if (cb.checked) cb.click();
+      return cb.checked ? "ยังติ๊กอยู่" : "เอาติ๊กออกแล้ว";
+    }).catch(() => "อ่านไม่ได้");
+    log(`→ แสดงใบของผู้ใช้ทุกคน: ${un}`);
+    await sleep(1200);
+  }
+  if (FROM || TO || ALL_USERS) {
+    if (FROM || TO) log(`→ ขยายช่วงวันที่สร้าง: ${FROM || "(เดิม)"} ถึง ${TO || "(เดิม)"}`);
     await page.evaluate(({ f, t }: { f: string; t: string }) => {
       const set = (id: string, v: string) => {
         if (!v) return;
@@ -105,6 +122,16 @@ try {
         fobCurrency: val(o, "TotalFobCurrencyCode"),
         fobForeign: val(o, "TotalFobForeign"),
         items: val(o, "TotalPackage"),
+        // คอลัมน์เพิ่มเติม — ใช้ดูว่าลูกค้ารายหนึ่งมี "รูปแบบใบ" กี่แบบ (จะได้รู้ว่าควรมี Master กี่อัน)
+        releasedPort: val(o, "ReleasedPort"),
+        loadedPort: val(o, "LoadedPort"),
+        transportMode: val(o, "TransportMode"),
+        packUnit: val(o, "TotalPackageUnitCode"),
+        netUnit: val(o, "TotalNetWeightUnitCode"),
+        buyerCountry: val(o, "PurCountryCode"),
+        taxIncentives: val(o, "ExportTaxIncentivesId"),
+        docType: val(o, "ExDecDocType"),
+        shippingMark: val(o, "ShippingMark"),
       };
     });
   }).catch(() => [] as Row[]);

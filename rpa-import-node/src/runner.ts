@@ -990,6 +990,20 @@ async function runBrowser(
       }
       setStatus(idx, "error", msg);
       result.errors++;
+
+      // ⚠ กู้สถานะก่อนทำใบถัดไป
+      //   ใบที่พังมักค้างอยู่กลางฟอร์ม (หรือในแท็บย่อย) ทำให้ใบถัดไปหาเมนู portfolio ไม่เจอ
+      //   แล้วพังตามกันหมดทั้งชุด (เจอจริง: ใบแรกพัง อีก 3 ใบพังด้วย page.click timeout)
+      try {
+        for (const extra of context.pages()) if (extra !== page) await extra.close().catch(() => { /* */ });
+        await page.goto(`${new URL(cfg.url!).origin}/DCTK/ExDec/Index`, {
+          waitUntil: "domcontentloaded", timeout: 45000,
+        });
+        await sleep(3000);
+        log(`  ↩ กลับหน้ารายการใบขนแล้ว — ทำใบถัดไปต่อได้`);
+      } catch (e) {
+        log(`  ⚠ กู้สถานะไม่สำเร็จ: ${e instanceof Error ? e.message.slice(0, 70) : ""}`);
+      }
     }
 
     // รวม screenshot ที่ capture ไว้เป็น "PDF เดียว" (Capture_<customer>.pdf) แล้วอัปขึ้น Supabase

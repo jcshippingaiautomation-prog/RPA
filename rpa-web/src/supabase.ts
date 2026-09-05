@@ -595,6 +595,26 @@ export async function createDeclaration(
     record = mastered.record;
     const fieldModes = { ...(mastered.fieldModes ?? {}), ...(opts.fieldModes ?? {}) };
 
+    // ── หัวใบสรุปหน่วยจากรายการสินค้า ────────────────────────────────
+    //   DCTK บังคับให้ "ส่วนควบคุม" (หัวใบ) มีหน่วยด้วย ไม่ใช่แค่ในรายการ
+    //   ใบหลายรายการ AI มักใส่หน่วยเฉพาะในรายการ → หัวใบว่าง แล้วติด validation ทุกใบ
+    //   (เจอจริงกับ COCOS ทั้ง 4 ใบ: รายการมี LTR แต่หัวใบว่าง)
+    //   เติมให้เฉพาะตอน "หัวใบว่าง" และ "ทุกรายการใช้หน่วยเดียวกัน" — ไม่เดาเมื่อไม่ตรงกัน
+    const UNIT_COLS = ["customs_unit_code", "net_weight_unit_code", "container_unit_code"];
+    const itemsForUnit = (record._items ?? []) as Record<string, unknown>[];
+    if (itemsForUnit.length) {
+      for (const col of UNIT_COLS) {
+        if (String(record[col] ?? "").trim()) continue;             // หัวใบมีค่าแล้ว ไม่แตะ
+        const vals = new Set(itemsForUnit
+          .map((it) => String(it[col] ?? "").trim())
+          .filter(Boolean));
+        if (vals.size === 1) {
+          record[col] = [...vals][0];
+          console.log(`[unit] หัวใบ ${col} ว่าง → ใช้ค่าจากรายการสินค้า "${record[col]}"`);
+        }
+      }
+    }
+
     const payload: Record<string, unknown> = {};
     for (const col of DECL_COLUMNS) if (record[col] !== undefined) payload[col] = record[col] ?? null;
     const extra = await availableExtraColumns();
@@ -904,6 +924,7 @@ export async function applyMasterToRecord(
   templateName?: string;
 }> {
   const consigneeName = String(record.consignee_name ?? "");
+  const destCountry = String(record.destination_country_code ?? record.dest_country_code ?? "");
   const productCodes = (record._items ?? [])
     .map((it) => String((it as Record<string, unknown>).description_eng ?? ""))
     .filter(Boolean);
@@ -916,7 +937,7 @@ export async function applyMasterToRecord(
   }
   if (!tpl) {
     tpl = (await templateLevelsEnabled())
-      ? (await findBestTemplate(customer, consigneeName, productCodes)) ?? (await getDefaultTemplate(customer))
+      ? (await findBestTemplate(customer, consigneeName, productCodes, destCountry)) ?? (await getDefaultTemplate(customer))
       : await getDefaultTemplate(customer);
   }
   if (!tpl) return { record };
@@ -1408,6 +1429,7 @@ export function scoreTemplate(
   t: DeclarationTemplate,
   consignee: string,
   productCodes: string[],
+  destCountry = "",
 ): number | null {
   const norm = (s: unknown) => String(s ?? "").trim().toUpperCase();
   const cons = norm(consignee);
@@ -1415,15 +1437,29 @@ export function scoreTemplate(
   const tCons = (t.consignee_names ?? []).map(norm).filter(Boolean);
   const tProds = (t.product_codes ?? []).map(norm).filter(Boolean);
 
+  // เทียบชื่อผู้รับสินค้าแบบ "ผ่อนปรน" — AI อ่านชื่อมาสั้น/ยาวกว่าที่บันทึกไว้ได้
+  //   (เจอจริง: Master เก็บ "AL ACCAD DEPARTMENT STORE OWNED BY ORGANIC F AND C"
+  //    แต่ในเอกสารเขียนแค่ "AL ACCAD DEPARTMENT STORE" → เทียบเป๊ะแล้วไม่ตรง Master ถูกทิ้ง)
+  //   ยังไม่เดาสุ่ม: ต้องมีฝ่ายหนึ่งเป็นส่วนขึ้นต้นของอีกฝ่าย และยาวพอที่จะไม่บังเอิญ
+  const consHit = (a: string, b: string) =>
+    a === b || (a.length >= 8 && b.length >= 8 && (a.startsWith(b) || b.startsWith(a)));
+
   // null = Master ไม่ได้ระบุระดับนี้ → ใช้ได้กับทุกค่า
-  const consMatch = tCons.length ? (!!cons && tCons.includes(cons)) : null;
+  const consMatch = tCons.length ? (!!cons && tCons.some((c) => consHit(c, cons))) : null;
   const prodMatch = tProds.length ? tProds.some((p) => prods.has(p)) : null;
 
   // ระบุไว้แล้วแต่ไม่ตรง → ใช้ Master นี้ไม่ได้
   if (consMatch === false || prodMatch === false) return null;
 
+  // ประเทศปลายทาง — ใช้ "เพิ่มคะแนน" อย่างเดียว ไม่ใช้ตัดทิ้ง
+  //   จำเป็นเมื่อผู้รับรายเดียวส่งหลายประเทศ (เจอจริง: FFF ส่งทั้ง NL และ IT)
+  //   ไม่ใช้ตัดทิ้งเพราะ AI มักสับสนระหว่าง "ประเทศของผู้รับ" กับ "ประเทศปลายทาง"
+  const tDest = norm((t.header ?? {}).dest_country_code);
+  const destMatch = tDest && norm(destCountry) ? tDest === norm(destCountry) : null;
+
   let score = 0;
   if (prodMatch === true) score += 4;      // ระดับ 3 ตรง = ละเอียดสุด
+  if (destMatch === true) score += 3;      // ปลายทางตรง
   if (consMatch === true) score += 2;      // ระดับ 2 ตรง
   if (t.is_default) score += 1;            // ค่าเริ่มต้นของลูกค้า
   score += Number(t.priority ?? 0);
@@ -1435,18 +1471,19 @@ export async function findBestTemplate(
   customer: string,
   consignee: string,
   productCodes: string[] = [],
+  destCountry = "",
 ): Promise<DeclarationTemplate | null> {
   if (!customer) return null;
   const all = await listTemplates(customer);
   if (!all.length) return null;
   let best: { score: number; tpl: DeclarationTemplate } | null = null;
   for (const t of all) {
-    const score = scoreTemplate(t, consignee, productCodes);
+    const score = scoreTemplate(t, consignee, productCodes, destCountry);
     if (score === null) continue;
     if (!best || score > best.score) best = { score, tpl: t };
   }
   if (best) {
-    console.log(`[master] เลือก "${best.tpl.name}" (คะแนน ${best.score}) สำหรับ ${customer}/${consignee || "-"}`);
+    console.log(`[master] เลือก "${best.tpl.name}" (คะแนน ${best.score}) สำหรับ ${customer}/${consignee || "-"}${destCountry ? " → " + destCountry : ""}`);
   }
   return best?.tpl ?? null;
 }
