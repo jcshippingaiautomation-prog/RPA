@@ -516,7 +516,28 @@ export async function listDeclarations(limit = 100): Promise<Record<string, unkn
       .order("created_at", { ascending: false })
       .limit(limit);
     if (error) throw error;
-    return (data ?? []).map((r) => ({ ...r, status: deriveStatus(r) })) as Record<string, unknown>[];
+    const rows = (data ?? []).map((r) => ({ ...r, status: deriveStatus(r) })) as Record<string, unknown>[];
+
+    // แนบ "รหัสสินค้า" ของแต่ละใบมาด้วย (ดึงเฉพาะคอลัมน์เดียว ไม่ดึงรายการทั้งก้อน)
+    //   ใน DCTK ช่องรหัสสินค้าเก็บที่คอลัมน์ description_eng ของ declaration_items
+    const ids = rows.map((r) => String(r.id)).filter(Boolean);
+    if (ids.length) {
+      const { data: items } = await sb
+        .from("declaration_items")
+        .select("declaration_id, description_eng")
+        .in("declaration_id", ids);
+      const byDecl = new Map<string, string[]>();
+      for (const it of items ?? []) {
+        const k = String((it as { declaration_id?: unknown }).declaration_id ?? "");
+        const v = String((it as { description_eng?: unknown }).description_eng ?? "").trim();
+        if (!k || !v) continue;
+        const arr = byDecl.get(k) ?? [];
+        if (!arr.includes(v)) arr.push(v);
+        byDecl.set(k, arr);
+      }
+      for (const r of rows) r.product_codes = byDecl.get(String(r.id)) ?? [];
+    }
+    return rows;
   } catch (err) {
     console.error("[supabase] listDeclarations error:", errMsg(err));
     return [];

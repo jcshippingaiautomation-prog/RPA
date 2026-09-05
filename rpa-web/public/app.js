@@ -400,7 +400,7 @@ function renderList() {
   const body = $("listBody");
   if (!rows.length) {
     // ชี้ทางต่อให้ชัด — และไม่พูดถึง "ดึงอีเมล" เพราะปิดถาวรแล้ว
-    body.innerHTML = `<tr><td colspan="9" class="empty">
+    body.innerHTML = `<tr><td colspan="10" class="empty">
       <div style="font-weight:600;margin-bottom:6px">ยังไม่มีใบขนในระบบ</div>
       <div class="muted" style="margin-bottom:12px">เริ่มจากอัปโหลดเอกสารของลูกค้า แล้วให้ AI อ่านข้อมูลให้</div>
       <button class="btn btn-primary btn-sm" onclick="document.getElementById('btnUpload').click()">อัปโหลดเอกสาร</button>
@@ -417,6 +417,12 @@ function renderList() {
       <td><div class="cust">${escapeHtml(d.customer_name || "—")}</div></td>
       <td class="muted-cell">${escapeHtml(d.consignee_name || "—")}</td>
       <td class="muted-cell">${escapeHtml(d.invoice_number || "—")}</td>
+      <td class="muted-cell prod-cell" title="${escapeHtml(prodCodes(d).join(" · "))}">${
+        prodCodes(d).length
+          ? prodCodes(d).slice(0, 2).map((c) => `<span class="chip-tag chip-product">${escapeHtml(c)}</span>`).join("")
+            + (prodCodes(d).length > 2 ? `<span class="muted" style="font-size:11px"> +${prodCodes(d).length - 2}</span>` : "")
+          : "—"
+      }</td>
       <td class="muted-cell">${escapeHtml(d.etd || "—")}</td>
       <td class="muted-cell">${escapeHtml(fmtMoney(d.total_goods_amount, d.currency))}</td>
       <td>${sourceBadge(d.source)}</td>
@@ -482,6 +488,19 @@ async function loadDecls() {
     populateCustomerFilter();
     renderList();
   } catch (e) { toast("โหลดรายการไม่ได้: " + e.message, "error"); }
+}
+
+/** รหัสสินค้าของใบขน — ใน DCTK ช่อง "รหัสสินค้า" เก็บที่คอลัมน์ description_eng
+ *  ใบที่มีหลายรายการจะได้หลายรหัส (ตัดซ้ำแล้ว) */
+function prodCodes(d) {
+  const out = [...(d.product_codes ?? [])].filter(Boolean);
+  for (const it of d._items ?? []) {
+    const v = String(it.description_eng ?? "").trim();
+    if (v && !out.includes(v)) out.push(v);
+  }
+  const head = String(d.description_eng ?? "").trim();     // ใบรายการเดียวที่เก็บไว้บนหัวใบ
+  if (!out.length && head) out.push(head);
+  return out;
 }
 
 // ---- รัน RPA ต่อใบ ----
