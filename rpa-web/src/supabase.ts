@@ -565,6 +565,34 @@ export async function getDeclaration(id: string): Promise<Record<string, unknown
 }
 
 /** สร้าง declaration ใหม่ (manual create หรือ upload) — คืน id */
+/**
+ * เติมจำนวนหีบห่อที่ขาดคืนให้แถวของแถม/ตัวอย่าง เพื่อให้ผลรวมรายการเท่ากับยอดหัวใบ
+ *
+ * ทำเฉพาะเมื่อมั่นใจว่าเป็นอาการ "อ่านคอลัมน์เลื่อน" เท่านั้น:
+ *   - หัวใบมียอด และผลรวมรายการน้อยกว่าหัวใบ
+ *   - ส่วนต่างเล็กมาก (ไม่เกิน 10 กล่อง และไม่เกิน 1% ของยอดทั้งใบ)
+ *   - มีแถวของแถม (FOC) ที่จำนวนกล่องเป็น 0 ให้เติม
+ * นอกเหนือจากนี้ไม่แตะ — ปล่อยให้ขึ้นเตือนในหน้าตรวจข้อมูลให้ผู้ใช้ตัดสินใจเอง
+ */
+function reconcilePackageCount(record: Record<string, unknown> & { _items?: Record<string, unknown>[] }): void {
+  const items = record._items ?? [];
+  if (items.length < 2) return;
+  const n = (v: unknown) => {
+    const x = Number(String(v ?? "").replace(/,/g, ""));
+    return Number.isFinite(x) ? x : 0;
+  };
+  const head = n(record.container_or_volume_qty);
+  if (head <= 0) return;
+  const sum = items.reduce((a, it) => a + n(it.container_or_volume_qty), 0);
+  const gap = head - sum;
+  if (gap <= 0 || gap > 10 || gap > head * 0.01) return;
+
+  const target = items.find((it) => it.is_foc === true && n(it.container_or_volume_qty) === 0);
+  if (!target) return;
+  target.container_or_volume_qty = gap;
+  console.log(`[กระทบยอด] จำนวนหีบห่อ: หัวใบ ${head} · รวมรายการ ${sum} — เติม ${gap} กล่องให้รายการของแถม "${String(target.description_eng_field ?? target.description_eng ?? "").slice(0, 40)}"`);
+}
+
 export async function createDeclaration(
   record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
   opts: {
@@ -614,6 +642,14 @@ export async function createDeclaration(
         }
       }
     }
+
+    // ── กระทบยอด "จำนวนหีบห่อ" หัวใบ vs รายการ ──────────────────────
+    //   กรมฯ เทียบส่วนควบคุมกับผลรวมรายรายการ ถ้าไม่ตรงจะยื่นไม่ผ่าน
+    //   ปัญหาที่เจอซ้ำ: ในใบแนบ แถวของแถม/ตัวอย่างเว้นช่อง "Pallet No." ว่าง
+    //   ทำให้คอลัมน์เลื่อน AI จึงอ่านจำนวนกล่องของแถวนั้นเป็น 0 ทั้งที่เอกสารมี 1 กล่อง
+    //   (ยืนยันกับใบขนที่ยื่นกรมฯ จริง CTN2648: แถวตัวอย่างแถวแรก = 1 กล่อง)
+    //   → เติมส่วนต่างคืนให้แถวของแถมแถวแรกที่เป็น 0 เมื่อส่วนต่างเล็กเท่านั้น
+    reconcilePackageCount(record);
 
     const payload: Record<string, unknown> = {};
     for (const col of DECL_COLUMNS) if (record[col] !== undefined) payload[col] = record[col] ?? null;
@@ -686,7 +722,9 @@ async function insertItems(declId: string, items: Record<string, unknown>[]): Pr
   const rows = items.map((it, i) => {
     const row: Record<string, unknown> = {
       declaration_id: declId,
-      line_no: it.line_no ?? i + 1,
+      // ⚠ ไล่เลขลำดับใหม่เสมอตามลำดับที่ส่งมา — ไม่ใช้ line_no ที่ AI ให้มา
+      //   AI เคยให้เลขซ้ำ (เช่น 1,2,2) แล้วรายการหายไปตอนเรียงลำดับ/แสดงผล
+      line_no: i + 1,
       description_eng: it.description_eng,
       brand_name: it.brand_name,
       container_or_volume_qty: it.container_or_volume_qty,

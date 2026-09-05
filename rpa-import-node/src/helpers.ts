@@ -389,6 +389,21 @@ export async function comboPick(
  * พิมพ์ค่า → รอ dropdown → เลือกแถวที่ match (เป๊ะ/startsWith/contains 2 ทาง)
  * ถ้าไม่เจอแถวที่ match → **throw error** (หยุด + แจ้ง ตามคู่มือ: สินค้าไม่มีใน master ห้ามกรอกมั่ว)
  */
+/**
+ * ยืนยันว่าเลือกจาก dropdown แล้วช่องมีค่าจริง
+ *
+ * ⚠ Kendo ComboBox: คลิกแถวใน dropdown ไม่ได้แปลว่าค่าติดเสมอ
+ *   (คลิกพลาดขอบแถว / widget ยัง filter อยู่ / มีคนกด Escape ทีหลัง = Kendo คืนค่าเดิม = ว่าง)
+ *   เคยพลาดตรงนี้: log บอก "เลือกรหัสสินค้าแล้ว" แต่ช่องว่าง → DCTK ไม่ auto-fill พิกัด
+ *   → ตอนบันทึกได้ "ค้นหาข้อมูลไม่พบ (พิกัดศุลกากร)" ซึ่งชี้ไปผิดที่ ไล่เหตุไม่เจอ
+ */
+async function comboHasValue(page: Page, inputSelector: string): Promise<string> {
+  return page.evaluate((sel: string) => {
+    const el = document.querySelector(sel) as HTMLInputElement | null;
+    return (el?.value ?? "").trim();
+  }, inputSelector).catch(() => "");
+}
+
 export async function comboPickStrict(
   page: Page,
   inputSelector: string,
@@ -443,7 +458,7 @@ export async function comboPickStrict(
     //   → ลอง fuzzy ด้วยคำสำคัญคำแรกก่อน (ค้นกว้างขึ้น ให้ master โผล่ แล้วเทียบความเหมือน)
     log(`  🔎 รหัสสินค้า: ค้น "${value}" เต็มๆ ไม่เจอแถว → ลอง fuzzy ด้วยคำสำคัญ`);
     const picked = await fuzzyPickFromMaster(page, inputSelector, want);
-    if (picked) { await sleep(400); return; }
+    if (picked && (await comboHasValue(page, inputSelector))) { await sleep(400); return; }
     throw new Error(`${fieldLabel}: ไม่พบรายการใน master DCTK สำหรับ "${value}" (ต้องเพิ่มสินค้าใน master ก่อน)`);
   }
 
@@ -457,19 +472,29 @@ export async function comboPickStrict(
     } catch { return ""; }
   };
 
+  // คลิกแถว แล้ว "ตรวจว่าค่าติดจริง" — ไม่ติดคืน false ให้ไปลอง pass ถัดไป
+  const pickRow = async (i: number): Promise<boolean> => {
+    await rows.nth(i).click();
+    await sleep(500);
+    const got = await comboHasValue(page, inputSelector);
+    if (got) return true;
+    log(`  ↻ ${fieldLabel}: คลิกเลือกแล้วแต่ช่องยังว่าง — ลองวิธีถัดไป`);
+    return false;
+  };
+
   // pass 1: เป๊ะ
   for (let i = 0; i < n; i++) {
-    if ((await textOf(i)) === want) { await rows.nth(i).click(); await sleep(400); return; }
+    if ((await textOf(i)) === want && (await pickRow(i))) return;
   }
   // pass 2: startsWith
   for (let i = 0; i < n; i++) {
     const t = await textOf(i);
-    if (t && (t.startsWith(want) || want.startsWith(t))) { await rows.nth(i).click(); await sleep(400); return; }
+    if (t && (t.startsWith(want) || want.startsWith(t)) && (await pickRow(i))) return;
   }
   // pass 3: contains 2 ทาง (master อาจชื่อสั้นกว่าค่าที่สกัด)
   for (let i = 0; i < n; i++) {
     const t = await textOf(i);
-    if (t && (t.includes(want) || want.includes(t))) { await rows.nth(i).click(); await sleep(400); return; }
+    if (t && (t.includes(want) || want.includes(t)) && (await pickRow(i))) return;
   }
 
   // pass 4: FUZZY FALLBACK — ชื่อในเอกสารอาจสะกดต่างจาก master เล็กน้อย
@@ -477,7 +502,7 @@ export async function comboPickStrict(
   //   วิธี: retype ด้วย "คำสำคัญ" (token แรกๆ ที่ไม่ใช่ stopword/วงเล็บ) แล้ว
   //   เทียบ token overlap — เลือกเฉพาะเมื่อมีแถวเดียวที่ overlap สูงพอ (ปลอดภัย ไม่เดามั่ว)
   const picked = await fuzzyPickFromMaster(page, inputSelector, want);
-  if (picked) { await sleep(400); return; }
+  if (picked && (await comboHasValue(page, inputSelector))) { await sleep(400); return; }
 
   // ไม่ match แถวไหนเลย → หยุด + แจ้ง พร้อม list ชื่อใน master ที่มีให้เห็น (ช่วยแก้)
   const master = [];

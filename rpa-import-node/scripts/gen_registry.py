@@ -120,6 +120,7 @@ FORCE_COMPUTED = {
     "TotalFobCurrencyCode", "TotalFobExchangeRate", "TotalFobForeign",
     "TotalFobBaht", "TotalFobAssess",
     "ExDutyAmount", "ExDutyAmountPay", "DepositAmount",
+    "TotalTaxPay", "TotalCustomsFee", "TotalDeposit", "TotalTax", "TotalDutyPay",
     # ช่อง "สาขา" — DCTK เติมให้เองหลังเลือกเลขประจำตัวผู้เสียภาษี
     #   ถ้าปล่อยให้ตัวกรอกทั่วไปพยายามกรอก จะ timeout ทุกใบ (เจอจริงตอน dry run)
     "CmpBrnNo", "BrkBrnNo", "SubBrkBrnNo", "TradingCmpBrnNo", "ExportFromAuthorityBrnNo",
@@ -142,7 +143,14 @@ FORCE_COMPUTED = {
 # "ปัจจัยเงื่อนไข" (…TermFactor) — DCTK คำนวณจากตาราง Incoterms (Term/GetFactor)
 # "วิธีเฉลี่ยค่าใช้จ่าย" (…AverageBy) — DCTK เปิดให้เฉพาะใบหลายรายการ
 # ทั้งสองกลุ่มกรอกไม่ได้จริง (ยืนยันจากการรันจริง: ข้ามทั้ง 20 ช่อง) → ไม่ต้องพยายามกรอก
-COMPUTED_SUFFIXES = ("TermFactor", "AverageBy")
+# ช่องที่ DCTK "คำนวณเอง" จากค่าอื่นบนหน้าจอ — ห้ามกรอกทับเด็ดขาด
+#   *Baht / *ExchangeRate = ได้จาก (เงินต่างประเทศ × อัตราแลกเปลี่ยนของวันนั้น)
+#     ค่าใน Master เป็นของ "วันที่ดึงมา" ถ้าเอาไปกรอกทับ = ยอดบาทผิด แล้วกระทบยอดไม่ตรง
+#   Total* ฝั่งภาษี/ค่าธรรมเนียม = ผลรวมที่ DCTK สรุปให้เอง
+COMPUTED_SUFFIXES = (
+    "TermFactor", "AverageBy",
+    "Baht", "ExchangeRate",
+)
 
 # ช่อง "สถานะ/ประวัติการรับส่งข้อมูล" ของ DCTK — เป็นผลลัพธ์หลังยื่น ไม่ใช่ข้อมูลที่คนกรอก
 #   เช่น วัน/เวลาที่ส่งข้อมูลไปกรมฯ · รหัสข้อผิดพลาดจากกรมฯ · จำนวนครั้งที่ส่ง

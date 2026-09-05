@@ -178,6 +178,38 @@ export async function fillFromRegistry(
     const sel = resolveSelector(f);
     if (!sel) { log(`  ⚠ [ทะเบียนช่อง] ${f.label} — ไม่มี selector ข้าม`); continue; }
 
+    // 🔒 กันพิมพ์ผิดช่อง: selector หลายอันเป็นเส้นทาง nth-child ยาว ๆ ที่ถอดจากหน้าจอ ณ วันหนึ่ง
+    //    ถ้า DCTK ขยับ layout เส้นทางเดิมจะไปโดน input ตัวอื่นแทน แล้วพิมพ์ทับเงียบ ๆ
+    //    (เจอจริง: ช่องอัตราอากรไปทับ TariffCode/RtcProductCode เป็น "0.00" → DCTK ตอบ
+    //     "ค้นหาข้อมูลไม่พบ (พิกัดศุลกากร)" ทั้งที่ log บอกว่ากรอกพิกัดสำเร็จ)
+    //    ทะเบียนช่องมี dctkName (ชื่อ id/name จริงบนหน้า DCTK) ครบทุกช่อง → ใช้ยืนยันก่อนพิมพ์
+    if (f.dctkName) {
+      const hit = await page.evaluate(
+        ({ s, want }: { s: string; want: string }) => {
+          let el: Element | null = null;
+          try { el = document.querySelector(s); } catch { return "selector ใช้ไม่ได้"; }
+          if (!el) return "ไม่เจอช่อง";
+          const norm = (x: string) => x.replace(/_input$/, "").toLowerCase();
+          const idOf = (e: Element) => (e as HTMLInputElement).id || (e as HTMLInputElement).name || "";
+          if (norm(idOf(el)) === norm(want)) return "ok";
+          // Kendo NumericTextBox/ComboBox: input ที่ "เห็นบนจอ" ไม่มี id — ตัวที่มีชื่อจริงเป็น input ซ่อนข้าง ๆ
+          //   ในกล่อง widget เดียวกัน → ถือว่าถูกช่อง ถ้าเจอ input ชื่อตรงกันในกล่องเดียวกัน
+          const box = el.closest(".k-widget, .k-numerictextbox, .k-numeric-wrap, span");
+          if (box) {
+            for (const sib of Array.from(box.querySelectorAll("input"))) {
+              if (norm(idOf(sib)) === norm(want)) return "ok";
+            }
+          }
+          return `ไปโดน "${idOf(el) || el.tagName}"`;
+        },
+        { s: sel, want: f.dctkName },
+      ).catch(() => "อ่านไม่ได้");
+      if (hit !== "ok") {
+        log(`  ⛔ [ทะเบียนช่อง] ข้าม "${f.label}" — selector ${hit} (ควรเป็น ${f.dctkName}) จึงไม่พิมพ์ กันทับช่องอื่น`);
+        continue;
+      }
+    }
+
     try {
       const text = String(val).trim();
       // ⚠ ช่องเสริมเป็น "ของแถม" — ถ้ากรอกไม่ได้ต้องข้ามเร็ว
@@ -972,6 +1004,47 @@ export async function fillPage2(page: Page, r: Record): Promise<Page> {
 }
 
 /**
+ * อ่านค่า "ที่ DCTK ถืออยู่จริง" ในกลุ่มช่องพิกัด/สินค้า ของฟอร์มรายการ (หน้า 3)
+ *
+ * ⚠ Kendo combo มี 2 ชั้น: input ที่เห็น (text) กับ hidden ที่ส่งไป server (value)
+ *   ถ้า text ถูกแต่ value ว่าง/ไม่ได้เลือกจากรายการ → server ตอบ "ค้นหาข้อมูลไม่พบ"
+ *   ไม่มี dump นี้จะไล่บั๊กไม่ได้เลย เพราะ log เห็นแค่ข้อความ error ลอย ๆ
+ */
+async function dumpTariffWidgets(page: Page): Promise<void> {
+  const widgets = await page.evaluate(() => {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const jq = (window as any).$;
+    const read = (id: string): string => {
+      const el = (document.getElementById(id) ?? document.querySelector(`[name="${id}"]`)) as HTMLInputElement | null;
+      if (!el) return "(ไม่มีช่อง)";
+      const w = jq ? (jq(el).data("kendoComboBox") || jq(el).data("kendoDropDownList") || jq(el).data("kendoAutoComplete")) : null;
+      if (!w) return `(ไม่ใช่ Kendo) value=${el.value}`;
+      let item = "ไม่"; let text = "";
+      try { item = w.dataItem() ? "ใช่" : "ไม่"; } catch { item = "อ่านไม่ได้"; }
+      try { text = String(w.text()); } catch { text = "(อ่านไม่ได้)"; }
+      return `value=${JSON.stringify(String(w.value()))} text=${JSON.stringify(text)} เลือกจากรายการ=${item}`;
+    };
+    // ไล่ทุก input ที่ id/name เกี่ยวกับพิกัด/สินค้า — กันกรณี "selector ที่เราคิดว่าใช่" ไปตรงช่องอื่น
+    const all: string[] = [];
+    document.querySelectorAll<HTMLInputElement>("input, select, textarea").forEach((el) => {
+      const key = `${el.id}|${el.name}`;
+      if (!/Tariff|Statistic|Product|GoodsUnit/i.test(key)) return;
+      const vis = (el as HTMLElement).offsetParent !== null;
+      all.push(`${el.id || "(ไม่มี id)"} name=${el.name || "-"} type=${el.type} เห็นบนจอ=${vis ? "ใช่" : "ไม่"} value=${JSON.stringify((el.value ?? "").slice(0, 30))}`);
+    });
+    return {
+      ประเภทพิกัด: read("ExportTariff_input"),
+      พิกัดศุลกากร: read("TariffCode"),
+      รหัสสถิติ: read("StatisticalCode_input"),
+      ลำดับอัตราอากร: read("TariffSeq_input"),
+      รหัสสินค้า: read("ProductCode_input"),
+      __ทุกช่องที่เกี่ยวข้อง__: all.join("\n        "),
+    };
+  }).catch((err: unknown) => { log(`     ⚠ อ่านค่าช่องไม่ได้: ${String(err).slice(0, 120)}`); return null; });
+  if (widgets) for (const [k, v] of Object.entries(widgets)) log(`     🔬 ${k}: ${v}`);
+}
+
+/**
  * เช็คว่ามี modal แจ้งเตือนเด้งไหม (ไม่ใช่ทุกลูกค้า) — ถ้ามีกด Yes
  * รอแบบ optional: ถ้าไม่เด้งภายในเวลาสั้นๆ ก็ผ่านไป ไม่ throw
  */
@@ -996,7 +1069,17 @@ async function dismissAlertIfPresent(page: Page): Promise<void> {
       await yesBtn.click({ timeout: 3000 });
       log("  ✓ กดยืนยัน modal (Yes ด้วย text)");
     } catch (e) {
+      // ⚠ ไม่รู้ว่า modal พูดอะไร = ไล่บั๊กไม่ได้ → dump ข้อความ + ปุ่มที่มีจริง
+      const what = await page.evaluate(() => {
+        const m = document.querySelector(".modal.in, .modal.show, #myModalAlert") as HTMLElement | null;
+        if (!m) return null;
+        const btns = Array.from(m.querySelectorAll("button, a.btn, input[type=button]"))
+          .map((b) => (b as HTMLElement).innerText?.trim() || (b as HTMLInputElement).value || "")
+          .filter(Boolean);
+        return { text: (m.innerText || "").replace(/\s+/g, " ").trim().slice(0, 180), btns };
+      }).catch(() => null);
       log(`  ⚠ พบ modal แต่กด Yes ไม่สำเร็จ: ${e instanceof Error ? e.message : String(e)}`);
+      if (what) log(`     🔬 modal ว่า: "${what.text}" · ปุ่มที่มี: ${what.btns.join(" / ") || "(ไม่มีปุ่ม)"}`);
       return;
     }
   }
@@ -1025,9 +1108,31 @@ async function fillOneGoodsItem(
     await comboPickStrict(page, S.SEL_DESC_INPUT, descVal, "รหัสสินค้า");
     // หลังเลือกรหัสสินค้า DCTK auto-fill พิกัด/หน่วย (ใช้เวลา โดยเฉพาะบน VM ที่ช้า)
     //   → ปิด dropdown ที่อาจค้าง + รอ DCTK เติมเสร็จ + รอช่องน้ำหนักพร้อม ก่อนกรอก (กันค้าง/timeout ยาว)
+    // ⚠ Escape กับ Kendo ComboBox = "ยกเลิกการเลือก" → ช่องรหัสสินค้ากลับไปว่าง
+    //   ย้ายโฟกัสออกด้วย blur ก่อน แล้วค่อย Escape ปิด dropdown ที่ค้าง (ตอนนั้นไม่มีอะไรให้ยกเลิกแล้ว)
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur()).catch(() => { /* */ });
+    await sleep(300);
     await page.keyboard.press("Escape").catch(() => { /* */ });
     await page.waitForLoadState("networkidle", { timeout: 12000 }).catch(() => { /* */ });
     await sleep(1500);
+    // ตรวจซ้ำว่ารหัสสินค้ายังอยู่ — ถ้าหาย DCTK จะไม่เติมพิกัดให้ แล้วไปพังตอนบันทึกแบบไล่เหตุไม่เจอ
+    const descNow = await page.evaluate((sel: string) => {
+      const el = document.querySelector(sel) as HTMLInputElement | null;
+      return (el?.value ?? "").trim();
+    }, S.SEL_DESC_INPUT).catch(() => "");
+    if (!descNow) {
+      log(`  ↻ รหัสสินค้าหายหลังปิด dropdown — เลือกใหม่อีกครั้ง`);
+      await comboPickStrict(page, S.SEL_DESC_INPUT, descVal, "รหัสสินค้า");
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur()).catch(() => { /* */ });
+      await page.waitForLoadState("networkidle", { timeout: 12000 }).catch(() => { /* */ });
+      await sleep(1500);
+      const again = await page.evaluate((sel: string) => {
+        const el = document.querySelector(sel) as HTMLInputElement | null;
+        return (el?.value ?? "").trim();
+      }, S.SEL_DESC_INPUT).catch(() => "");
+      if (!again) throw new Error(`รหัสสินค้า: เลือก "${descVal}" แล้วค่าไม่ติดในช่อง (DCTK ไม่รับ) — ตรวจ master สินค้าของลูกค้ารายนี้`);
+    }
+    log(`  ✓ รหัสสินค้าในช่อง = "${descNow || descVal}"`);
     // รอช่องน้ำหนัก (SEL_NET_TON_1) ปรากฏ + พร้อมกรอก ก่อนไปต่อ (poll ~16s แทนรอ default 30s/ช่อง)
     await page.waitForSelector(S.SEL_NET_TON_1, { state: "visible", timeout: 16000 }).catch(() => {
       log("  ⚠ ช่องน้ำหนัก (Page 3) ยังไม่ขึ้นหลังเลือกสินค้า — ลองกรอกต่อ");
@@ -1301,6 +1406,7 @@ export async function fillPage3(page: Page, r: Record): Promise<void> {
           });
           if (errs.length) log(`  🛑 Page 3 ยังไม่ปิด — error บนหน้า: ${JSON.stringify(errs)}`);
           else log(`  ℹ Page 3 ยังไม่ปิด แต่ไม่เจอข้อความ error (อาจกำลัง submit ช้า)`);
+          await dumpTariffWidgets(page);
         } catch { /* */ }
       }
     } else {
@@ -1311,6 +1417,11 @@ export async function fillPage3(page: Page, r: Record): Promise<void> {
         continue;
       }
       await captureIfRequested(page, r, `page3_item${i + 1}`);
+      // ตรวจสภาพช่องพิกัดก่อนกดบันทึก (เปิดด้วย RPA_DUMP_TARIFF=1) — เห็นปัญหาตั้งแต่รายการแรก
+      if (process.env.RPA_DUMP_TARIFF && i === 0) {
+        log(`  🔎 สภาพช่องพิกัดก่อนกดบันทึก (รายการ 1):`);
+        await dumpTariffWidgets(page);
+      }
       await page.click(S.SEL_BTN_SAVE_AND_ADD);
       await sleep(2000);
       await dismissAlertIfPresent(page); // บางลูกค้าเด้ง modal หลังบันทึก
@@ -1319,13 +1430,30 @@ export async function fillPage3(page: Page, r: Record): Promise<void> {
       //   อาการเดิม: รายการ 2+ ค้นรหัสสินค้าเจอ master ผิด (เช่น "LIFT") เพราะ dropdown ยังไม่ refresh
       //   → รอช่องรหัสสินค้าว่าง (ฟอร์มใหม่เคลียร์แล้ว) + networkidle ก่อนกรอกรายการถัดไป
       try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch { /* */ }
+      let cleared = false;
       for (let w = 0; w < 12; w++) { // ~24s
         const ready = await page.evaluate((sel: string) => {
           const el = document.querySelector(sel) as HTMLInputElement | null;
           return !!el && (el.offsetParent !== null) && (el.value ?? "").trim() === "";
         }, S.SEL_DESC_INPUT).catch(() => false);
-        if (ready) break;
+        if (ready) { cleared = true; break; }
         await sleep(2000);
+      }
+      // ⚠ ฟอร์มไม่เคลียร์ = "บันทึกและเพิ่มใหม่" ไม่ผ่าน — ต้องหยุด ไม่ใช่กรอกทับรายการเดิมต่อ
+      //   ของเดิมเงียบตรงนี้: วนกรอกทับฟอร์มเดิมจนครบ แล้วค่อยพังตอนรายการสุดท้าย
+      //   ทำให้อ่าน log แล้วนึกว่า "รายการ 1-4 ผ่าน เหลือรายการ 5 พัง" ทั้งที่ไม่มีรายการไหนถูกบันทึกเลย
+      if (!cleared) {
+        const errs = await page.evaluate(() => {
+          const txt: string[] = [];
+          document.querySelectorAll(".validation-summary-errors, .field-validation-error, .text-danger, [class*='error']:not(:empty)")
+            .forEach((e) => { const t = (e as HTMLElement).innerText?.trim(); if (t && t.length < 200) txt.push(t); });
+          return [...new Set(txt)].slice(0, 6);
+        }).catch(() => [] as string[]);
+        const why = errs.length ? errs.join(" | ") : "ไม่พบข้อความ error บนหน้า";
+        log(`  🛑 รายการ ${i + 1}/${items.length}: กด "บันทึกและเพิ่มใหม่" แล้วฟอร์มไม่เคลียร์ = บันทึกไม่ผ่าน`);
+        log(`     เหตุผลจาก DCTK: ${why}`);
+        await dumpTariffWidgets(page);
+        throw new Error(`บันทึกรายการที่ ${i + 1} ไม่ผ่าน — ${why}`);
       }
       await sleep(500);
     }

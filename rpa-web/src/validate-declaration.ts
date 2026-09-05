@@ -80,6 +80,14 @@ export function validateDeclaration(decl: Decl): ValidationResult {
     if (num(it.gross_weight_kg) <= 0) {
       add("error", "gross_weight_kg", `รายการที่ ${line}: ขาด/เป็น 0 'น้ำหนักรวม' — DCTK บังคับ > 0`, line);
     }
+    // DCTK บังคับน้ำหนักสุทธิ > 0 ทุกรายการ — รวมถึงของแถม/ตัวอย่าง
+    //   (DCTK ตอบว่า "ข้อมูลนี้ต้องมีค่ามากกว่าค่าต่ำสุด (0)" แล้วบันทึกรายการนั้นไม่ผ่าน)
+    //   เจอจริงกับแถวตัวอย่างที่สกัดน้ำหนักสุทธิไม่ติด ทั้งที่ Packing List มีค่าอยู่
+    if (num(it.net_weight_kg) <= 0) {
+      add("error", "net_weight_kg", `รายการที่ ${line}: ขาด/เป็น 0 'น้ำหนักสุทธิ' — DCTK บังคับ > 0 ทุกรายการ (รวมของแถม/ตัวอย่าง) ดูค่าจาก Packing List`, line);
+    } else if (num(it.gross_weight_kg) > 0 && num(it.net_weight_kg) > num(it.gross_weight_kg)) {
+      add("warn", "net_weight_kg", `รายการที่ ${line}: 'น้ำหนักสุทธิ' มากกว่า 'น้ำหนักรวม' — น่าจะสลับคอลัมน์กัน`, line);
+    }
     if (isEmpty(it.customs_unit_code)) {
       add("error", "customs_unit_code", `รายการที่ ${line}: ขาด 'หน่วยปริมาณในใบขน' (customs_unit_code)`, line);
     }

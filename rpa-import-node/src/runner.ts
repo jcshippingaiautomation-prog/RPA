@@ -996,11 +996,32 @@ async function runBrowser(
       //   แล้วพังตามกันหมดทั้งชุด (เจอจริง: ใบแรกพัง อีก 3 ใบพังด้วย page.click timeout)
       try {
         for (const extra of context.pages()) if (extra !== page) await extra.close().catch(() => { /* */ });
-        await page.goto(`${new URL(cfg.url!).origin}/DCTK/ExDec/Index`, {
-          waitUntil: "domcontentloaded", timeout: 45000,
-        });
-        await sleep(3000);
-        log(`  ↩ กลับหน้ารายการใบขนแล้ว — ทำใบถัดไปต่อได้`);
+        // ⚠ ต้องกลับไป "หน้าแรก (portfolio)" ไม่ใช่หน้ารายการใบขน
+        //   เพราะใบถัดไปเริ่มด้วยการคลิกไอคอนใน #portfolio ซึ่งมีเฉพาะหน้าแรก
+        //   ของเดิม goto /DCTK/ExDec/Index แล้ว log ว่า "กู้สถานะแล้ว" ทั้งที่ยังหาไอคอนไม่เจอ
+        //   → ใบที่เหลือพัง page.click timeout ตามกันหมด
+        const origin = new URL(cfg.url!).origin;
+        let backHome = false;
+        for (const url of [`${origin}/DCTK/`, `${origin}/DCTK/Home/Index`, cfg.url!]) {
+          try {
+            await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+            await page.waitForSelector(S.SEL_PORTFOLIO_MENU, { state: "visible", timeout: 15000 });
+            backHome = true;
+            break;
+          } catch { /* ลอง url ถัดไป */ }
+        }
+        if (!backHome) {
+          // เซสชันอาจหลุด — login ใหม่แล้วเช็คอีกครั้ง
+          try {
+            await page.goto(cfg.url!, { waitUntil: "domcontentloaded", timeout: 45000 });
+            await login(page, cfg.username, cfg.password);
+            backHome = await page.locator(S.SEL_PORTFOLIO_MENU).first().isVisible().catch(() => false);
+          } catch { /* */ }
+        }
+        await sleep(2000);
+        log(backHome
+          ? `  ↩ กลับหน้าแรกแล้ว — ทำใบถัดไปต่อได้`
+          : `  ⚠ กู้สถานะไม่สำเร็จ (ยังไม่เจอหน้าแรกของ DCTK) — ใบถัดไปอาจพังตาม`);
       } catch (e) {
         log(`  ⚠ กู้สถานะไม่สำเร็จ: ${e instanceof Error ? e.message.slice(0, 70) : ""}`);
       }
