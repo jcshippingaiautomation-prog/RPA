@@ -18,7 +18,7 @@
     "express": "^4.21.2",
     "node-cron": "^3.0.3",
     "rpa-import-node": "file:../rpa-import-node",
-    "xlsx": "^0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
