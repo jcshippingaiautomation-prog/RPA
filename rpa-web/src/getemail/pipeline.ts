@@ -3,6 +3,7 @@
 //  processInbox → ทุก message: allowlist → AI classify → lookup →
 //  extract → postProcess → insert declarations (+ items) → label dedup
 // ============================================================
+import { dateFactsBlock } from "./sheet-dates.js";
 import { config } from "../config.js";
 import {
   supabaseEnabled,
@@ -59,6 +60,12 @@ export async function extractFromAttachments(
   const files = await prepareFilesForAI(attachments, log);
   if (!files.length) throw new Error("ไม่มีไฟล์ที่ AI อ่านได้");
 
+  // อ่านวันที่จากไฟล์ Excel ด้วยโค้ดก่อน แล้วบอก AI ไปเลย
+  //   ลูกค้าเขียนวันที่หลายรูปแบบปนกัน (เลขลำดับวันของ Excel / วัน-เดือน / เดือน-วัน)
+  //   ปล่อยให้ AI เดา ได้ผลไม่คงที่ — ไฟล์เดิมอัปซ้ำได้คนละวัน
+  const dateFacts = dateFactsBlock(attachments.map((a) => ({ filename: a.filename, bytes: a.bytes })));
+  if (dateFacts) log("อ่านวันที่จากไฟล์ Excel ให้ AI แล้ว");
+
   // ลูกค้า: ใช้ที่ user เลือก (ถ้ามี) ไม่งั้นให้ AI classify
   let keyword = (customerHint || "").trim();
   if (keyword) {
@@ -76,7 +83,7 @@ export async function extractFromAttachments(
     : (keyword ? { Customer_Name: keyword, Extraction_Rules: "" } : null);
 
   // รอบ 1: สกัดด้วยกฎ default ของลูกค้า
-  const raw = await extractDeclaration(files, rule, "");
+  const raw = await extractDeclaration(files, rule, "", dateFacts);
   let record = postProcess(raw);
   if (record._has_error) throw new Error("AI สกัดข้อมูลไม่สำเร็จ (parse ล้มเหลว)");
 

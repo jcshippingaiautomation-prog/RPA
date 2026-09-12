@@ -42,6 +42,7 @@ export async function extractDeclaration(
   files: InlineFile[],
   preloadedRule: unknown,
   emailBody: string,
+  dateFacts = "",
 ): Promise<string> {
   let intro = "นี่คือเอกสารแนบจากอีเมล โปรดสกัดข้อมูลใบขนสินค้าตาม Schema";
   if (preloadedRule) {
@@ -52,6 +53,9 @@ export async function extractDeclaration(
       "\n\n[เนื้อหาอีเมล (email body) — ใช้หาข้อมูลที่ไม่อยู่ในไฟล์แนบ เช่น ค่าระวาง/Freight/O.F]\n" +
       emailBody.slice(0, 4000);
   }
+
+  // วันที่ที่ระบบแปลงมาให้แล้ว — วางท้ายสุดเพื่อให้มีน้ำหนักกว่ากฎอื่น
+  if (dateFacts) intro += "\n\n" + dateFacts;
 
   const contents: GeminiContent[] = [
     { role: "user", parts: [{ text: intro }, ...fileParts(files)] as GeminiPart[] },
