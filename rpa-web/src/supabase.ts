@@ -593,6 +593,62 @@ function reconcilePackageCount(record: Record<string, unknown> & { _items?: Reco
   console.log(`[กระทบยอด] จำนวนหีบห่อ: หัวใบ ${head} · รวมรายการ ${sum} — เติม ${gap} กล่องให้รายการของแถม "${String(target.description_eng_field ?? target.description_eng ?? "").slice(0, 40)}"`);
 }
 
+/**
+ * เลือกแถวใน Master ที่ "เป็นสินค้าตัวเดียวกัน" กับรายการจากเอกสาร
+ *
+ * ใช้คำที่ใช้ร่วมกันเป็นเกณฑ์ เพราะชื่อในเอกสารกับในคลัง DCTK เขียนไม่เหมือนกัน
+ * และแถวตัวอย่าง (SAMPLE) ของบางผู้รับมีรหัสสินค้าแยกต่างหาก
+ * ถ้าไม่มีแถวไหนใกล้พอ ใช้แถวแรกเป็นต้นแบบ (เป็นสินค้าหลักของผู้รับรายนั้น)
+ */
+function pickMasterItem(
+  aiItem: Record<string, unknown>,
+  tplItems: Record<string, unknown>[],
+): Record<string, unknown> {
+  if (!tplItems.length) return {};
+  if (tplItems.length === 1) return tplItems[0];
+  const words = (v: unknown) =>
+    new Set(String(v ?? "").toUpperCase().replace(/[^A-Z0-9ก-๙ ]/g, " ").split(/\s+/).filter((w) => w.length >= 2));
+  const need = new Set<string>();
+  for (const k of ["description_eng_field", "description_eng", "product_description_eng"]) {
+    for (const w of words(aiItem[k])) need.add(w);
+  }
+  if (!need.size) return tplItems[0];
+  let best = tplItems[0], bestScore = 0;
+  for (const t of tplItems) {
+    const have = new Set<string>();
+    for (const k of ["product_description_eng", "product_code"]) for (const w of words(t[k])) have.add(w);
+    if (!have.size) continue;
+    let hit = 0;
+    for (const w of have) if (need.has(w)) hit++;
+    const score = hit / Math.min(have.size, need.size);
+    if (score > bestScore) { bestScore = score; best = t; }
+  }
+  return bestScore >= 0.5 ? best : tplItems[0];
+}
+
+/**
+ * จัดข้อความ/รหัสระดับรายการให้ตรงกับที่กรมฯ ต้องการ — คำนวณเอง ไม่พึ่ง Master
+ *
+ * 1) รายการของแถม (nature_trans): 21 ถ้าเป็นของแถม · 11 ถ้าไม่ใช่
+ *    เดิมเอามาจาก Master ตามลำดับแถว ซึ่งผิดทันทีที่เอกสารใหม่มีจำนวนรายการไม่เท่าเดิม
+ * 2) คำอธิบายสินค้าภาษาอังกฤษ: ใบขนจริงเขียน "รหัสสินค้า" ขึ้นบรรทัดแรก
+ *    แล้วต่อด้วยถ้อยคำจากใบกำกับ (ดูใบที่ยื่นจริง CTN2649)
+ *    ถ้าขาดบรรทัดแรกไป ใบขนจะไม่ตรงกับที่เจ้าหน้าที่ทำมือ
+ */
+function normalizeItemText(record: Record<string, unknown> & { _items?: Record<string, unknown>[] }): void {
+  for (const it of record._items ?? []) {
+    const extra = (it.extra_fields ?? {}) as Record<string, unknown>;
+    extra.nature_trans = it.is_foc === true ? "21" : "11";
+    it.extra_fields = extra;
+
+    const code = String(it.description_eng ?? "").trim();
+    const desc = String(it.description_eng_field ?? "").trim();
+    if (code && desc && !desc.toUpperCase().startsWith(code.toUpperCase())) {
+      it.description_eng_field = `${code}\n${desc}`;
+    }
+  }
+}
+
 export async function createDeclaration(
   record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
   opts: {
@@ -650,6 +706,7 @@ export async function createDeclaration(
     //   (ยืนยันกับใบขนที่ยื่นกรมฯ จริง CTN2648: แถวตัวอย่างแถวแรก = 1 กล่อง)
     //   → เติมส่วนต่างคืนให้แถวของแถมแถวแรกที่เป็น 0 เมื่อส่วนต่างเล็กเท่านั้น
     reconcilePackageCount(record);
+    normalizeItemText(record);
 
     const payload: Record<string, unknown> = {};
     for (const col of DECL_COLUMNS) if (record[col] !== undefined) payload[col] = record[col] ?? null;
@@ -999,10 +1056,12 @@ export async function applyMasterToRecord(
   } else if (tplItems.length) {
     const aiItems = record._items as Record<string, unknown>[];
     out._items = await Promise.all(aiItems.map(async (aiIt, i) => {
-      // ชิปเมนต์ใหม่มีรายการมากกว่าที่ Master เก็บไว้ → ใช้ "แถวแรก" เป็นต้นแบบ ไม่ใช่แถวสุดท้าย
-      //   แถวสุดท้ายของ Master มักเป็นแถวตัวอย่าง/ของแถม (หน่วย LTR · หีบห่อ 0)
-      //   ถ้าเอามาเป็นต้นแบบให้สินค้าจริง จะได้หน่วยผิดและจำนวนหีบห่อเป็น 0
-      const raw = tplItems[i] ?? tplItems[0] ?? {};
+      // จับคู่แถวใน Master ด้วย "ชื่อสินค้า" ไม่ใช่ "ลำดับที่"
+      //   ชิปเมนต์แต่ละครั้งมีสินค้าไม่เหมือนกันและไม่เรียงเหมือนกัน
+      //   (เจอจริง CTN2649: เอกสารมี น้ำมะพร้าว → ครีมสมูทตี้ → ตัวอย่าง
+      //    แต่ Master เรียง น้ำมะพร้าว250 → น้ำมะพร้าว500 → ครีม → ตัวอย่าง ×2
+      //    จับคู่ตามลำดับแล้วได้ชื่อสินค้าของแถวอื่นมาทับ ผิดทั้งใบ)
+      const raw = pickMasterItem(aiIt, tplItems);
       // ระดับรายการเอาเฉพาะช่องโหมด "ใช้ค่า Master" เท่านั้น — ไม่เติมช่องว่างจาก Master
       //   เพราะช่องที่ว่างในรายการมักเป็นยอดเงิน/ปริมาณของชิปเมนต์นั้น
       //   ถ้าเอาค่าเก่ามาเติม จะได้ยอดที่ไม่ตรงกับหัวใบ แล้ว DCTK ตีกลับตอนกระทบยอด
