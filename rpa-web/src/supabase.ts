@@ -639,6 +639,16 @@ function normalizeItemText(record: Record<string, unknown> & { _items?: Record<s
   for (const it of record._items ?? []) {
     const extra = (it.extra_fields ?? {}) as Record<string, unknown>;
     extra.nature_trans = it.is_foc === true ? "21" : "11";
+
+    // ช่อง "ปริมาณ" ใช้เฉพาะหน่วยที่ไม่ใช่น้ำหนัก/ปริมาตร (MTK ตารางเมตร · C62 ชิ้น)
+    //   ถ้าหน่วยเป็น KGM/TNE/LTR ตัวเลขก็คือน้ำหนักสุทธินั่นเอง เก็บซ้ำจะทำให้
+    //   ยอดหัวใบ (เก็บเป็นตัน) กับผลรวมรายการ (เป็นกิโล) ขัดกันเอง แล้วขึ้นเตือนผิด ๆ
+    const cu = String(it.customs_unit_code ?? "").trim().toUpperCase();
+    if (["TNE", "TON", "TO", "MT", "KGM", "KG", "LTR", "L"].includes(cu)) {
+      delete extra.quantity;
+      delete it.quantity;
+    }
+
     it.extra_fields = extra;
 
     const code = String(it.description_eng ?? "").trim();
@@ -662,6 +672,40 @@ function normalizeItemText(record: Record<string, unknown> & { _items?: Record<s
       const body = thai.split("\n").filter((l) => !/^[A-Z]{2,}-\d/i.test(l.trim())).join("\n").trim();
       it.product_description_thai = body ? `${partNo}\n${body}` : partNo;
     }
+  }
+}
+
+/**
+ * จัดน้ำหนักรายรายการและยอดรวมหัวใบให้สอดคล้องกัน
+ *
+ * ใบแนบของลูกค้าบางรายมี "น้ำหนักรวมหีบห่อ" เฉพาะยอดรวมท้ายตาราง ไม่มีรายแถว
+ * ใบขนที่เจ้าหน้าที่ทำจริงจะใส่น้ำหนักสุทธิลงทั้งสองช่องของแถวนั้น
+ * แล้วยอดหัวใบก็เท่ากับผลรวมรายแถว (ดูใบจริง DCTK000035584: 696+175.5 = 871.5 ทั้งสุทธิและรวม)
+ * ถ้าไม่ทำ กรมฯ จะตีกลับตอนกระทบยอด "ส่วนควบคุม vs ส่วนรายละเอียด"
+ */
+function reconcileWeights(record: Record<string, unknown> & { _items?: Record<string, unknown>[] }): void {
+  const items = record._items ?? [];
+  if (!items.length) return;
+  const n = (v: unknown) => {
+    const x = Number(String(v ?? "").replace(/,/g, ""));
+    return Number.isFinite(x) ? x : 0;
+  };
+  // 1) แถวไหนไม่มีน้ำหนักรวม → ใช้น้ำหนักสุทธิของแถวนั้น (เอกสารให้มาแค่นั้น)
+  for (const it of items) {
+    if (n(it.gross_weight_kg) <= 0 && n(it.net_weight_kg) > 0) {
+      it.gross_weight_kg = n(it.net_weight_kg);
+      console.log(`[น้ำหนัก] รายการ "${String(it.description_eng_field ?? it.description_eng ?? "").slice(0, 34)}" ไม่มีน้ำหนักรวมในเอกสาร → ใช้น้ำหนักสุทธิ ${it.gross_weight_kg}`);
+    }
+  }
+  // 2) ยอดหัวใบต้องเท่ากับผลรวมรายแถว (กรมฯ เทียบสองยอดนี้)
+  for (const [col, label] of [["net_weight_kg", "น้ำหนักสุทธิ"], ["gross_weight_kg", "น้ำหนักรวม"]] as const) {
+    const sum = items.reduce((a, it) => a + n(it[col]), 0);
+    if (sum <= 0) continue;
+    const head = n(record[col]);
+    if (Math.abs(sum - head) < Math.max(0.02, sum * 0.0005)) continue;
+    console.log(`[กระทบยอด] ${label}: หัวใบ ${head.toLocaleString()} → ใช้ผลรวมรายการ ${sum.toLocaleString()}`);
+    record[col] = Number(sum.toFixed(3));
+    if (col === "net_weight_kg") record.net_weight_ton = Number((sum / 1000).toFixed(3));
   }
 }
 
@@ -722,6 +766,7 @@ export async function createDeclaration(
     //   (ยืนยันกับใบขนที่ยื่นกรมฯ จริง CTN2648: แถวตัวอย่างแถวแรก = 1 กล่อง)
     //   → เติมส่วนต่างคืนให้แถวของแถมแถวแรกที่เป็น 0 เมื่อส่วนต่างเล็กเท่านั้น
     reconcilePackageCount(record);
+    reconcileWeights(record);
     normalizeItemText(record);
 
     const payload: Record<string, unknown> = {};
