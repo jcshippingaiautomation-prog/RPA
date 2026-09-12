@@ -38,8 +38,11 @@ if ($before -and $remote -and ($before -ne $remote)) {
   } else {
     Log "new code $before -> $remote : updating"
     git reset --hard origin/main 2>&1 | Out-Null
-    Push-Location (Join-Path $repo "rpa-import-node"); npx tsc 2>&1 | Out-Null; Pop-Location
-    Push-Location (Join-Path $repo "rpa-worker");      npx tsc 2>&1 | Out-Null; Pop-Location
+    # Use the package build script, not bare tsc: it also copies src/data/*.json into dist/data.
+    # Bare `npx tsc` leaves dist/data stale, so the worker keeps running an OLD field registry
+    # even though git pull brought the new one. (Bug found 2026-09-12.)
+    Push-Location (Join-Path $repo "rpa-import-node"); npm run build 2>&1 | Out-Null; Pop-Location
+    Push-Location (Join-Path $repo "rpa-worker");      npm run build 2>&1 | Out-Null; Pop-Location
     pm2 restart rpa-worker 2>&1 | Out-Null
     Log "updated + restarted -> $remote"
   }

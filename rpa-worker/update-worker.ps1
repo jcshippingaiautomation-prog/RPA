@@ -8,9 +8,9 @@ Write-Host "[1/4] git pull..." -ForegroundColor Cyan
 Set-Location $REPO
 git pull
 Write-Host "[2/4] build rpa-import-node..." -ForegroundColor Cyan
-Set-Location (Join-Path $REPO "rpa-import-node"); npx tsc
+Set-Location (Join-Path $REPO "rpa-import-node"); npm run build   # tsc + copy src/data/*.json -> dist/data
 Write-Host "[3/4] build rpa-worker..." -ForegroundColor Cyan
-Set-Location (Join-Path $REPO "rpa-worker"); npx tsc
+Set-Location (Join-Path $REPO "rpa-worker"); npm run build
 Write-Host "[4/4] restart worker (pm2)..." -ForegroundColor Cyan
 pm2 restart rpa-worker
 Start-Sleep -Seconds 2
