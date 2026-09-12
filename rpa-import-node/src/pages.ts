@@ -472,7 +472,14 @@ export async function goHome(
   const origin = new URL(page.url() || cred?.url || "http://localhost").origin;
   const seen = await page.locator(S.SEL_PORTFOLIO_MENU).first().isVisible().catch(() => false);
   if (seen) return true;
-  const candidates = [`${origin}/DCTK/`, `${origin}/DCTK/Home/Index`, `${origin}/DCTK/Account/Login`];
+  // ⚠ หน้าแรกจริงของ DCTK คือ /DCTK/Home/MenuBlogList (ดูจาก url หลัง login)
+  //   ถ้าไล่แต่ /DCTK/ กับ /DCTK/Home/Index จะไม่เจอไอคอน portfolio แล้วกู้สถานะไม่สำเร็จ
+  const candidates = [
+    `${origin}/DCTK/Home/MenuBlogList`,
+    `${origin}/DCTK/`,
+    `${origin}/DCTK/Home/Index`,
+    `${origin}/DCTK/Account/Login`,
+  ];
   if (cred?.url) candidates.push(cred.url);
   for (const url of candidates) {
     try {
@@ -497,7 +504,10 @@ export async function openPortfolioAndAdd(page: Page): Promise<void> {
   // ⚠ ใบก่อนหน้าอาจทิ้งเบราว์เซอร์ไว้กลางฟอร์ม (เช่นโหมดทดสอบที่ไม่ finalize จะค้างที่หน้า 2)
   //   ถ้าไม่พากลับหน้าแรกก่อน จะหาไอคอน portfolio ไม่เจอแล้วใบนี้พังทั้งที่ข้อมูลไม่มีปัญหา
   //   เช็คก่อน ถ้าอยู่หน้าแรกอยู่แล้วก็ไม่ต้องโหลดใหม่ (ประหยัดเวลา)
-  const atHome = await page.locator(S.SEL_PORTFOLIO_MENU).first().isVisible().catch(() => false);
+  // รอไอคอนสักครู่ก่อนตัดสินว่า "ไม่ได้อยู่หน้าแรก"
+  //   DCTK ช้าเป็นพัก ๆ ถ้าเช็คทันทีแล้วเด้งไปโหลดหน้าใหม่ จะช้ากว่าเดิมและเสี่ยงหลุดเซสชัน
+  const atHome = await page.locator(S.SEL_PORTFOLIO_MENU).first()
+    .waitFor({ state: "visible", timeout: 8000 }).then(() => true).catch(() => false);
   if (!atHome) {
     log("  ↩ ไม่ได้อยู่หน้าแรก — กลับหน้าแรกก่อน");
     if (!(await goHome(page))) {
@@ -1233,8 +1243,16 @@ async function fillOneGoodsItem(
       }
       return netTon;
     }
+    // หน่วยที่ไม่ใช่น้ำหนัก/ปริมาตร (MTK ตารางเมตร · C62 ชิ้น · PCS …)
+    //   ต้องใช้ "ปริมาณที่ระบุในใบกำกับ" ตรง ๆ จะคำนวณจากน้ำหนักไม่ได้
+    //   (ลูกค้าแผงวงจรพิมพ์คิดเป็นตารางเมตร: 90.246 MTK ไม่เกี่ยวกับน้ำหนัก 696 กก.)
+    const invQty = numOf(item.quantity ?? item.inv_quantity);
+    if (invQty > 0 && !["TNE", "TON", "TO", "MT", "KGM", "KG", "LTR", "L"].includes(u) && u !== packUnit) {
+      log(`  📐 ปริมาณ${label}: หน่วย ${u} → ใช้ค่าจากใบกำกับ ${invQty.toLocaleString()}`);
+      return String(invQty);
+    }
     // หน่วยหีบห่อ (BX/CS/CT/…) — ใช้จำนวนหีบห่อ เฉพาะเมื่อหน่วยตรงกับหน่วยหีบห่อจริง
-    //   ไม่เดาเมื่อหน่วยแปลก (เช่น C62 ของไข่) → คงพฤติกรรมเดิมไว้
+    //   ไม่เดาเมื่อหน่วยแปลก → คงพฤติกรรมเดิมไว้
     if (packQty > 0 && u === packUnit) {
       log(`  📐 ปริมาณ${label}: หน่วย ${u} → ใช้จำนวนหีบห่อ ${packQty.toLocaleString()}`);
       return String(packQty);

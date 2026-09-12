@@ -102,6 +102,11 @@ export function postProcess(rawText: string): DeclarationRecord {
       insurance: toNumber(it.insurance),                                          // ค่าประกันต่อรายการ
       export_tariff: toStr(it.export_tariff),
       customs_unit_code: toStr(it.customs_unit_code),
+      // ปริมาณตามหน่วยที่ใบกำกับใช้จริง (MTK/C62/PCS) — คนละเรื่องกับน้ำหนัก
+      //   และรหัสสินค้าของลูกค้าเอง (Part No) ที่เปลี่ยนทุกรายการ
+      //   สองช่องนี้ยังไม่มีคอลัมน์ของตัวเอง จะถูกเก็บลง extra_fields ตอนบันทึก
+      quantity: toStr(it.quantity),
+      customs_product_code: toStr(it.customs_product_code),
       is_foc: !!it.is_foc,
     };
     // ถ้า item ไม่มีพิกัด ใช้พิกัดระดับบนเป็น fallback

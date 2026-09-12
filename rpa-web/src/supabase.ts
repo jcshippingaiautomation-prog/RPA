@@ -646,6 +646,22 @@ function normalizeItemText(record: Record<string, unknown> & { _items?: Record<s
     if (code && desc && !desc.toUpperCase().startsWith(code.toUpperCase())) {
       it.description_eng_field = `${code}\n${desc}`;
     }
+
+    // 3) คำอธิบายภาษาไทย: ลูกค้าบางรายต้องขึ้นต้นด้วยรหัสสินค้าของตัวเอง (Part No) ของรายการนั้น
+    //    แล้วตามด้วยชื่อสินค้าภาษาไทย — Part No เปลี่ยนทุกรายการ จะเก็บไว้ใน Master ไม่ได้
+    //    (ลูกค้าแผงวงจรพิมพ์: "PCB-20260407-016" ขึ้นบรรทัดแรก แล้วต่อด้วย "แผงวงจรพิมพ์")
+    // Part No อาจอยู่ได้ 2 ที่: ระดับบนของ item (ตอน AI เพิ่งสกัดมา) หรือใน extra_fields (หลังบันทึกแล้ว)
+    const partNo = String(
+      it.customs_product_code
+      ?? ((it.extra_fields ?? {}) as Record<string, unknown>).customs_product_code
+      ?? "",
+    ).trim();
+    const thai = String(it.product_description_thai ?? "").trim();
+    if (partNo && thai) {
+      // ตัดบรรทัด Part No เดิมที่ติดมากับ Master ออกก่อน (เป็นของชิปเมนต์เก่า)
+      const body = thai.split("\n").filter((l) => !/^[A-Z]{2,}-\d/i.test(l.trim())).join("\n").trim();
+      it.product_description_thai = body ? `${partNo}\n${body}` : partNo;
+    }
   }
 }
 

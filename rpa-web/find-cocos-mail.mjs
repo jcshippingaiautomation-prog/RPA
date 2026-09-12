@@ -69,7 +69,9 @@ for (const id of ids) {
 
   if (SAVE_DIR) {
     for (const a of atts) {
-      if (!/\.(xls[xm]?|pdf|csv|docx?)$/i.test(a.filename)) continue;
+      // นามสกุลที่จะโหลด — ปรับได้ด้วย MAIL_EXT (เช่น "zip" เพื่อเอาชุดเอกสารที่บีบอัดมา)
+      const extRe = new RegExp(`\\.(${process.env.MAIL_EXT || "xls[xm]?|pdf|csv|docx?"})$`, "i");
+      if (!extRe.test(a.filename)) continue;
       const d = await GET(`/messages/${id}/attachments/${a.attachmentId}`);
       const buf = Buffer.from(String(d.data).replace(/-/g, "+").replace(/_/g, "/"), "base64");
       const safe = a.filename.replace(/[/\\]/g, "_");

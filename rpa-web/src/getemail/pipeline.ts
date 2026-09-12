@@ -84,6 +84,12 @@ export async function extractFromAttachments(
 
   // รอบ 1: สกัดด้วยกฎ default ของลูกค้า
   const raw = await extractDeclaration(files, rule, "", dateFacts);
+  // เก็บคำตอบดิบไว้ดูเวลาไล่บั๊ก (เปิดด้วย AI_DEBUG=1) — ช่วยแยกว่า "AI อ่านผิด" หรือ "เราแปลงผิด"
+  if (process.env.AI_DEBUG) {
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(process.env.AI_DEBUG, String(raw), "utf-8").catch(() => {});
+    log(`เก็บคำตอบดิบของ AI ไว้ที่ ${process.env.AI_DEBUG}`);
+  }
   let record = postProcess(raw);
   if (record._has_error) throw new Error("AI สกัดข้อมูลไม่สำเร็จ (parse ล้มเหลว)");
 

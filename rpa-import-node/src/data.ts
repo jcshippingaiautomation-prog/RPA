@@ -394,6 +394,10 @@ export function mapItemRow(it: { [k: string]: unknown }): Record {
     // พิกัด/หน่วยต่อรายการ (ใบที่มีหลายพิกัด เช่น ไข่ไก่ 04072100 + ไข่เป็ด 04072910)
     export_tariff: s(it.export_tariff),
     customs_unit_code: s(it.customs_unit_code),
+    // ปริมาณตามหน่วยที่ใบกำกับใช้จริง (เช่น MTK ตารางเมตร) — คนละเรื่องกับน้ำหนัก
+    //   เก็บอยู่ใน extra_fields เพราะยังไม่มีคอลัมน์ของตัวเอง ดึงขึ้นมาให้ตัวกรอกใช้ได้ตรง ๆ
+    quantity: s((it.extra_fields as { [k: string]: unknown } | undefined)?.quantity),
+    inv_quantity: s((it.extra_fields as { [k: string]: unknown } | undefined)?.inv_quantity),
     is_foc: it.is_foc === true || s(it.is_foc).toLowerCase() === "true",
     // ช่องต่อรายการที่ยังไม่มีคอลัมน์ (พิกัดสิทธิ/ประเทศต้นกำเนิด/หมายเหตุ ฯลฯ) — ตัวกรอก generic ใช้
     __extra_fields__: (it.extra_fields ?? {}) as { [k: string]: unknown },

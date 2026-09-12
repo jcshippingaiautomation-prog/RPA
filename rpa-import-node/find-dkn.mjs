@@ -50,10 +50,10 @@ try {
     console.log(`ขยายช่วงเป็น ${FROM} ถึง ${TO} แล้วกดค้นหา`);
     await sleep(15000);
   }
-  const rows = await page.evaluate(async (needle) => {
+  let rows = await page.evaluate(async ({ needle, PS }) => {
     const g = window.$("#grid").data("kendoGrid");
     if (!g) return "ไม่พบตาราง";
-    g.dataSource.pageSize(200);
+    g.dataSource.pageSize(Number(PS) || 200);
     if (needle) g.dataSource.filter({ field: "InvoiceNoText", operator: "contains", value: needle });
     else g.dataSource.filter([]);
     await new Promise((r) => setTimeout(r, 12000));
@@ -64,9 +64,15 @@ try {
       st: String(r.DeclarationStatusName ?? ""), cur: String(r.TotalFobCurrencyCode ?? ""),
       fob: String(r.TotalFobForeign ?? ""), dest: String(r.DestCountryCode ?? ""),
     }));
-  }, NEEDLE);
+  }, { needle: NEEDLE, PS: process.env.PAGESIZE || '200' });
   if (typeof rows === "string") throw new Error(rows);
   console.log(`พบ ${rows.length} ใบ${NEEDLE ? ` ที่เลขใบกำกับมี "${NEEDLE}"` : ""}\n`);
+  if (process.env.JSONOUT) {
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(process.env.JSONOUT, JSON.stringify(rows, null, 1));
+    console.log(`เขียน ${rows.length} แถว → ${process.env.JSONOUT}`);
+    process.exit(0);
+  }
   if (process.env.GROUP) {
     const by = new Map();
     for (const r of rows) {
@@ -84,6 +90,10 @@ try {
     }
     process.exit(0);
   }
+  const cmp = (process.env.CMP || "");
+  if (cmp) rows = rows.filter((r) => String(r.cmp || "").includes(cmp));   // CMPFILTER
+  const dest = (process.env.DEST || "").toUpperCase();
+  if (dest) rows = rows.filter((r) => String(r.dest || "").toUpperCase() === dest);   // DESTFILTER
   rows.sort((a, b) => (b.ref || "").localeCompare(a.ref || ""));
   console.log(`${"เลขอ้างอิง".padEnd(16)}${"เลขใบกำกับ".padEnd(22)}${"ผู้ส่งออก".padEnd(24)}${"ส่งออก".padEnd(17)}สถานะ`);
   console.log("─".repeat(112));
