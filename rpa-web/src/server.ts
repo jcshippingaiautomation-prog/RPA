@@ -148,8 +148,18 @@ app.use(express.static(PUBLIC_DIR, {
 
 // ---- Public endpoints (ไม่ต้อง login) ----------------------
 // health check (สำหรับ uptime monitor / load balancer ตอน deploy)
+const STARTED_AT = new Date().toISOString();
+
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, status: "healthy", auth: authEnabled() });
+  // บอกเลข commit ที่กำลังรันอยู่ด้วย — ไม่งั้นหลัง deploy แล้วดูไม่ออกว่าโค้ดใหม่ขึ้นหรือยัง
+  //   Render ใส่ RENDER_GIT_COMMIT ให้เองตอน build
+  res.json({
+    ok: true,
+    status: "healthy",
+    auth: authEnabled(),
+    commit: (process.env.RENDER_GIT_COMMIT ?? "").slice(0, 7) || "local",
+    startedAt: STARTED_AT,
+  });
 });
 
 // คืนเฉพาะ url + anonKey ให้ frontend ใช้กับ Supabase Auth (ห้ามคืน service key)
