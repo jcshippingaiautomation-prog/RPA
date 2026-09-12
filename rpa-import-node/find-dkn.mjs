@@ -84,10 +84,11 @@ try {
     }
     process.exit(0);
   }
-  console.log(`${"เลขใบกำกับ".padEnd(20)}${"เลขอ้างอิง".padEnd(16)}${"ส่งออก".padEnd(17)}${"ปท".padEnd(4)}${"มูลค่า".padEnd(16)}สถานะ`);
+  rows.sort((a, b) => (b.ref || "").localeCompare(a.ref || ""));
+  console.log(`${"เลขอ้างอิง".padEnd(16)}${"เลขใบกำกับ".padEnd(22)}${"ผู้ส่งออก".padEnd(24)}${"ส่งออก".padEnd(17)}สถานะ`);
   console.log("─".repeat(112));
   for (const r of rows) {
-    console.log(`${r.inv.padEnd(20)}${r.ref.padEnd(16)}${r.dep.padEnd(17)}${r.dest.padEnd(4)}${(r.cur + " " + r.fob).padEnd(16)}${r.st}`);
+    console.log(`${r.ref.padEnd(16)}${r.inv.slice(0,20).padEnd(22)}${r.cmp.slice(0,22).padEnd(24)}${r.dep.padEnd(17)}${r.st}`);
   }
 } catch (e) { console.log("✗", e.message); }
 finally { await b.close(); }
