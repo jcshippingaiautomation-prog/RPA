@@ -175,6 +175,10 @@ AI_FIELDS = set(COLUMN_MAP_HEADER) | set(COLUMN_MAP_ITEM) | {
     "PoNumber", "TermPayment", "ConsigneeStreetAndNo", "ConsigneeDistrictName",
     "ConsigneeSubProvinceName", "ConsigneeProvinceName", "ConsigneePostCode",
     "ConsigneeEmailAddress", "OriginCountryCode", "TariffCode", "ProductYear",
+    # Part No/Product Code — ลูกค้าบางรายใส่รหัสสินค้าของตัวเองมาในใบกำกับ
+    #   และเปลี่ยนทุกรายการ (เช่น ลูกค้าแผงวงจรพิมพ์ ที่ประชุม 8 ก.ย. 2569)
+    #   ต้องให้ AI อ่านได้ ไม่ใช่ตั้งค่าคงที่ใน Master
+    "CustomsProductCode",
 }
 
 

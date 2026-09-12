@@ -2161,7 +2161,10 @@ const MODE_LABEL = { master: "ใช้ค่า Master", ai: "อ่านจ�
 function msMode(tpl, key) {
   const m = (tpl.field_modes || {})[key];
   if (m === "master" || m === "ai" || m === "off") return m;
-  const v = (tpl.header || {})[key];
+  // ⚠ ช่องระดับรายการสินค้าเก็บค่าไว้ใน items ไม่ใช่ header
+  //   ถ้าเดาจาก header อย่างเดียว ช่องรายการจะขึ้นว่า "อ่านจากเอกสาร" เสมอ
+  //   ทั้งที่ฝั่งเซิร์ฟเวอร์ถือว่า "รายการมีค่า = ใช้ค่า Master" → หน้าจอโกหกผู้ใช้
+  const v = (tpl.header || {})[key] ?? ((tpl.items || [])[0] || {})[key];
   return v == null || String(v).trim() === "" ? "ai" : "master";
 }
 
@@ -2299,7 +2302,16 @@ function renderMasterForm() {
   const row = { extra_fields: { ...(t.header || {}) } };
   for (const f of REGISTRY) if (f.column && (t.header || {})[f.key] != null) row[f.column] = t.header[f.key];
 
+  // ที่มาของ Master — ผู้ใช้ต้องรู้ว่าค่าพวกนี้ถอดมาจากใบขนใบไหน ถึงจะตรวจได้ว่าถูกไหม
+  //   เก็บไว้ 2 ที่: source.value (ตัวใหม่) และท้ายข้อความ description (ตัวเก่า)
+  const srcInv = String(((t.source || {}).value) || "").trim()
+    || (String(t.description || "").match(/"([^"]+)"/) || [])[1] || "";
+  const srcLine = srcInv
+    ? `<div class="ms-src">ถอดมาจากใบขนของใบกำกับ <b>${escapeHtml(srcInv)}</b> — ค่าที่ตั้งไว้ทั้งหมดมาจากใบนั้น</div>`
+    : `<div class="ms-src muted">ไม่ได้บันทึกว่าถอดมาจากใบกำกับใด (สร้างเอง หรือทำสำเนามา)</div>`;
+
   $("msBody").innerHTML = `
+    ${srcLine}
     <div class="md-grid" style="margin-bottom:12px">
       <div class="fld"><label>ชื่อ Master *</label><input class="inp" id="msName" value="${escapeHtml(t.name || "")}" placeholder="เช่น THANAKORN — ตู้ 40ft ไปเวียดนาม" /></div>
       <div class="fld"><label>ลูกค้า (ว่าง = ใช้ได้ทุกลูกค้า)</label>
@@ -2458,11 +2470,13 @@ async function saveMaster() {
     if (v) header[el.dataset.key] = v;
   });
   const field_modes = {};
+  // ⚠ เก็บโหมด "ทุกช่อง" ห้ามตัดช่องที่คิดว่าเป็นค่าปริยายออก
+  //   ของเดิมตัดออกโดยเดาค่าปริยายจาก header เท่านั้น → ช่องระดับรายการ
+  //   (น้ำหนัก ปริมาณ จำนวนหีบห่อ ราคา/หน่วย) ที่ตั้ง "อ่านจากเอกสาร" ไว้ถูกตัดทิ้งทุกครั้งที่บันทึก
+  //   แล้วเซิร์ฟเวอร์ตีความใหม่เป็น "ใช้ค่า Master" → ใบใหม่ได้น้ำหนัก/ปริมาณของชิปเมนต์เก่า
+  //   (เจอจริง 8 ก.ย. 2569: Master ของ COCOS ที่ผู้ใช้เปิดแก้แล้วกดบันทึก เสียโหมดทั้ง 6 อัน)
   $("msBody").querySelectorAll(".ms-mode").forEach((el) => {
-    // เก็บเฉพาะโหมดที่ "ตั้งใจตั้ง" — ช่องว่าง+จาก AI = ค่าปริยาย ไม่ต้องเก็บ (กัน jsonb บวม)
-    const k = el.dataset.key;
-    const isDefault = el.value === (header[k] ? "master" : "ai");
-    if (!isDefault) field_modes[k] = el.value;
+    field_modes[el.dataset.key] = el.value;
   });
   const splitList = (v) => String(v || "").split(",").map((x) => x.trim()).filter(Boolean);
   const payload = {

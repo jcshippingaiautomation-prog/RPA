@@ -34,7 +34,7 @@ try {
 
     await page.click("#btnUpload");
     await page.waitForTimeout(1500);
-    await page.selectOption("#upCustomer", { label: "COCO" }).catch(() => {});
+    await page.selectOption("#upCustomer", { label: "COCOS" }).catch(() => {});
     await page.waitForTimeout(1200);
     // ปล่อยช่อง Master ว่าง = ให้ระบบจับคู่เอง
     await page.setInputFiles("#fileInput", f.file);

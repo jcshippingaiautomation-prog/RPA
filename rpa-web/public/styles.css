@@ -588,6 +588,13 @@ tr.ms-group > td {
 .ms-name { font-weight: 600; line-height: 1.45; }
 .ms-scope { margin-top: 5px; display: flex; flex-wrap: wrap; gap: 5px; }
 .ms-desc { margin-top: 5px; font-size: 12px; }
+/* แถบ "ที่มา" บนฟอร์มแก้ไข Master — ผู้ใช้ต้องเห็นก่อนว่าค่าถอดมาจากใบไหน */
+.ms-src {
+  margin: 0 0 12px; padding: 8px 12px; font-size: 13px;
+  border: 1px solid var(--border); border-left: 3px solid var(--primary);
+  border-radius: var(--radius); background: var(--ico-blue-bg); color: var(--text);
+}
+.ms-src.muted { border-left-color: var(--border); background: var(--bg); color: var(--muted2); }
 .chip-tag {
   display: inline-block; font-size: 11.5px; padding: 2px 9px; border-radius: 999px;
   border: 1px solid transparent; white-space: nowrap;
