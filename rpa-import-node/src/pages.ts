@@ -1207,6 +1207,31 @@ async function fillOneGoodsItem(
     if (exportTariff) await comboPick(page, S.SEL_EXPORT_TARIFF_INPUT, exportTariff);
   }
 
+  // คำอธิบายสินค้า 2 ช่อง: DCTK เติมให้เองจากคลังสินค้า "แต่ได้แค่ชื่อสินค้าเปล่า ๆ"
+  //   ใบขนจริงที่เจ้าหน้าที่ทำมีรายละเอียดต่อรายการเพิ่มเข้าไปด้วย เช่น
+  //     ภาษาไทย  : "PCB-20260407-016⏎แผงวงจรพิมพ์"  (ลูกค้าแผงวงจรพิมพ์ ต้องมีรหัสสินค้าของเขาทุกครั้ง)
+  //     ภาษาอังกฤษ: "FROZEN ORGANIC COCONUT WATER⏎ORGANIC RAW COCONUT WATER … 250ML"
+  //   จึงกรอกทับเฉพาะเมื่อ "ค่าที่เรามี ต่างจากที่ DCTK เติมไว้" เท่านั้น
+  //   (ไม่แตะพร่ำเพรื่อ เพราะการกรอกทับโดยไม่จำเป็นเคยทำให้ Save ไม่ผ่าน)
+  for (const [sel, val, label] of [
+    [S.SEL_DESC_THAI, String(item.product_description_thai ?? "").trim(), "คำอธิบายภาษาไทย"],
+    [S.SEL_DESC_ENG, String(item.description_eng_field ?? "").trim(), "คำอธิบายภาษาอังกฤษ"],
+  ] as const) {
+    if (!val) continue;
+    try {
+      const now = await page.evaluate((sl: string) => {
+        const el = document.querySelector(sl) as HTMLTextAreaElement | null;
+        return (el?.value ?? "").trim();
+      }, sel).catch(() => "");
+      const same = now.replace(/\s+/g, " ") === val.replace(/\s+/g, " ");
+      if (same) continue;
+      await clickThenType(page, sel, val, { commit: true });
+      log(`  ✓ ${label} = ${val.replace(/\n/g, " ⏎ ").slice(0, 52)}`);
+    } catch (e) {
+      log(`  ⏭ กรอก${label}ไม่ได้ — ข้าม (${e instanceof Error ? e.message.slice(0, 50) : ""})`);
+    }
+  }
+
   const netTon = String(item.net_weight_ton ?? "");
   const unit = String(item.unit_code ?? r.unit_code ?? "");
   // หน่วยช่อง 2 = "หน่วยปริมาณในใบขนฯ" (QuantityUnitCode) — DCTK auto-fill ตามพิกัด (เช่นไข่=C62)
