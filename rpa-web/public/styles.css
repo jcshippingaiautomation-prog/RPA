@@ -71,8 +71,15 @@ body {
 .sidebar .btn-ghost { color: var(--nav-text); border-color: var(--nav-border); background: transparent; }
 .sidebar .btn-ghost:hover { background: var(--nav-hover-bg); color: var(--nav-text-strong); border-color: rgba(255,255,255,.22); }
 
-.main { flex: 1; padding: 24px 28px; max-width: 1500px; }
-.topbar { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 22px; }
+.main {
+  flex: 1;
+  /* ⚠ ต้องมี min-width:0 — ไม่งั้น flex item จะหดต่ำกว่าความกว้างเนื้อหาไม่ได้
+     ตารางรายการใบขนที่กว้างจะดันทั้งหน้าให้ล้นจอ แล้วปุ่มขวาสุดโดนตัดหาย */
+  min-width: 0;
+  padding: 24px 28px;
+  max-width: 1500px;
+}
+.topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
 .topbar h1 { font-size: 22px; margin: 0; font-weight: 700; }
 .subtitle { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
 .topbar-right { display: flex; align-items: center; gap: 12px; }
@@ -101,7 +108,8 @@ body {
 .bulk-bar { display: flex; align-items: center; gap: 12px; background: var(--ico-blue-bg); border: 1px solid #cdd9f3; border-radius: 9px; padding: 9px 16px; margin-bottom: 14px; font-size: 13px; color: var(--primary); }
 
 /* ===== Buttons ===== */
-.btn { cursor: pointer; border: none; border-radius: 9px; padding: 9px 15px; font-weight: 600; font-size: 13px; font-family: inherit; transition: all .15s; display: inline-flex; align-items: center; gap: 6px; }
+.btn { cursor: pointer; border: none; border-radius: 9px; padding: 9px 15px; font-weight: 600; font-size: 13px; font-family: inherit; transition: all .15s; display: inline-flex; align-items: center; gap: 6px;   white-space: nowrap;
+}
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .btn .icon { width: 16px; height: 16px; }
 .btn-primary { background: var(--primary); color: #fff; }
@@ -142,7 +150,14 @@ body {
 .chk-inline input { accent-color: var(--primary); }
 
 /* ===== Data table ===== */
-.card-table { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.card-table {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  /* เลื่อนแนวนอนได้เมื่อจอแคบ (overflow-y ต้องเป็น hidden เพื่อคงมุมโค้ง) */
+  overflow-x: auto; overflow-y: hidden;
+}
+/* คงความกว้างขั้นต่ำของตารางไว้ ไม่ให้คอลัมน์บีบจนอ่านไม่ออก — เกินจอแล้วเลื่อนเอา */
+.card-table > .dt { min-width: 1040px; }
 .card-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); }
 .card-head h2 { font-size: 15px; margin: 0; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; }
 .card-head h2 .icon { width: 18px; height: 18px; color: var(--muted2); }
@@ -609,8 +624,21 @@ tr.ms-group > td {
 .ms-actions .btn.icon-only { padding: 5px 7px; }
 
 /* คอลัมน์รหัสสินค้าในรายการใบขน — หลายรายการก็ยังอ่านง่าย */
-.dt td.prod-cell { max-width: 210px; }
-.dt td.prod-cell .chip-tag { margin: 1px 3px 1px 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.dt td.prod-cell { max-width: 170px; }
+.dt td.prod-cell .chip-tag { margin: 1px 3px 1px 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
 
 /* รหัสสินค้าที่หัวการ์ดรายการ — บอกว่ากำลังดูรายการไหนโดยไม่ต้องเลื่อนหา */
 .item-card-head .item-code { margin-left: 8px; font-weight: 600; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── ให้ตารางรายการใบขนพอดีจอโน้ตบุ๊กทั่วไป (~1440px) โดยไม่ต้องเลื่อน ──
+   คอลัมน์ "รหัสสินค้า" กับ "จัดการ" กินที่มากที่สุด จึงคุมความกว้างไว้
+   จอที่แคบกว่านี้ยังเลื่อนตารางได้ตามปกติ */
+.row-actions .actDetail { min-width: 100px; }
+.row-actions .actFiles { min-width: 80px; }
+.row-actions .icon-only { min-width: 30px; }
+
+/* จอแคบลงมา — ลดช่องไฟในตารางให้เห็นข้อมูลได้มากขึ้น */
+@media (max-width: 1400px) {
+  .dt th, .dt td { padding: 10px 10px; }
+  .main { padding: 20px 18px; }
+}
