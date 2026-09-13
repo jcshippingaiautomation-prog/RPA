@@ -649,6 +649,18 @@ function normalizeItemText(record: Record<string, unknown> & { _items?: Record<s
       delete it.quantity;
     }
 
+    // สกุลเงินของรายการต้องเป็นสกุลเดียวกับทั้งใบเสมอ
+    //   ถ้าไม่ตรง DCTK คำนวณยอดบาทคนละอัตราแล้วตีกลับตอนบันทึกหน้า 3:
+    //   "ราคาสินค้าบาท: ผลรวมส่วนรายละเอียดไม่เท่ากับส่วนควบคุม"
+    //   (เจอจริงกับไทยซิง: หัวใบเป็น USD แต่รายการติด CNY มาจาก Master → บันทึกไม่ผ่านทุกครั้ง)
+    const cur = String(record.currency ?? "").trim().toUpperCase();
+    if (cur) {
+      for (const k of ["amount_currency", "unit_price", "freight", "insurance_currency",
+                       "pack", "inland", "landing", "extra1", "extra2"]) {
+        if (String(extra[k] ?? "").trim()) extra[k] = cur;
+      }
+    }
+
     it.extra_fields = extra;
 
     const code = String(it.description_eng ?? "").trim();
@@ -1173,6 +1185,13 @@ export async function insertDeclaration(
     const applied = await applyMasterToRecord(record, customer, invoice);
     let fieldModes = applied.fieldModes;
     rec = applied.record;
+
+    // ── กระทบยอด/จัดรูปรายการ เหมือนทางอัปโหลดเอกสาร ────────────────
+    //   เดิมทางนี้ (Get Email) ข้ามไปทั้งชุด ใบที่มาจากอีเมลจึงไม่ได้กระทบยอด
+    //   จำนวนหีบห่อ/น้ำหนัก และรายการยังติดสกุลเงินของ Master → DCTK ตีกลับหน้า 3
+    reconcilePackageCount(rec);
+    reconcileWeights(rec);
+    normalizeItemText(rec);
 
     const payload: Record<string, unknown> = {};
     for (const col of DECL_COLUMNS) payload[col] = rec[col] ?? null;

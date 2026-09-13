@@ -1504,6 +1504,7 @@ export async function fillPage3(page: Page, r: Record): Promise<void> {
       };
       let closed = false;
       let dialogDismissed = false;
+      let dialogText = "";
       for (let w = 0; w < 22; w++) { // 22 × ~2s ≈ 45s
         if (page.isClosed()) { closed = true; break; }
         // ลองกด OK dialog (ถ้าโผล่) — ทำซ้ำได้ เผื่อมีหลายชั้น
@@ -1511,11 +1512,13 @@ export async function fillPage3(page: Page, r: Record): Promise<void> {
         if (dlg.clicked) {
           if (!dialogDismissed) log(`  ✓ กด OK ปิด dialog (Page 3) → ให้ DCTK บันทึก goods + ปิดหน้า · ข้อความ: ${JSON.stringify(dlg.text || "")}`);
           dialogDismissed = true;
+          if (dlg.text) dialogText = dlg.text;
         }
         await sleep(2000);
       }
       log(`  ✓ Page 3 Save&Close — thisPageClosed=${closed}${closed ? "" : " (รอ ~45s แล้วยังไม่ปิด)"}${dialogDismissed ? " [กด OK dialog แล้ว]" : ""}`);
       // ถ้าหน้าไม่ปิด = เซฟไม่ผ่าน → ดักข้อความ error ที่ค้างบนหน้า (จะได้รู้ว่า Page 3 ติดอะไร)
+      let pageErrs: string[] = [];
       if (!closed) {
         try {
           const errs = await page.evaluate(() => {
@@ -1528,7 +1531,13 @@ export async function fillPage3(page: Page, r: Record): Promise<void> {
           if (errs.length) log(`  🛑 Page 3 ยังไม่ปิด — error บนหน้า: ${JSON.stringify(errs)}`);
           else log(`  ℹ Page 3 ยังไม่ปิด แต่ไม่เจอข้อความ error (อาจกำลัง submit ช้า)`);
           await dumpTariffWidgets(page);
+          pageErrs = errs;
         } catch { /* */ }
+        // ⚠ หน้า 3 ไม่ปิด = DCTK ไม่รับรายการสินค้า → ใบขนได้หัวใบแต่ไม่มีรายการ
+        //   ของเดิมแค่ log แล้วเดินต่อ → สรุปว่า "สำเร็จ errors=0" ทั้งที่ใบมี 0 รายการ
+        //   (เจอจริง: THAIXING DCTK000035730/035732/035733 — สกุลเงินรายการ ≠ สกุลเงินหัวใบ)
+        const why = [dialogText, ...pageErrs].filter(Boolean).join(" | ") || "ไม่พบข้อความ error บนหน้า";
+        throw new Error(`หน้า 3 ไม่ปิด = DCTK ไม่บันทึกรายการสินค้า — ${why}`);
       }
     } else {
       // ยังมีรายการถัดไป: กด "บันทึกและเพิ่มใหม่" (ปุ่มเดียว = บันทึก + เปิดฟอร์มรายการถัดไป)
