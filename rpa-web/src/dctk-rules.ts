@@ -62,6 +62,8 @@ export interface CrossFieldRule {
   require: {
     field?: string; oneOf?: string[]; maxLength?: number; greaterThan?: number;
     allNotEmpty?: string[]; itemsMin?: number;
+    /** ผ่านถ้ามีค่าอย่างน้อยหนึ่งช่องในกลุ่มนี้ (DCTK บางเรื่องกรอกได้หลายช่องแทนกัน) */
+    anyNotEmpty?: string[];
     /** [ก, ข] → วันที่ ก ต้องไม่เกินวันที่ ข */
     dateNotAfter?: [string, string];
     /** regex ที่ค่าต้องผ่าน */
@@ -102,6 +104,9 @@ export interface ReconcileRule {
   itemKey: string;
   tolerance: number;
   level: "error" | "warn";
+  /** เทียบได้เฉพาะเมื่อหน่วยของใบอยู่ในกลุ่มนี้ (คนละหน่วย = เทียบกันไม่ได้) */
+  unitField?: string;
+  unitIn?: string[];
 }
 
 const require = createRequire(import.meta.url);
@@ -321,6 +326,7 @@ export async function checkDctkRules(
         failed = numOf(get(req.field)) <= req.greaterThan;
       }
       if (req.allNotEmpty) failed = req.allNotEmpty.some((k) => isEmpty(get(k)));
+      if (req.anyNotEmpty) failed = req.anyNotEmpty.every((k) => isEmpty(get(k)));
       if (req.matches) {
         failed = !new RegExp(req.matches).test(String(get(req.field ?? "") ?? "").trim());
       }
@@ -369,6 +375,16 @@ export async function checkDctkRules(
       ({ key, scope, label: "", dctkName: "" });
     for (const rc of (await loadDctkRules()).reconcile ?? []) {
       // ค่าอาจอยู่ในคอลัมน์จริงหรือใน extra_fields — ให้ valueOf จัดการให้
+      // ยอดหัวใบกับยอดรายการต้องเป็น "หน่วยเดียวกัน" ถึงจะเทียบกันได้
+      //   ช่อง "ปริมาณในใบขน (รวม)" ของเราเก็บทับคอลัมน์น้ำหนักสุทธิ (ตัน)
+      //   ลูกค้าที่หน่วยศุลกากรไม่ใช่น้ำหนัก (เช่น ไทยซิง = MTK ตารางเมตร)
+      //   ยอดหัวใบจึงไม่ใช่ปริมาณ แล้วจะเตือนผิด ๆ ว่า 0.084 ≠ 12.422
+      //   (DCTK คำนวณยอดหัวใบเองจากรายการอยู่แล้ว — ดูใบจริง DCTK000035734 = 12.422 MTK)
+      if (rc.unitField && rc.unitIn) {
+        const u = String(valueOf(decl, asRule(rc.unitField, "header"), registryColumns) ?? "")
+          .trim().toUpperCase();
+        if (!rc.unitIn.includes(u)) continue;
+      }
       const head = numOf(valueOf(decl, asRule(rc.headerKey, "header"), registryColumns));
       if (head <= 0) continue;                       // ไม่ได้กรอกยอดระดับใบ = ไม่ต้องเทียบ
       const sum = items.reduce(
