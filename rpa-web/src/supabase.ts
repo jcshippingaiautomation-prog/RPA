@@ -655,8 +655,12 @@ function normalizeItemText(record: Record<string, unknown> & { _items?: Record<s
     //   (เจอจริงกับไทยซิง: หัวใบเป็น USD แต่รายการติด CNY มาจาก Master → บันทึกไม่ผ่านทุกครั้ง)
     const cur = String(record.currency ?? "").trim().toUpperCase();
     if (cur) {
-      for (const k of ["amount_currency", "unit_price", "freight", "insurance_currency",
-                       "pack", "inland", "landing", "extra1", "extra2"]) {
+      // ราคาสินค้า/ราคาต่อหน่วย: ตั้งเสมอ แม้เอกสารไม่ได้เขียนสกุลซ้ำในแต่ละแถว
+      //   (ปล่อยว่างแล้ว DCTK จะใช้ค่าปริยายของมันเอง แล้วยอดบาทไม่ตรงอีกแบบ)
+      extra.amount_currency = cur;
+      extra.unit_price = cur;
+      // ค่าใช้จ่ายอื่น: เติมเฉพาะช่องที่ใบนี้มีค่าอยู่แล้ว ไม่ไปเปิดช่องที่ไม่ได้ใช้
+      for (const k of ["freight", "insurance_currency", "pack", "inland", "landing", "extra1", "extra2"]) {
         if (String(extra[k] ?? "").trim()) extra[k] = cur;
       }
     }
@@ -708,6 +712,28 @@ function reconcileWeights(record: Record<string, unknown> & { _items?: Record<st
       it.gross_weight_kg = n(it.net_weight_kg);
       console.log(`[น้ำหนัก] รายการ "${String(it.description_eng_field ?? it.description_eng ?? "").slice(0, 34)}" ไม่มีน้ำหนักรวมในเอกสาร → ใช้น้ำหนักสุทธิ ${it.gross_weight_kg}`);
     }
+  }
+  // 1.5) เอกสารบอก "น้ำหนักรวมทั้งใบ" ไว้ แต่คอลัมน์รายแถวว่าง
+  //   → เกลี่ยยอดของเอกสารตามสัดส่วนน้ำหนักสุทธิ ไม่ใช่ทิ้งยอดเอกสารแล้วใช้ผลรวมสุทธิแทน
+  //   (เจอจริง ไทยซิงชุด 9: ใบแพ็คกิ้งเขียน G/W รวม 186.50 แต่รายแถวว่าง
+  //    ของเดิมทับหัวใบเป็น 171.50 = น้ำหนักสุทธิ ซึ่งไม่ตรงเอกสาร)
+  const headGross = n(record.gross_weight_kg);
+  const sumNet = items.reduce((a, it) => a + n(it.net_weight_kg), 0);
+  const sumGross = items.reduce((a, it) => a + n(it.gross_weight_kg), 0);
+  const tol = Math.max(0.02, sumNet * 0.0005);
+  // "ไม่มีน้ำหนักรวมรายแถวจริง" = ผลรวมรายแถวเท่ากับน้ำหนักสุทธิพอดี
+  //   (ไม่ว่าจะเพราะเราเติมให้เอง หรือ AI อ่านคอลัมน์สุทธิมาใส่ทั้งสองช่อง)
+  const noRowGross = Math.abs(sumGross - sumNet) < tol;
+  if (noRowGross && headGross > 0 && sumNet > 0 && headGross > sumNet + tol) {
+    let used = 0;
+    items.forEach((it, i) => {
+      const v = i === items.length - 1
+        ? Number((headGross - used).toFixed(2))
+        : Number((headGross * n(it.net_weight_kg) / sumNet).toFixed(2));
+      it.gross_weight_kg = v;
+      used = Number((used + v).toFixed(2));
+    });
+    console.log(`[น้ำหนัก] เอกสารให้น้ำหนักรวมทั้งใบ ${headGross} แต่ไม่แยกรายแถว → เกลี่ยตามสัดส่วนน้ำหนักสุทธิ: ${items.map((it) => it.gross_weight_kg).join(" + ")}`);
   }
   // 2) ยอดหัวใบต้องเท่ากับผลรวมรายแถว (กรมฯ เทียบสองยอดนี้)
   for (const [col, label] of [["net_weight_kg", "น้ำหนักสุทธิ"], ["gross_weight_kg", "น้ำหนักรวม"]] as const) {
