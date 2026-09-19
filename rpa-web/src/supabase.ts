@@ -581,9 +581,17 @@ function reconcilePackageCount(record: Record<string, unknown> & { _items?: Reco
     const x = Number(String(v ?? "").replace(/,/g, ""));
     return Number.isFinite(x) ? x : 0;
   };
+  const sum0 = items.reduce((a, it) => a + n(it.container_or_volume_qty), 0);
+  // หัวใบไม่มีจำนวนหีบห่อ แต่รายการมี → ใช้ผลรวมรายการ
+  //   (เอกสารบางราย เช่น สยามฮิตาชิ ไม่มีแถวสรุปจำนวนลัง ต้องรวมเอง
+  //    ไม่งั้นช่องบังคับของ DCTK ว่างแล้วบันทึกหน้า 1 ไม่ผ่าน)
+  if (n(record.container_or_volume_qty) <= 0 && sum0 > 0) {
+    record.container_or_volume_qty = sum0;
+    console.log(`[กระทบยอด] จำนวนหีบห่อหัวใบว่าง → ใช้ผลรวมรายการ ${sum0}`);
+  }
   const head = n(record.container_or_volume_qty);
   if (head <= 0) return;
-  const sum = items.reduce((a, it) => a + n(it.container_or_volume_qty), 0);
+  const sum = sum0;
   const gap = head - sum;
   if (gap <= 0 || gap > 10 || gap > head * 0.01) return;
 
@@ -759,11 +767,16 @@ function reconcileItemAmounts(
     //   (AI มักอ่านยอดหัวใบเป็นผลรวมเฉพาะสินค้า จึงคำนวณเป้าหมายเองจากผลรวมรายการ)
     const charges = r2(n(record.freight_charge) + n(record.insurance_charge));
     if (charges <= 0.005) return;
-    const target = r2(sumAmt() + charges);
-    const gap = r2(target - sumAmt());
+    const head = n(record.total_goods_amount);
+    const sum = sumAmt();
+    // ส่วนต่างที่ต้องบวกเข้ารายการที่ 1
+    //   บรีฟสั่งให้ AI ส่ง "ยอดสินค้าล้วน" ทั้งหัวใบและรายรายการ → ส่วนต่างคือค่าระวาง+ค่าประกัน
+    //   แต่บางรอบ AI ส่งยอดหัวใบเป็นยอด Total ของใบกำกับ (รวมค่าใช้จ่ายแล้ว) → ใช้ส่วนต่างที่คำนวณได้แทน
+    let gap = head > 0 ? r2(head - sum) : 0;
+    if (gap <= 0.005) gap = charges;
     if (gap <= 0.005) return;
     items[0].amount = r2(n(items[0].amount) + gap);
-    console.log(`[ยอดเงิน] ค่าระวาง+ค่าประกัน ${charges.toLocaleString()} → บวกเข้ารายการที่ 1 เป็น ${items[0].amount} (ยอดทั้งใบ ${target.toLocaleString()})`);
+    console.log(`[ยอดเงิน] ค่าใช้จ่ายนอกราคาสินค้า ${gap.toLocaleString()} → บวกเข้ารายการที่ 1 เป็น ${items[0].amount}`);
   }
 
   // ยอดหัวใบต้องเท่าผลรวมรายการเสมอ — DCTK เทียบสองยอดนี้ตอนบันทึกหน้า 3

@@ -32,6 +32,27 @@ export interface DeclarationRecord {
   _needs_review?: boolean;
 }
 
+/** ดึงเฉพาะตัวเลขออกจากข้อความ เช่น "TE1" → "1" (ไม่มีตัวเลข = คืนค่าเดิม) */
+function digitsOnly(v: string): string {
+  const t = v.trim();
+  if (!t || /^[\d.,]+$/.test(t)) return t;
+  const m = t.match(/\d+(?:[.,]\d+)?/);
+  return m ? m[0].replace(/,/g, "") : t;
+}
+
+/** ชื่อประเทศเต็ม → รหัส 2 ตัว (เอกสารลูกค้าเขียนเต็มคำ เช่น THAILAND / JAPAN / CHINA) */
+const ORIGIN_MAP: { [k: string]: string } = {
+  THAILAND: "TH", THAI: "TH", JAPAN: "JP", CHINA: "CN", "P.R.CHINA": "CN",
+  SINGAPORE: "SG", MALAYSIA: "MY", INDIA: "IN", KOREA: "KR", TAIWAN: "TW",
+  VIETNAM: "VN", INDONESIA: "ID", PHILIPPINES: "PH", "UNITED STATES": "US", USA: "US",
+};
+function originCode(v: string): string {
+  const t = v.trim().toUpperCase().replace(/\./g, "").replace(/\s+/g, " ");
+  if (!t) return "";
+  if (/^[A-Z]{2}$/.test(t)) return t;                       // เป็นรหัสอยู่แล้ว
+  return ORIGIN_MAP[t] ?? ORIGIN_MAP[t.replace(/ /g, "")] ?? t.slice(0, 2);
+}
+
 export function postProcess(rawText: string): DeclarationRecord {
   const parsed = safeParseJson(rawText);
   if (!parsed) {
@@ -92,7 +113,8 @@ export function postProcess(rawText: string): DeclarationRecord {
       description_eng_field: toStr(it.description_eng_field).toUpperCase(),        // คำอธิบายอังกฤษอิสระต่อรายการ
       product_description_thai: toStr(it.product_description_thai),                // คำอธิบายไทยต่อรายการ
       brand_name: toStr(it.brand_name) || "NO BRAND",
-      container_or_volume_qty: toStr(it.container_or_volume_qty),
+      // บางเอกสารเขียนช่องจำนวนหีบห่อปนตัวอักษร (สยามฮิตาชิ: "TE1" / "TC1") → เอาเฉพาะตัวเลข
+      container_or_volume_qty: digitsOnly(toStr(it.container_or_volume_qty)),
       container_unit_code: toStr(it.container_unit_code) || (r.container_unit_code as string),
       net_weight_kg: toNumber(it.net_weight_kg),
       gross_weight_kg: toNumber(it.gross_weight_kg),
@@ -107,6 +129,8 @@ export function postProcess(rawText: string): DeclarationRecord {
       //   สองช่องนี้ยังไม่มีคอลัมน์ของตัวเอง จะถูกเก็บลง extra_fields ตอนบันทึก
       quantity: toStr(it.quantity),
       customs_product_code: toStr(it.customs_product_code),
+      // ประเทศต้นกำเนิดต่อรายการ — ใบเดียวกันมีได้หลายประเทศ (สยามฮิตาชิ: TH/JP/CN)
+      origin_country_code: originCode(toStr(it.origin_country_code)),
       is_foc: !!it.is_foc,
     };
     // ถ้า item ไม่มีพิกัด ใช้พิกัดระดับบนเป็น fallback

@@ -78,7 +78,7 @@ export const EXTRACTOR_SYSTEM_PROMPT =
   '      "description_eng_field":   "คำอธิบายสินค้าภาษาอังกฤษแบบละเอียดของรายการนี้ (อิสระ ต่างกันได้ต่อรายการ เช่น ORGANIC RAW COCONUT CREAM SMOOTHIE BRAND ORGANIC SOURCE 250ML) ตัวพิมพ์ใหญ่ทั้งหมด",\n' +
   '      "product_description_thai": "คำอธิบายสินค้าภาษาไทยของรายการนี้ (เช่น น้ำมะพร้าวแช่แข็ง)",\n' +
   '      "brand_name":             "ยี่ห้อ (ถ้าไม่มีใส่ NO BRAND)",\n' +
-  '      "container_or_volume_qty": "จำนวนกล่อง/หีบห่อของรายการนี้ (carton/box)",\n' +
+  '      "container_or_volume_qty": "จำนวนกล่อง/หีบห่อของรายการนี้ (carton/box/case). ถ้าช่องนั้นเขียนปนตัวอักษร เช่น \\"TE1\\" / \\"TC1\\" ให้เอาเฉพาะตัวเลขมา (TE1 → 1)",\n' +
   '      "container_unit_code":     "หน่วยหีบห่อ เช่น CT, BX",\n' +
   '      "net_weight_kg":           0.00,\n' +
   '      "gross_weight_kg":         0.00,\n' +
@@ -90,6 +90,7 @@ export const EXTRACTOR_SYSTEM_PROMPT =
   '      "customs_unit_code":       "หน่วยปริมาณหลังพิกัดของรายการนี้ (เช่น KGM, C62, MTR, MTK)",\n' +
   '      "quantity":                "ปริมาณของรายการนี้ตามหน่วยที่ใบกำกับใช้จริง — ใส่เมื่อหน่วยไม่ใช่น้ำหนัก เช่น MTK (ตารางเมตร), C62 (ชิ้น), PCS. ตัวอย่าง Qty (MTK) 90.246 → ใส่ 90.246. ถ้าเอกสารคิดเป็นน้ำหนักอยู่แล้วให้เว้นว่าง",\n' +
   '      "customs_product_code":    "Part No / Product Code ของลูกค้าเอง ถ้าเอกสารมีคอลัมน์นี้ (เช่น PCB-20260407-016) — เปลี่ยนได้ทุกรายการ ถ้าไม่มีให้เว้นว่าง",\n' +
+  '      "origin_country_code":     "ประเทศต้นกำเนิดของรายการนี้ เป็นรหัส 2 ตัว (TH/JP/CN/...) — เอกสารมักเขียนเต็มคำในคอลัมน์ \\"Country of origin\\" เช่น THAILAND→TH, JAPAN→JP, CHINA→CN. ในใบเดียวกันแต่ละรายการอาจต้นกำเนิดต่างกันได้ ถ้าเอกสารไม่ระบุให้เว้นว่าง",\n' +
   '      "is_foc":                  false\n' +
   "    }\n" +
   "  ]\n" +
