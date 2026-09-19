@@ -574,7 +574,10 @@ export async function getDeclaration(id: string): Promise<Record<string, unknown
  *   - มีแถวของแถม (FOC) ที่จำนวนกล่องเป็น 0 ให้เติม
  * นอกเหนือจากนี้ไม่แตะ — ปล่อยให้ขึ้นเตือนในหน้าตรวจข้อมูลให้ผู้ใช้ตัดสินใจเอง
  */
-function reconcilePackageCount(record: Record<string, unknown> & { _items?: Record<string, unknown>[] }): void {
+function reconcilePackageCount(
+  record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
+  fromItems = false,
+): void {
   const items = record._items ?? [];
   if (items.length < 2) return;
   const n = (v: unknown) => {
@@ -588,6 +591,14 @@ function reconcilePackageCount(record: Record<string, unknown> & { _items?: Reco
   if (n(record.container_or_volume_qty) <= 0 && sum0 > 0) {
     record.container_or_volume_qty = sum0;
     console.log(`[กระทบยอด] จำนวนหีบห่อหัวใบว่าง → ใช้ผลรวมรายการ ${sum0}`);
+  }
+  // ลูกค้าที่เอกสารเขียนจำนวนกล่องไม่เป็นมาตรฐาน (สยามฮิตาชิ: บางชุดเป็นตัวเลข
+  //   บางชุดปนตัวอักษรอย่าง "TE1") — ตกลงกับ user ว่าให้เชื่อเลขรายรายการ
+  //   แล้วให้ยอดหัวใบเดินตามผลรวม จะได้สอดคล้องกันเองและบันทึกผ่านเสมอ
+  if (fromItems && sum0 > 0 && Math.abs(n(record.container_or_volume_qty) - sum0) > 0.001) {
+    console.log(`[กระทบยอด] จำนวนหีบห่อ: หัวใบ ${n(record.container_or_volume_qty)} → ใช้ผลรวมรายการ ${sum0}`);
+    record.container_or_volume_qty = sum0;
+    return;
   }
   const head = n(record.container_or_volume_qty);
   if (head <= 0) return;
@@ -718,6 +729,15 @@ function normalizeItemText(record: Record<string, unknown> & { _items?: Record<s
  *              KW000985 แถวแรก 211.80 + 30.00 + 860.51 = 1,102.31 ตรงกับใบขนจริง)
  *   ลูกค้าที่ไม่ได้ตั้งค่า = ไม่แตะ (พฤติกรรมเดิม)
  */
+/** ลูกค้ารายนี้ให้ยอดหีบห่อหัวใบเดินตามผลรวมรายการไหม — เก็บใน presets ของตั้งค่าลูกค้า */
+async function packageFromItems(customer: string): Promise<boolean> {
+  if (!customer.trim()) return false;
+  try {
+    const s = await getExtractionRulesByKeyword(customer);
+    return /^(1|true|yes)$/i.test(String(s?.presets?.__package_from_items ?? ""));
+  } catch { return false; }
+}
+
 /** วิธีกระจายส่วนต่างยอดเงินของลูกค้ารายนี้ — เก็บใน presets ของตั้งค่าลูกค้า */
 async function extraAmountAlloc(customer: string): Promise<string> {
   if (!customer.trim()) return "";
@@ -891,7 +911,7 @@ export async function createDeclaration(
     //   ทำให้คอลัมน์เลื่อน AI จึงอ่านจำนวนกล่องของแถวนั้นเป็น 0 ทั้งที่เอกสารมี 1 กล่อง
     //   (ยืนยันกับใบขนที่ยื่นกรมฯ จริง CTN2648: แถวตัวอย่างแถวแรก = 1 กล่อง)
     //   → เติมส่วนต่างคืนให้แถวของแถมแถวแรกที่เป็น 0 เมื่อส่วนต่างเล็กเท่านั้น
-    reconcilePackageCount(record);
+    reconcilePackageCount(record, await packageFromItems(String(record.customer_name ?? "")));
     reconcileWeights(record);
     reconcileItemAmounts(record, await extraAmountAlloc(String(record.customer_name ?? "")));
     normalizeItemText(record);
@@ -1304,7 +1324,7 @@ export async function insertDeclaration(
     // ── กระทบยอด/จัดรูปรายการ เหมือนทางอัปโหลดเอกสาร ────────────────
     //   เดิมทางนี้ (Get Email) ข้ามไปทั้งชุด ใบที่มาจากอีเมลจึงไม่ได้กระทบยอด
     //   จำนวนหีบห่อ/น้ำหนัก และรายการยังติดสกุลเงินของ Master → DCTK ตีกลับหน้า 3
-    reconcilePackageCount(rec);
+    reconcilePackageCount(rec, await packageFromItems(customer));
     reconcileWeights(rec);
     reconcileItemAmounts(rec, await extraAmountAlloc(customer));
     normalizeItemText(rec);
