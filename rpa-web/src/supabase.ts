@@ -699,6 +699,81 @@ function normalizeItemText(record: Record<string, unknown> & { _items?: Record<s
  * แล้วยอดหัวใบก็เท่ากับผลรวมรายแถว (ดูใบจริง DCTK000035584: 696+175.5 = 871.5 ทั้งสุทธิและรวม)
  * ถ้าไม่ทำ กรมฯ จะตีกลับตอนกระทบยอด "ส่วนควบคุม vs ส่วนรายละเอียด"
  */
+/**
+ * ยอดเงินรายรายการ vs ยอดหัวใบ — บางลูกค้ายอดรวมในใบกำกับ "รวมค่าระวาง/ค่าประกัน" ไว้แล้ว
+ *   DCTK เทียบผลรวมรายการกับยอดหัวใบ ถ้าไม่เท่าจะตีกลับตอนบันทึกหน้า 3
+ *   ส่วนต่างต้องกระจายลงรายการ แต่ "วิธีกระจาย" ต่างกันตามที่ลูกค้าทำมาจริง:
+ *     equal = เฉลี่ยเท่ากันทุกรายการ แล้วใส่เป็นค่าระวางรายรายการด้วย
+ *             (Q-Cine: ค่าระวาง 450 / 10 รายการ → ใบขนจริงขึ้น F=USD 45.00 ทุกแถว)
+ *     first = บวกรวมไว้ที่รายการแรกรายการเดียว ไม่ต้องกรอกค่าระวางรายรายการ
+ *             (สยามฮิตาชิ: ค่า C/O + ค่าระวาง+ประกัน ไปรวมแถวแรก แล้ว DCTK เฉลี่ยเอง
+ *              KW000985 แถวแรก 211.80 + 30.00 + 860.51 = 1,102.31 ตรงกับใบขนจริง)
+ *   ลูกค้าที่ไม่ได้ตั้งค่า = ไม่แตะ (พฤติกรรมเดิม)
+ */
+/** วิธีกระจายส่วนต่างยอดเงินของลูกค้ารายนี้ — เก็บใน presets ของตั้งค่าลูกค้า */
+async function extraAmountAlloc(customer: string): Promise<string> {
+  if (!customer.trim()) return "";
+  try {
+    const s = await getExtractionRulesByKeyword(customer);
+    return String(s?.presets?.__extra_amount_alloc ?? "");
+  } catch { return ""; }
+}
+
+function reconcileItemAmounts(
+  record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
+  alloc: string,
+): void {
+  const mode = alloc.trim().toLowerCase();
+  if (mode !== "equal" && mode !== "first") return;
+  const items = record._items ?? [];
+  if (!items.length) return;
+  const n = (v: unknown) => {
+    const x = Number(String(v ?? "").replace(/,/g, ""));
+    return Number.isFinite(x) ? x : 0;
+  };
+  const r2 = (x: number) => Number(x.toFixed(2));
+  const sumAmt = () => r2(items.reduce((a, it) => a + n(it.amount), 0));
+
+  if (mode === "equal") {
+    // ค่าระวางหารเท่ากันทุกรายการ แล้วบวกเข้ายอดของแต่ละรายการ
+    //   ใบกำกับของ Q-Cine มีคอลัมน์ที่บวกไว้ให้แล้วบ้าง ไม่มีบ้าง → เช็คก่อนว่าบวกไปหรือยัง
+    const frt = n(record.freight_charge);
+    if (frt <= 0) return;
+    const share = r2(frt / items.length);
+    const already = Math.abs(sumAmt() - r2(n(record.total_goods_amount) + frt)) < 0.05;
+    let used = 0;
+    items.forEach((it, i) => {
+      const add = i === items.length - 1 ? r2(frt - used) : share;
+      used = r2(used + add);
+      if (!already) it.amount = r2(n(it.amount) + add);
+      const ex = (it.extra_fields ?? {}) as Record<string, unknown>;
+      ex.freight_foreign = add.toFixed(2);
+      it.extra_fields = ex;
+    });
+    console.log(`[ยอดเงิน] ค่าระวาง ${frt.toLocaleString()} หารลง ${items.length} รายการ รายการละ ${share}` +
+      (already ? " (ยอดในเอกสารบวกไว้ให้แล้ว — เติมเฉพาะช่องค่าระวาง)" : " (บวกเข้ายอดรายการด้วย)"));
+  } else {
+    // ส่วนที่ไม่ใช่สินค้า (ค่าระวาง/ประกัน/ค่า C-O) รวมไว้ที่รายการแรก แล้วให้ DCTK เฉลี่ยเอง
+    //   ยอดที่กรอกทั้งใบต้องเป็น "ยอด Total ของใบกำกับ" = ราคาสินค้า + ค่าระวาง + ค่าประกัน
+    //   DCTK จะถอดค่าระวาง/ประกันออกเองแล้วได้ราคา FOB กลับมา
+    //   (AI มักอ่านยอดหัวใบเป็นผลรวมเฉพาะสินค้า จึงคำนวณเป้าหมายเองจากผลรวมรายการ)
+    const charges = r2(n(record.freight_charge) + n(record.insurance_charge));
+    if (charges <= 0.005) return;
+    const target = r2(sumAmt() + charges);
+    const gap = r2(target - sumAmt());
+    if (gap <= 0.005) return;
+    items[0].amount = r2(n(items[0].amount) + gap);
+    console.log(`[ยอดเงิน] ค่าระวาง+ค่าประกัน ${charges.toLocaleString()} → บวกเข้ารายการที่ 1 เป็น ${items[0].amount} (ยอดทั้งใบ ${target.toLocaleString()})`);
+  }
+
+  // ยอดหัวใบต้องเท่าผลรวมรายการเสมอ — DCTK เทียบสองยอดนี้ตอนบันทึกหน้า 3
+  const sum = sumAmt();
+  if (sum > 0 && Math.abs(sum - n(record.total_goods_amount)) > 0.02) {
+    console.log(`[ยอดเงิน] ราคาสินค้าหัวใบ ${n(record.total_goods_amount).toLocaleString()} → ใช้ผลรวมรายการ ${sum.toLocaleString()}`);
+    record.total_goods_amount = sum;
+  }
+}
+
 function reconcileWeights(record: Record<string, unknown> & { _items?: Record<string, unknown>[] }): void {
   const items = record._items ?? [];
   if (!items.length) return;
@@ -805,6 +880,7 @@ export async function createDeclaration(
     //   → เติมส่วนต่างคืนให้แถวของแถมแถวแรกที่เป็น 0 เมื่อส่วนต่างเล็กเท่านั้น
     reconcilePackageCount(record);
     reconcileWeights(record);
+    reconcileItemAmounts(record, await extraAmountAlloc(String(record.customer_name ?? "")));
     normalizeItemText(record);
 
     const payload: Record<string, unknown> = {};
@@ -1217,6 +1293,7 @@ export async function insertDeclaration(
     //   จำนวนหีบห่อ/น้ำหนัก และรายการยังติดสกุลเงินของ Master → DCTK ตีกลับหน้า 3
     reconcilePackageCount(rec);
     reconcileWeights(rec);
+    reconcileItemAmounts(rec, await extraAmountAlloc(customer));
     normalizeItemText(rec);
 
     const payload: Record<string, unknown> = {};

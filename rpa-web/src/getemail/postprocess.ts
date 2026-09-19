@@ -111,6 +111,18 @@ export function postProcess(rawText: string): DeclarationRecord {
     };
     // ถ้า item ไม่มีพิกัด ใช้พิกัดระดับบนเป็น fallback
     if (!item.export_tariff && r.export_tariff) item.export_tariff = r.export_tariff as string;
+    // ⚠ "export_tariff" ใน DCTK คือ ประเภทพิกัด (เช่น 9PART3) ไม่ใช่เลขพิกัดศุลกากร
+    //   แต่บรีฟสั่ง AI ให้ตอบเลข HS 8 หลักมาในช่องนี้ → ค่าชนกัน
+    //   ลูกค้าที่พิกัดตายตัว (Master ใส่ 9PART3 ไว้) เลขจาก AI จะถูกทับหายไปเงียบ ๆ
+    //   (เจอจริง Q-Cine: 10 รายการ พิกัดต่างกัน 4 ค่า แต่ในใบไม่เหลือเลขพิกัดเลย)
+    //   → ถ้าเป็นตัวเลขล้วน 8 หลัก ให้ย้ายไปช่องพิกัดศุลกากรจริง เติมศูนย์หน้าให้ครบ 12 หลัก
+    const etRaw = String(item.export_tariff ?? "").trim();
+    if (/^\d{8}$/.test(etRaw)) {
+      const ex = (item.extra_fields ?? {}) as Record<string, unknown>;
+      if (!String(ex.tariff_code ?? "").trim()) ex.tariff_code = etRaw.padStart(12, "0");
+      item.extra_fields = ex;
+      item.export_tariff = "";        // ปล่อยให้ Master/preset เป็นคนใส่ "ประเภทพิกัด"
+    }
     if (!item.customs_unit_code && r.customs_unit_code) item.customs_unit_code = r.customs_unit_code as string;
     if (item.is_foc) item.container_or_volume_qty = "0";
     if (item.net_weight_ton <= 0 && item.net_weight_kg > 0) {
