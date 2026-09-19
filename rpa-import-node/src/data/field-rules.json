@@ -10724,7 +10724,7 @@
       "headerKey": "total_package",
       "itemKey": "package",
       "tolerance": 0,
-      "level": "warn"
+      "level": "error"
     },
     {
       "id": "quantity",
