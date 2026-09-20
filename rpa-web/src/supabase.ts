@@ -654,7 +654,10 @@ function pickMasterItem(
  *    แล้วต่อด้วยถ้อยคำจากใบกำกับ (ดูใบที่ยื่นจริง CTN2649)
  *    ถ้าขาดบรรทัดแรกไป ใบขนจะไม่ตรงกับที่เจ้าหน้าที่ทำมือ
  */
-function normalizeItemText(record: Record<string, unknown> & { _items?: Record<string, unknown>[] }): void {
+function normalizeItemText(
+  record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
+  productCodeFrom = "",
+): void {
   for (const it of record._items ?? []) {
     const extra = (it.extra_fields ?? {}) as Record<string, unknown>;
     extra.nature_trans = it.is_foc === true ? "21" : "11";
@@ -666,6 +669,16 @@ function normalizeItemText(record: Record<string, unknown> & { _items?: Record<s
     if (["TNE", "TON", "TO", "MT", "KGM", "KG", "LTR", "L"].includes(cu)) {
       delete extra.quantity;
       delete it.quantity;
+    }
+
+    // ลูกค้าบางรายลงทะเบียนสินค้าใน DCTK ด้วย "รหัสผู้ผลิต (MFG)" ของตัวเอง
+    //   เช่น สยามฮิตาชิ: "XP0659-JP แผงวงจรไฟฟ้า PCB …" · "ST05371-PH ประตูนอก …"
+    //   ช่องค้น combo จึงต้องใช้รหัสนั้น ไม่ใช่ชื่อสินค้า ไม่งั้นค้นไม่เจอทุกรายการ
+    if (productCodeFrom === "customs_product_code") {
+      // ⚠ ค่าจาก AI ยังอยู่ระดับบนของ item ตอนนี้ — ย้ายลง extra_fields ทีหลังตอนบันทึก
+      //   ถ้าอ่านจาก extra อย่างเดียวจะได้ค่าว่างเสมอ
+      const mfg = String(extra.customs_product_code ?? it.customs_product_code ?? "").trim();
+      if (mfg && mfg.toUpperCase() !== "XX") it.description_eng = mfg;
     }
 
     // สกุลเงินของรายการต้องเป็นสกุลเดียวกับทั้งใบเสมอ
@@ -729,6 +742,15 @@ function normalizeItemText(record: Record<string, unknown> & { _items?: Record<s
  *              KW000985 แถวแรก 211.80 + 30.00 + 860.51 = 1,102.31 ตรงกับใบขนจริง)
  *   ลูกค้าที่ไม่ได้ตั้งค่า = ไม่แตะ (พฤติกรรมเดิม)
  */
+/** อ่านค่า preset ของลูกค้า (ใช้เก็บกฎเฉพาะราย เช่น วิธีกระจายยอด/ที่มาของรหัสสินค้า) */
+async function customerPreset(customer: string, key: string): Promise<string> {
+  if (!customer.trim()) return "";
+  try {
+    const s = await getExtractionRulesByKeyword(customer);
+    return String((s?.presets as { [k: string]: unknown } | undefined)?.[key] ?? "");
+  } catch { return ""; }
+}
+
 /** ลูกค้ารายนี้ให้ยอดหีบห่อหัวใบเดินตามผลรวมรายการไหม — เก็บใน presets ของตั้งค่าลูกค้า */
 async function packageFromItems(customer: string): Promise<boolean> {
   if (!customer.trim()) return false;
@@ -914,7 +936,7 @@ export async function createDeclaration(
     reconcilePackageCount(record, await packageFromItems(String(record.customer_name ?? "")));
     reconcileWeights(record);
     reconcileItemAmounts(record, await extraAmountAlloc(String(record.customer_name ?? "")));
-    normalizeItemText(record);
+    normalizeItemText(record, await customerPreset(String(record.customer_name ?? ""), "__product_code_from"));
 
     const payload: Record<string, unknown> = {};
     for (const col of DECL_COLUMNS) if (record[col] !== undefined) payload[col] = record[col] ?? null;
@@ -1327,7 +1349,7 @@ export async function insertDeclaration(
     reconcilePackageCount(rec, await packageFromItems(customer));
     reconcileWeights(rec);
     reconcileItemAmounts(rec, await extraAmountAlloc(customer));
-    normalizeItemText(rec);
+    normalizeItemText(rec, await customerPreset(customer, "__product_code_from"));
 
     const payload: Record<string, unknown> = {};
     for (const col of DECL_COLUMNS) payload[col] = rec[col] ?? null;

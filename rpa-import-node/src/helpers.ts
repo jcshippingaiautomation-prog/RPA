@@ -404,6 +404,44 @@ async function comboHasValue(page: Page, inputSelector: string): Promise<string>
   }, inputSelector).catch(() => "");
 }
 
+/**
+ * เปิด dropdown รหัสสินค้าแบบ "ไม่ใส่คำค้น" เพื่อดูว่า master ของบริษัทนี้มีอะไรบ้าง
+ *   ใช้ตอน debug เท่านั้น — ไม่เลือกแถวไหน แค่อ่านรายชื่อแล้วปิด
+ */
+export async function listMasterOptions(
+  page: Page,
+  inputSelector: string,
+  limit = 40,
+  near = "",
+): Promise<string[]> {
+  const rowsSel =
+    ".k-animation-container:visible li[role=option], .k-popup:visible li[role=option], ul.k-list:visible > li.k-item";
+  // ค้นด้วย "คำนำหน้าที่สั้นลงเรื่อย ๆ" ของค่าที่ต้องการก่อน แล้วค่อยถอยไปดูรายการทั้งหมด
+  //   เพราะ dropdown โหลดมาทีละ ~40 แถวเรียงตามตัวอักษร ถ้ารหัสที่ต้องการอยู่ท้าย ๆ
+  //   การดูรายการเปล่า ๆ จะไม่เห็นเลยว่ามีของใกล้เคียงอะไรบ้าง
+  const probes: string[] = [];
+  const key = near.trim();
+  if (key.length >= 4) for (const n of [6, 5, 4]) if (n < key.length) probes.push(key.slice(0, n));
+  probes.push("");
+  for (const q of probes) {
+    try {
+      await page.click(inputSelector, { timeout: 5000 });
+      await page.fill(inputSelector, "").catch(() => { /* */ });
+      if (q) await page.type(inputSelector, q, { delay: 60 });
+      else await page.keyboard.press("Backspace").catch(() => { /* */ });
+      await sleep(2500);
+      const out = (await page.locator(rowsSel).allInnerTexts())
+        .map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
+      await page.keyboard.press("Escape").catch(() => { /* */ });
+      if (out.length) {
+        if (q) log(`  🔎 ลองค้นด้วยคำนำหน้า "${q}" → เจอ ${out.length} รายการ`);
+        return out.slice(0, limit);
+      }
+    } catch { /* ลองคำถัดไป */ }
+  }
+  return [];
+}
+
 export async function comboPickStrict(
   page: Page,
   inputSelector: string,
@@ -459,6 +497,16 @@ export async function comboPickStrict(
     log(`  🔎 รหัสสินค้า: ค้น "${value}" เต็มๆ ไม่เจอแถว → ลอง fuzzy ด้วยคำสำคัญ`);
     const picked = await fuzzyPickFromMaster(page, inputSelector, want);
     if (picked && (await comboHasValue(page, inputSelector))) { await sleep(400); return; }
+    // ก่อนยอมแพ้ — บอกด้วยว่า "แล้วใน master มีอะไรให้เลือกบ้าง"
+    //   ไม่งั้น error บอกแค่ว่าไม่เจอ แล้วต้องไปเปิด DCTK ดูเองทุกครั้ง
+    //   (ลูกค้าใหม่มักติดตรงนี้ เพราะชื่อสินค้าในเอกสารไม่ตรงกับที่ลงทะเบียนไว้กับกรมฯ)
+    const avail = await listMasterOptions(page, inputSelector, 40, want);
+    if (avail.length) {
+      log(`  📋 รหัสสินค้าที่มีใน master DCTK ของบริษัทนี้ (${avail.length} รายการแรก):`);
+      avail.forEach((o, i) => log(`     ${String(i + 1).padStart(2)}. ${o}`));
+    } else {
+      log(`  📋 เปิด dropdown แบบไม่ใส่คำค้นแล้วไม่มีรายการเลย — บริษัทนี้อาจยังไม่ได้ลงทะเบียนสินค้าไว้`);
+    }
     throw new Error(`${fieldLabel}: ไม่พบรายการใน master DCTK สำหรับ "${value}" (ต้องเพิ่มสินค้าใน master ก่อน)`);
   }
 

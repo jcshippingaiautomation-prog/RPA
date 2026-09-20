@@ -1446,8 +1446,17 @@ export async function fillPage3(page: Page, r: Record): Promise<void> {
       //   ทางแก้: set ทั้ง model + widget = currency + dispatch change ตอนสุดท้าย
       //   ⚠ force "เฉพาะแถวที่มีจำนวนเงินจริง" — ถ้าใส่สกุลเงินในแถวที่ยอด=0 DCTK อาจฟ้องใหม่
       const curP3 = String(r.currency ?? "").trim().toUpperCase() || "USD";
-      const hasFreightP3 = !!stripZeroDecimals(r.freight ?? "");
-      const hasInsuranceP3 = !!stripZeroDecimals(r.insurance ?? "") || !!stripZeroDecimals(item.insurance ?? "");
+      // ⚠ ต้องเช็คว่า "มีตัวเลขมากกว่า 0" ไม่ใช่แค่ "มีข้อความ"
+      //   stripZeroDecimals("0.00") คืน "0" ซึ่งเป็น string ไม่ว่าง → !! ได้ true
+      //   ผลคือใบที่ไม่มีค่าประกันเลย ถูกบังคับสกุลเงินลงช่องที่ว่าง
+      //   แล้ว DCTK ตีกลับหน้า 3: "ค่าประกันภัยต่างประเทศ: ต้องมีค่ามากกว่าหรือเท่ากับ (0)"
+      //   (เจอจริง Q-Cine IN03409 ซึ่งใบกำกับมีแต่ค่าระวาง ไม่มีค่าประกัน)
+      const numOrZero = (v: unknown) => {
+        const x = Number(String(v ?? "").replace(/,/g, ""));
+        return Number.isFinite(x) ? x : 0;
+      };
+      const hasFreightP3 = numOrZero(r.freight) > 0;
+      const hasInsuranceP3 = numOrZero(r.insurance) > 0 || numOrZero(item.insurance) > 0;
       if (allowed(r, "currency") && curP3) {
         const forced = await page.evaluate(({ want, doFreight, doIns }) => {
           const setVal = (sel: string) => {
@@ -1510,7 +1519,11 @@ export async function fillPage3(page: Page, r: Record): Promise<void> {
         // ลองกด OK dialog (ถ้าโผล่) — ทำซ้ำได้ เผื่อมีหลายชั้น
         const dlg = await dismissValidateDialog();
         if (dlg.clicked) {
-          if (!dialogDismissed) log(`  ✓ กด OK ปิด dialog (Page 3) → ให้ DCTK บันทึก goods + ปิดหน้า · ข้อความ: ${JSON.stringify(dlg.text || "")}`);
+          // log "ทุกกล่อง" ไม่ใช่เฉพาะกล่องแรก — DCTK เด้งหลายชั้น และชั้นหลังคือตัวที่บล็อกจริง
+          //   (เจอจริง Q-Cine: ชั้นแรกถามใบอนุญาต ตอบ YES แล้วชั้นสองเป็น Message Validate)
+          if (dlg.text && dlg.text !== dialogText) {
+            log(`  ✓ กด OK/YES ปิด dialog (Page 3) · ข้อความ: ${JSON.stringify(dlg.text)}`);
+          }
           dialogDismissed = true;
           if (dlg.text) dialogText = dlg.text;
         }
