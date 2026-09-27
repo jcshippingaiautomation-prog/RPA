@@ -434,6 +434,7 @@ textarea.md-edit { resize: vertical; min-height: 62px; font-family: inherit; lin
 .t-info { background: #1f2a44; }
 .t-success { background: var(--green); }
 .t-error { background: var(--red); }
+.t-warn  { background: #b45309; }
 
 /* ===== กล่องแสดงสาเหตุที่ RPA ไม่สำเร็จ (modal รายละเอียด + ประวัติงาน) ===== */
 .err-box { border: 1px solid #f0c9c9; background: #fdf3f3; border-radius: 10px; padding: 12px 14px; margin: 12px 0 4px; }

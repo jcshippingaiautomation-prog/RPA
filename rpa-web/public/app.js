@@ -2491,9 +2491,19 @@ async function saveMaster() {
   };
   $("msSave").disabled = true;
   try {
-    await api("/api/templates", "POST", payload);
+    const res = await api("/api/templates", "POST", payload);
     const sv = $("msSaved"); sv.style.display = "inline"; setTimeout(() => (sv.style.display = "none"), 2000);
-    toast("บันทึก Master แล้ว", "success");
+    // ผลตรวจ Master ที่เซิร์ฟเวอร์ตรวจให้ตอนบันทึก — ตั้งผิดทีเดียวใบพังทุกใบ ต้องเห็นทันที
+    const chk = res && res.check;
+    const errs = chk ? chk.issues.filter((i) => i.level === "error") : [];
+    const warns = chk ? chk.issues.filter((i) => i.level === "warn") : [];
+    if (errs.length) {
+      toast(`บันทึกแล้ว แต่ Master มีปัญหา ${errs.length} ข้อ — ${errs[0].label}: ${errs[0].message}`, "error");
+    } else if (warns.length) {
+      toast(`บันทึก Master แล้ว · มีข้อควรดู ${warns.length} ข้อ — ${warns[0].label}: ${warns[0].message}`, "warn");
+    } else {
+      toast("บันทึก Master แล้ว · ตรวจแล้วไม่พบปัญหา", "success");
+    }
     closeMaster();
     loadMasters();
   } catch (e) { toast("บันทึกไม่สำเร็จ: " + e.message, "error"); }
@@ -2502,6 +2512,42 @@ async function saveMaster() {
 
 $("btnNewMaster").onclick = () => openMaster(null);
 $("btnReloadMasters").onclick = loadMasters;
+
+/** ตรวจ Master ทุกอันด้วยกฎของกรมฯ แล้วสรุปให้ดูทีเดียว */
+async function checkAllMasters() {
+  const btn = $("btnCheckMasters");
+  btn.disabled = true;
+  try {
+    const r = await api("/api/templates-check");
+    if (!r.enabled) { toast("ยังไม่ได้เปิดใช้คลัง Master", "error"); return; }
+    const bad = r.results.filter((x) => !x.ok);
+    const warn = r.results.filter((x) => x.ok && x.issues.length);
+    const lines = [];
+    for (const x of [...bad, ...warn]) {
+      lines.push(`${x.ok ? "⚠" : "⛔"} ${x.name}`);
+      for (const i of x.issues) {
+        lines.push(`      ${i.level === "error" ? "⛔" : "⚠"} ${i.label}${i.itemLine ? ` (แถว ${i.itemLine})` : ""}: ${i.message}`);
+      }
+    }
+    if (!lines.length) {
+      toast(`ตรวจ ${r.total} Master แล้ว — ไม่พบปัญหา`, "success");
+      return;
+    }
+    // แสดงเป็นบล็อกอ่านง่ายในหน้าเดียวกัน (ไม่ใช้ alert เพราะข้อความยาว)
+    const box = document.createElement("div");
+    box.className = "card";
+    box.style.cssText = "margin:12px 0;white-space:pre-wrap;font-size:13px;line-height:1.7";
+    box.textContent = `ตรวจ ${r.total} Master · มีปัญหาร้ายแรง ${r.failed} อัน · ควรดูเพิ่ม ${warn.length} อัน\n\n` + lines.join("\n");
+    const prev = document.getElementById("msCheckBox");
+    if (prev) prev.remove();
+    box.id = "msCheckBox";
+    const note = $("mastersNote");
+    note.parentNode.insertBefore(box, note.nextSibling);
+    toast(`ตรวจ ${r.total} Master · พบปัญหาร้ายแรง ${r.failed} อัน`, r.failed ? "error" : "warn");
+  } catch (e) { toast("ตรวจไม่สำเร็จ: " + e.message, "error"); }
+  finally { btn.disabled = false; }
+}
+$("btnCheckMasters").onclick = checkAllMasters;
 $("msClose").onclick = closeMaster;
 $("msCancel").onclick = closeMaster;
 $("msSave").onclick = saveMaster;

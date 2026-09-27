@@ -19,6 +19,7 @@ import {
 import { config } from "./config.js";
 import { loadRegistry, rowToFields, splitRecord } from "./field-registry.js";
 import { applyTemplate } from "./master-template.js";
+import { validateMaster } from "./validate-master.js";
 import {
   listDocuments,
   listDocumentsFor,
@@ -818,6 +819,32 @@ app.get("/api/templates/:id", async (req, res) => {
   res.json(t);
 });
 
+/** ตรวจ Master ว่าตั้งค่าถูกไหม — ใช้กฎชุดเดียวกับที่ตรวจใบขน */
+app.get("/api/templates/:id/check", async (req, res) => {
+  const t = await getTemplate(String(req.params.id));
+  if (!t) { res.status(404).json({ error: "ไม่พบ Master นี้" }); return; }
+  res.json({ name: t.name, ...(await validateMaster(t)) });
+});
+
+/** ตรวจ Master ทุกอัน (หรือเฉพาะลูกค้าหนึ่งราย) — ใช้ดูภาพรวมทีเดียว */
+app.get("/api/templates-check", async (req, res) => {
+  if (!supabaseEnabled() || !(await templatesEnabled())) { res.json({ enabled: false, results: [] }); return; }
+  const customer = String(req.query.customer ?? "").trim();
+  const results = [];
+  for (const row of await listTemplates(customer || undefined)) {
+    const full = await getTemplate(String(row.id));
+    if (!full) continue;
+    const r = await validateMaster(full);
+    results.push({ id: row.id, name: full.name, customer_name: full.customer_name, ...r });
+  }
+  res.json({
+    enabled: true,
+    total: results.length,
+    failed: results.filter((r) => !r.ok).length,
+    results,
+  });
+});
+
 app.post("/api/templates", requireUser, async (req, res) => {
   if (!supabaseEnabled() || !(await templatesEnabled())) {
     res.status(400).json({ error: "ยังไม่ได้สร้างตาราง Master — โปรดรัน sql/11_extra_fields_and_masters.sql" });
@@ -840,7 +867,14 @@ app.post("/api/templates", requireUser, async (req, res) => {
     is_default: !!b.is_default,
   }, (req as Request & { user?: { id?: string } }).user?.id ?? null);
   if (!saved) { res.status(500).json({ error: "บันทึก Master ไม่สำเร็จ" }); return; }
-  res.json(saved);
+  // ตรวจให้ทันทีหลังบันทึก — Master ตั้งผิดทีเดียว ใบของลูกค้ารายนั้นพังทุกใบ
+  //   ไม่บล็อกการบันทึก (ผู้ใช้อาจกำลังตั้งค่าค้างไว้) แต่ต้องเห็นทันทีว่ามีอะไรผิด
+  let check: Awaited<ReturnType<typeof validateMaster>> | null = null;
+  try {
+    const full = await getTemplate(String((saved as { id?: string }).id ?? ""));
+    if (full) check = await validateMaster(full);
+  } catch { /* ตรวจไม่ได้ ไม่ใช่เหตุให้บันทึกล้ม */ }
+  res.json({ ...saved, check });
 });
 
 app.delete("/api/templates/:id", requireUser, async (req, res) => {
