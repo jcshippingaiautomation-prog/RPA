@@ -14,7 +14,7 @@
 import { chromium } from "playwright";
 import { loadConfig } from "./runner.js";
 import { login } from "./pages.js";
-import { setLogSink, log, sleep } from "./helpers.js";
+import { setLogSink, log, sleep, waitForPageReady } from "./helpers.js";
 
 setLogSink(null);
 
@@ -38,7 +38,8 @@ page.on("dialog", async (d) => {
 });
 
 try {
-  await page.goto(cfg.url!, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await page.goto(cfg.url!, { waitUntil: "commit", timeout: 60000 });
+  await waitForPageReady(page, "หน้า DCTK", 120000);
   await login(page, cfg.username, cfg.password);
   const base = new URL(cfg.url!).origin;
 
@@ -46,7 +47,7 @@ try {
 
   let done = 0, skipped = 0;
   for (const ref of REFS) {
-    await page.goto(`${base}/DCTK/ExDec/Index`, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.goto(`${base}/DCTK/ExDec/Index`, { waitUntil: "commit", timeout: 60000 });
     await page.locator("#grid").first().waitFor({ state: "visible", timeout: 30000 });
     await sleep(2500);
 

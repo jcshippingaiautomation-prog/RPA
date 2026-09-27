@@ -23,7 +23,7 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { chromium, type Page } from "playwright";
 import { loadConfig, PROJECT_ROOT } from "./runner.js";
 import { login, openDeclarationForEdit, detectSearchColumn } from "./pages.js";
-import { setLogSink, log, sleep } from "./helpers.js";
+import { setLogSink, log, sleep, waitForPageReady } from "./helpers.js";
 import { loadFieldRegistry, type FieldDef } from "./field-registry.js";
 import * as S from "./selectors.js";
 
@@ -185,7 +185,7 @@ async function deleteCopy(page: Page, ref: string): Promise<boolean> {
     // ตอนนี้เราอยู่ลึกในฟอร์มใบขน (บางทีคนละแท็บ) — กดเมนูอาจไม่ติด
     //   ไปหน้ารายการด้วย URL ตรง ๆ ชัวร์กว่า
     const base = new URL(cfg.url!).origin;
-    await page.goto(`${base}/DCTK/ExDec/Index`, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.goto(`${base}/DCTK/ExDec/Index`, { waitUntil: "commit", timeout: 60000 });
     await page.locator("#grid").first().waitFor({ state: "visible", timeout: 30000 });
     await sleep(3000);
 
@@ -321,7 +321,8 @@ try {
   log(`📥 ดึงใบขนจาก DCTK เป็น Master`);
   log(`   เลขที่ให้มา: "${INVOICE}" → ค้นในคอลัมน์ "${col.label}"`);
 
-  await page.goto(cfg.url, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await page.goto(cfg.url, { waitUntil: "commit", timeout: 60000 });
+  await waitForPageReady(page, "หน้า DCTK", 120000);
   await login(page, cfg.username, cfg.password);
   if (VIA_COPY) {
     copyRef = await copyThenOpen(page, INVOICE);

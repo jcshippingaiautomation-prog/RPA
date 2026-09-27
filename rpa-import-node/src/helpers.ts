@@ -442,6 +442,41 @@ export async function listMasterOptions(
   return [];
 }
 
+/**
+ * รอให้หน้า DCTK "พร้อมใช้งานจริง" ไม่ใช่แค่ DOM โหลดเสร็จ
+ *   DCTK เสิร์ฟ bundle ก้อนใหญ่มาก (kendo ~3.4MB · css ~14MB) และบางช่วงช้ามาก
+ *   ถ้าเริ่มกรอก/กดปุ่มก่อน Kendo จะ init เสร็จ จะเกิดอาการ "กดแล้วไม่มีอะไรเกิดขึ้น"
+ *   โดยไม่มี error ใด ๆ เพราะ event handler ยังไม่ถูกผูก
+ *   (เจอจริง THANAKORN MEK 18(C)/2026: กดบันทึกหน้า 1 แล้วเงียบทุกครั้ง)
+ */
+export async function waitForPageReady(
+  page: Page,
+  label = "หน้า",
+  timeoutMs = 180000,
+): Promise<boolean> {
+  const t0 = Date.now();
+  let warned = false;
+  while (Date.now() - t0 < timeoutMs) {
+    const st = await page.evaluate(() => ({
+      ready: document.readyState,
+      kendo: typeof (window as unknown as { kendo?: unknown }).kendo !== "undefined",
+      jq: typeof (window as unknown as { $?: unknown }).$ !== "undefined",
+    })).catch(() => null);
+    if (st && st.ready === "complete" && st.kendo && st.jq) {
+      const sec = ((Date.now() - t0) / 1000).toFixed(0);
+      if (warned) log(`  ✓ ${label} พร้อมแล้ว (รอไป ${sec}s)`);
+      return true;
+    }
+    if (!warned && Date.now() - t0 > 20000) {
+      warned = true;
+      log(`  ⏳ ${label} ยังโหลดไม่เสร็จ (readyState=${st?.ready ?? "?"} kendo=${st?.kendo ?? "?"}) — DCTK เสิร์ฟไฟล์ช้า กำลังรอต่อ`);
+    }
+    await sleep(2000);
+  }
+  log(`  ⚠ ${label} ยังไม่พร้อมหลังรอ ${(timeoutMs / 1000).toFixed(0)}s — เดินต่อแบบเสี่ยง`);
+  return false;
+}
+
 export async function comboPickStrict(
   page: Page,
   inputSelector: string,

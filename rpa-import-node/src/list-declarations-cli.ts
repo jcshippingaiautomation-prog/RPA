@@ -47,7 +47,7 @@ interface Row {
 }
 
 try {
-  await page.goto(cfg.url, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await page.goto(cfg.url, { waitUntil: "commit", timeout: 60000 });
   await login(page, cfg.username, cfg.password);
   log("→ เปิดหน้ารายการใบขน");
   await page.click(S.SEL_PORTFOLIO_MENU);

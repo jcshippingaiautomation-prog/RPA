@@ -22,6 +22,7 @@ import {
   clickThenType,
   clearField,
   kendoPickDate,
+  waitForPageReady,
 } from "./helpers.js";
 import { loadFieldRegistry, resolveSelector } from "./field-registry.js";
 import type { Record } from "./types.js";
@@ -483,7 +484,8 @@ export async function goHome(
   if (cred?.url) candidates.push(cred.url);
   for (const url of candidates) {
     try {
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+      await page.goto(url, { waitUntil: "commit", timeout: 60000 });
+      await waitForPageReady(page, "หน้าแรก DCTK", 120000);
       await page.waitForSelector(S.SEL_PORTFOLIO_MENU, { state: "visible", timeout: 12000 });
       return true;
     } catch { /* ลองที่อยู่ถัดไป */ }
@@ -491,7 +493,7 @@ export async function goHome(
   if (cred) {
     // เซสชันหลุด — login ใหม่ (เป็นทางที่ได้ผลจริงเมื่อ goto เฉย ๆ ไม่พอ)
     try {
-      await page.goto(cred.url, { waitUntil: "domcontentloaded", timeout: 45000 });
+      await page.goto(cred.url, { waitUntil: "commit", timeout: 60000 });
       await login(page, cred.username, cred.password);
       return await page.locator(S.SEL_PORTFOLIO_MENU).first().isVisible().catch(() => false);
     } catch { return false; }
@@ -836,9 +838,65 @@ export async function fillPage1(page: Page, r: Record): Promise<void> {
     log("  🧪 dry run: ข้ามการกด Save (Page 1)");
     return;
   }
+  // ⚠ ต้องแน่ใจว่า Kendo ผูก event ให้ปุ่มแล้ว ไม่งั้นกดบันทึกแล้วเงียบ ไม่มีอะไรเกิดขึ้น
+  await waitForPageReady(page, "หน้า 1 (ก่อนกดบันทึก)");
+  // ตรวจว่าปุ่มบันทึกที่กำลังจะกดคือปุ่มไหนจริง ๆ (เคยเจอปุ่มถูกซ่อน/ถูกทับแล้วคลิกไม่ติด)
+  const btn = await page.evaluate((sel: string) => {
+    const b = document.querySelector(sel) as HTMLElement | null;
+    if (!b) return "(ไม่พบปุ่ม)";
+    const r = b.getBoundingClientRect();
+    return `text="${(b.innerText || "").replace(/\s+/g, " ").trim().slice(0, 20)}" เห็นบนจอ=${b.offsetParent !== null} ` +
+      `ขนาด=${Math.round(r.width)}x${Math.round(r.height)} class="${(b.className || "").slice(0, 40)}"`;
+  }, S.SEL_BTN_SAVE).catch(() => "(อ่านไม่ได้)");
+  log(`  🔘 ปุ่มบันทึกหน้า 1: ${btn}`);
   await page.click(S.SEL_BTN_SAVE);
-  await sleep(10000);
-  await reportSaveErrors(page, "Page 1");
+  await sleep(3000);
+  // รอให้กล่อง "กำลังประมวลผล" หายไปก่อน ค่อยตัดสินว่าบันทึกผ่านหรือไม่
+  //   DCTK ช่วงนี้เสิร์ฟช้ามาก การรอเวลาคงที่แล้วเดาเอาทำให้อ่านผลผิด
+  for (let i = 0; i < 40; i++) {                       // สูงสุด ~80s
+    const busy = await page.evaluate(() => {
+      const boxes = Array.from(document.querySelectorAll<HTMLElement>("#dialogbox, .k-window, [class*='odal'], [id*='ialog']"))
+        .filter((d) => d.offsetParent !== null);
+      return boxes.some((d) => /กำลังประมวลผล|กรุณารอ|please wait/i.test(d.innerText || ""));
+    }).catch(() => false);
+    if (!busy) break;
+    await sleep(2000);
+  }
+  await sleep(4000);
+  // ⚠ ของเดิมแค่ log แล้วเดินต่อ — พอหน้า 1 ไม่ผ่าน หน้า 2 จะเปิดไม่ได้
+  //   แล้วไปพังด้วยข้อความ "waiting for #InvoiceNo" ซึ่งไม่บอกสาเหตุอะไรเลย
+  //   (เจอจริง THANAKORN MEK 18(C)/2026 ที่ user กดรันแล้วล้ม 3 รอบติด)
+  const errs = await reportSaveErrors(page, "Page 1");
+  if (errs.length) throw new Error(`บันทึกหน้า 1 ไม่ผ่าน — ${errs.slice(0, 3).join(" | ").slice(0, 300)}`);
+  // DCTK บางกรณี "ไม่ขึ้นข้อความอะไรเลย" แต่ก็ไม่บันทึก → บอกไม่ได้ว่าติดอะไร
+  //   สแกนช่องบังคับที่ยังว่างไว้ใน log เผื่อไว้ (ไม่ throw เพราะอาจเป็นช่องที่ DCTK เติมเองทีหลัง)
+  const empty = await findEmptyRequired(page);
+  if (empty.length) {
+    log(`  ⚠ หน้า 1: ช่องบังคับที่ยังว่างอยู่ ${empty.length} ช่อง —`);
+    for (const e of empty) log(`      ${e.slice(0, 150)}`);
+  }
+  // บอกให้ชัดว่า "บันทึกติดหรือยัง" — ดูจากหัวเรื่องหน้าและเลขที่ใบขนฯ
+  //   [สร้างข้อมูล] = ยังไม่บันทึก · [แก้ไขข้อมูล]/มีเลขที่ = บันทึกแล้ว
+  const st = await page.evaluate(() => {
+    const head = (document.querySelector("h1,h2,h3,.page-title,[class*='title']") as HTMLElement | null)?.innerText ?? "";
+    const withNo = Array.from(document.querySelectorAll<HTMLElement>("input,span,div"))
+      .map((e) => ((e as HTMLInputElement).value || e.innerText || "").trim())
+      .filter((t) => /^DCTK\d{6,}$/.test(t));
+    return { head: head.replace(/\s+/g, " ").trim().slice(0, 80), ref: withNo[0] ?? "" };
+  }).catch(() => ({ head: "", ref: "" }));
+  log(`  ℹ หลังบันทึกหน้า 1: หัวเรื่อง="${st.head}" · เลขที่ใบขน="${st.ref || "(ยังไม่มี)"}"`);
+  // ดึงข้อความจากกล่องข้อความทุกกล่อง "ไม่ว่าจะมองเห็นหรือไม่" — DCTK ซ่อน/โชว์ด้วย css หลายแบบ
+  const boxes = await page.evaluate(() => {
+    const out: string[] = [];
+    document.querySelectorAll<HTMLElement>("#dialogbox, .k-window, [class*='odal'], [id*='ialog'], [class*='essage']")
+      .forEach((d) => {
+        const t = (d.innerText || "").replace(/\s+/g, " ").trim();
+        if (t && t.length > 8) out.push(`${d.id || d.className.slice(0, 30)} :: ${t.slice(0, 220)}`);
+      });
+    return [...new Set(out)].slice(0, 6);
+  }).catch(() => [] as string[]);
+  if (boxes.length) { log(`  🔎 กล่องข้อความบนหน้า 1 หลังกดบันทึก:`); boxes.forEach((b) => log(`      ${b}`)); }
+  await captureIfRequested(page, r, "page1_after_save");
 }
 
 /**
@@ -847,22 +905,70 @@ export async function fillPage1(page: Page, r: Record): Promise<void> {
  * ก่อนหน้านี้ Save ที่ไม่ผ่านจะเงียบ แล้วไปพังที่หน้าถัดไปด้วยข้อความ
  * "waitForSelector timeout" ซึ่งไม่บอกสาเหตุ ทำให้ไล่ปัญหายาก
  */
-async function reportSaveErrors(page: Page, where: string): Promise<void> {
+/**
+ * หน้า 1 บันทึกไม่ผ่านแต่ DCTK ไม่ขึ้นข้อความ — สแกนหาว่า "ช่องบังคับไหนยังว่าง"
+ *   DCTK ทำเครื่องหมายช่องบังคับด้วย class ที่มีคำว่า required และใส่ * ไว้ใน label
+ *   คืนรายการ "ป้ายช่อง" ที่บังคับแต่ยังไม่มีค่า เพื่อบอกสาเหตุได้ตรงจุด
+ */
+async function findEmptyRequired(page: Page): Promise<string[]> {
+  return await page.evaluate(() => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const labelOf = (el: Element): string => {
+      // หา label ที่ใกล้ที่สุด — DCTK วาง label ไว้ใน div พี่น้องฝั่งซ้าย
+      let n: Element | null = el;
+      for (let i = 0; i < 6 && n; i++) {
+        const row = n.closest("div.form-group, div.row, td, tr");
+        if (row) {
+          const t = (row as HTMLElement).innerText?.replace(/\s+/g, " ").trim();
+          if (t && t.length < 120) return t;
+        }
+        n = n.parentElement;
+      }
+      return (el as HTMLInputElement).id || (el as HTMLInputElement).name || "(ไม่ทราบชื่อช่อง)";
+    };
+    const nodes = document.querySelectorAll<HTMLElement>(
+      "input[class*='required'], select[class*='required'], textarea[class*='required']," +
+      " [class*='required'] input, [class*='required'] select, [class*='required'] textarea," +
+      " input[aria-required=true], select[aria-required=true]",
+    );
+    for (const el of Array.from(nodes)) {
+      if (el.offsetParent === null) continue;                       // ไม่เห็นบนจอ = ไม่นับ
+      if ((el as HTMLInputElement).disabled) continue;
+      const v = String((el as HTMLInputElement).value ?? "").trim();
+      if (v && v !== "-" && v !== "--เลือก--") continue;
+      const lb = labelOf(el);
+      if (!seen.has(lb)) { seen.add(lb); out.push(`${lb} [${el.id || el.getAttribute("name") || "?"}] = ${JSON.stringify(v)}`); }
+    }
+    return out.slice(0, 12);
+  }).catch(() => [] as string[]);
+}
+
+async function reportSaveErrors(page: Page, where: string): Promise<string[]> {
   const msgs = await page.evaluate(() => {
     const out: string[] = [];
     const seen = new Set<string>();
-    const nodes = document.querySelectorAll(
+    const push = (t?: string) => {
+      const v = (t ?? "").replace(/\s+/g, " ").trim();
+      if (v && v.length > 3 && !seen.has(v)) { seen.add(v); out.push(v); }
+    };
+    document.querySelectorAll(
       ".validation-summary-errors, .field-validation-error, .text-danger, [class*=alert-danger]",
-    );
-    for (const n of Array.from(nodes)) {
-      const t = (n as HTMLElement).innerText?.replace(/\s+/g, " ").trim();
-      if (t && t.length > 3 && !seen.has(t)) { seen.add(t); out.push(t); }
-    }
-    return out;
+    ).forEach((n) => push((n as HTMLElement).innerText));
+    // ⚠ DCTK บางหน้าขึ้น error เป็น "กล่องข้อความ" ไม่ใช่ข้อความในฟอร์ม
+    //   ถ้าดูแต่ element ในฟอร์มจะไม่เห็นอะไรเลย แล้วเข้าใจผิดว่าบันทึกผ่าน
+    document.querySelectorAll("#dialogbox, .k-window, [class*='odal'], [id*='ialog']").forEach((d) => {
+      if ((d as HTMLElement).offsetParent !== null) push((d as HTMLElement).innerText);
+    });
+    // กรองข้อความที่ "ไม่ใช่ error" ออก — DCTK ใช้กล่องเดียวกันแสดงสถานะกำลังทำงานด้วย
+    //   ถ้าไม่กรอง จะเข้าใจผิดว่า "กำลังประมวลผล กรุณารอสักครู่" คือข้อผิดพลาด
+    const NOISE = /กำลังประมวลผล|กรุณารอ|please wait|loading/i;
+    return out.filter((t) => !NOISE.test(t) && t.replace(/Message Info\.?|×/gi, "").trim().length > 5);
   }).catch(() => [] as string[]);
-  if (!msgs.length) return;
+  if (!msgs.length) return [];
   log(`  ✗ ${where}: DCTK ไม่ยอมบันทึก —`);
-  for (const m of msgs.slice(0, 6)) log(`      ${m.slice(0, 160)}`);
+  for (const m of msgs.slice(0, 6)) log(`      ${m.slice(0, 200)}`);
+  return msgs;
 }
 
 /** Page 2 ขั้น 1 — เปิด tab ใหม่ + รอฟอร์มพร้อม (แยกออกเพื่อ inspect) */
@@ -875,7 +981,26 @@ export async function fillPage2Open(page: Page): Promise<Page> {
 
   const context = page.context();
   const addBtn = page.locator(S.SEL_BTN_INVOICE_ADD);
-  await addBtn.waitFor({ state: "visible", timeout: 20000 });
+  try {
+    await addBtn.waitFor({ state: "visible", timeout: 20000 });
+  } catch (e) {
+    // ปุ่มเพิ่มใบกำกับไม่โผล่ = ส่วนใหญ่เพราะหน้า 1 ยังไม่ถูกบันทึก → บอกเหตุผลจริงก่อนตาย
+    const errs = await reportSaveErrors(page, "Page 2 (เปิดฟอร์ม)");
+    if (errs.length) throw new Error(`เปิดฟอร์มใบกำกับไม่ได้ — ${errs.slice(0, 3).join(" | ").slice(0, 300)}`);
+    throw e;
+  }
+  // ปุ่มโผล่แล้วแต่กดไม่ติด = หน้า 1 ยังไม่ถูกบันทึก (DCTK ปิดปุ่มไว้จนกว่าจะมีเลขที่ใบขน)
+  const addDisabled = await page.evaluate((sel: string) => {
+    const b = document.querySelector(sel) as HTMLElement | null;
+    if (!b) return true;
+    const cls = b.className || "";
+    return /disabled|k-state-disabled/i.test(cls) || (b as HTMLButtonElement).disabled === true;
+  }, S.SEL_BTN_INVOICE_ADD).catch(() => false);
+  if (addDisabled) {
+    const empty = await findEmptyRequired(page);
+    const why = empty.length ? ` · ช่องบังคับที่ว่าง: ${empty.slice(0, 3).join(" | ")}` : "";
+    throw new Error(`หน้า 1 ยังไม่ถูกบันทึก — ปุ่ม "เพิ่มข้อมูล" ของใบกำกับยังกดไม่ได้${why}`.slice(0, 350));
+  }
   await sleep(1500);
 
   // retry คลิก "เพิ่มข้อมูล" จนกว่า tab ใหม่จะเปิด (สูงสุด 3 ครั้ง)

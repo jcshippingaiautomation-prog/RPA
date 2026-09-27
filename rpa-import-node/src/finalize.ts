@@ -434,7 +434,7 @@ export async function reprintDeclaration(
     // pattern ยืนยันจาก log จริง: ...?selectedRecord=DCTKxxx&pagesText=&printFirstPage=false&printLastPage=false
     const reportUrl = `${base}/ExportReport/RptExDec?selectedRecord=${encodeURIComponent(declNo)}&pagesText=&printFirstPage=false&printLastPage=false`;
     log(`  🔗 เปิด report URL ตรง: ${reportUrl}`);
-    await page.goto(reportUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.goto(reportUrl, { waitUntil: "commit", timeout: 60000 });
     // ให้ Stimulsoft viewer โหลด (รอ panel หลัก)
     try { await page.waitForSelector("#Report_JsViewerMainPanel, .stiJsViewerMainPanel", { timeout: 25000 }); } catch { /* */ }
     await page.waitForTimeout(2000);

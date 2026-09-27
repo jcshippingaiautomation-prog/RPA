@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { chromium, type BrowserContext, type Page } from "playwright";
 
-import { log, sleep, setLogSink, type LogSink } from "./helpers.js";
+import { log, sleep, setLogSink, waitForPageReady, type LogSink } from "./helpers.js";
 import {
   loadRecordsFromSheet,
   loadRecords,
@@ -713,13 +713,33 @@ async function runBrowser(
     viewport: { width: 1920, height: 1080 },
   });
   if (process.env.RPA_DEBUG_TABS) context.on("page", (p) => log(`  [TAB+] ${(p.url() || "about:blank").slice(0, 90)}`));
+
+  // ⚠ DCTK บางจังหวะถามด้วย alert()/confirm() ของเบราว์เซอร์ ไม่ใช่กล่องในหน้าเว็บ
+  //   Playwright ตั้งต้น "ปิดกล่องทิ้ง" = ตอบ Cancel ให้อัตโนมัติ
+  //   ผลคือกดบันทึกแล้วไม่มีอะไรเกิดขึ้น ไม่มีข้อความ ไม่มี error — หาสาเหตุไม่เจอเลย
+  //   (เจอจริง THANAKORN MEK 18(C)/2026 ที่ user กดรันแล้วล้ม: บันทึกหน้า 1 ไม่ติดทุกครั้ง)
+  //   → ตอบ OK/ใช่ ให้ทุกกล่อง ยกเว้นกล่องที่ขอ "ปรับสถานะเอกสารให้พร้อมแก้ไข"
+  //     ซึ่งห้ามตอบตกลงเด็ดขาด เพราะจะไปเปลี่ยนสถานะใบขนจริงของลูกค้า
+  const wireDialogs = (p: Page) => {
+    p.on("dialog", async (d) => {
+      const msg = d.message().replace(/\s+/g, " ").trim();
+      const danger = /ปรับสถานะ|พร้อมแก้ไข/.test(msg);
+      log(`  💬 DCTK ถามผ่านกล่องเบราว์เซอร์ (${d.type()}): "${msg.slice(0, 140)}" → ตอบ ${danger ? "ยกเลิก (กันแตะสถานะใบจริง)" : "ตกลง"}`);
+      try { danger ? await d.dismiss() : await d.accept(); } catch { /* กล่องปิดไปเองแล้ว */ }
+    });
+  };
+  context.on("page", wireDialogs);
   let page: Page = await context.newPage();
+  wireDialogs(page);                       // หน้าแรกไม่ผ่าน event "page" ต้องผูกเอง
   page.setDefaultTimeout(cfg.default_timeout_ms ?? 30000);
 
   log(`open: ${cfg.url}`);
   // รอแค่ DOM พร้อม (ฟอร์ม login ใช้ได้ทันที) ไม่ต้องรอ resource ครบ (รูป/script เสริม)
   //   + เผื่อ timeout 45s กันหน้าโหลดช้า — กัน error "Timeout 15000ms ... waiting until load"
-  await page.goto(cfg.url, { waitUntil: "domcontentloaded", timeout: 45000 });
+  // ⚠ อย่ารอ domcontentloaded — DCTK เสิร์ฟ bundle 14MB บางช่วงกินเวลา >45s
+  //   รอแค่ "ได้ response แล้ว" (commit) จากนั้นค่อยรอให้ Kendo พร้อมจริง
+  await page.goto(cfg.url, { waitUntil: "commit", timeout: 60000 });
+  await waitForPageReady(page, "หน้า login");
   await login(page, cfg.username, cfg.password);
 
   // ---- INSPECT-COMBO-CURRENCY: เปิดถึง Page 2 → คลิก currency → dump row + input value ----
@@ -1007,7 +1027,7 @@ async function runBrowser(
         let backHome = false;
         for (const url of [`${origin}/DCTK/`, `${origin}/DCTK/Home/Index`, cfg.url!]) {
           try {
-            await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+            await page.goto(url, { waitUntil: "commit", timeout: 60000 });
             await page.waitForSelector(S.SEL_PORTFOLIO_MENU, { state: "visible", timeout: 15000 });
             backHome = true;
             break;
@@ -1016,7 +1036,7 @@ async function runBrowser(
         if (!backHome) {
           // เซสชันอาจหลุด — login ใหม่แล้วเช็คอีกครั้ง
           try {
-            await page.goto(cfg.url!, { waitUntil: "domcontentloaded", timeout: 45000 });
+            await page.goto(cfg.url!, { waitUntil: "commit", timeout: 60000 });
             await login(page, cfg.username, cfg.password);
             backHome = await page.locator(S.SEL_PORTFOLIO_MENU).first().isVisible().catch(() => false);
           } catch { /* */ }
