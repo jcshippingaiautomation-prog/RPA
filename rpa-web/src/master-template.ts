@@ -10,6 +10,9 @@
 // ============================================================
 import type { DeclarationTemplate, FieldMode } from "./supabase.js";
 
+/** ช่องที่ผูกกับคอลัมน์ระบุตัวตนของใบ — โหมด "ไม่กรอก" ต้องไม่ล้างค่าพวกนี้ */
+const PROTECTED_KEYS = new Set(["cmp_name_thai", "invoice_no"]);
+
 const isEmpty = (v: unknown): boolean =>
   v === null || v === undefined || (typeof v === "string" && v.trim() === "");
 
@@ -59,8 +62,17 @@ export function applyTemplate(
 
     if (mode === "off") {
       // ไม่กรอกช่องนี้ — ล้างค่าที่ติดมาจาก AI ด้วย กันหลุดลง DCTK
-      if (!isEmpty(record[key])) overridden.push(key);
-      record[key] = "";
+      //   ⚠ ยกเว้น "ช่องที่เป็นตัวระบุตัวตนของใบ" ห้ามล้างเด็ดขาด
+      //   cmp_name_thai → คอลัมน์ customer_name (ใช้ค้นบริษัทผู้ส่งออกใน DCTK)
+      //   invoice_no    → คอลัมน์ invoice_number (ใช้ระบุใบ + กันสร้างซ้ำ)
+      //   ถ้าล้าง ใบจะกลายเป็น null/null รันไม่ได้และหาไม่เจอ
+      //   (เจอจริง: user ตั้ง 2 ช่องนี้เป็น "ไม่กรอก" ใน Master ของ Q-Cine
+      //    แล้วทุกใบที่อัปโหลดหลังจากนั้นเสียหมด)
+      //   การ "ไม่กรอกลง DCTK" ทำได้อยู่แล้วผ่าน fieldModes ที่ worker อ่าน ไม่ต้องล้างค่า
+      if (!PROTECTED_KEYS.has(key)) {
+        if (!isEmpty(record[key])) overridden.push(key);
+        record[key] = "";
+      }
       continue;
     }
     if (isEmpty(tplVal)) continue;               // Master ไม่มีค่าให้ใช้
