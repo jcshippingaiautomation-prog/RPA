@@ -877,17 +877,21 @@ function reconcileWeights(record: Record<string, unknown> & { _items?: Record<st
   }
 }
 
-export async function createDeclaration(
+/**
+ * ประกอบ "ใบขนที่พร้อมบันทึก" จากสิ่งที่ AI อ่านมา — แยกออกจากการบันทึกลงฐานข้อมูล
+ *   เพื่อให้ทดสอบได้โดยไม่ต้องเขียนข้อมูลจริง (ชุดทดสอบถอยหลัง golden-cli)
+ *   ขั้นตอนทั้งหมดต้องเหมือนกับตอนอัปโหลดจริงเป๊ะ ๆ ไม่งั้นทดสอบไปก็ไม่ตรงของจริง
+ */
+export async function prepareDeclarationRecord(
   record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
-  opts: {
-    source?: string; status?: string; fieldModes?: { [k: string]: string };
-    /** บังคับใช้ Master ตัวนี้ (ผู้ใช้เลือกเองตอนอัปโหลด) — ไม่ต้องให้ระบบจับคู่เอง */
-    templateId?: string;
-  } = {},
-): Promise<{ id: string; codeFixes?: { label: string; from: string; to: string }[] } | null> {
-  const sb = getClient();
-  if (!sb) return null;
-  try {
+  opts: { fieldModes?: { [k: string]: string }; templateId?: string } = {},
+): Promise<{
+  record: Record<string, unknown> & { _items?: Record<string, unknown>[] };
+  fieldModes: { [k: string]: string };
+  codeFixes: { label: string; from: string; to: string; scope?: string; itemLine?: number; listLabel?: string }[];
+  templateName?: string;
+}> {
+
     // ── ผสม Master ก่อนบันทึก ────────────────────────────────────────────
     //   เดิมขั้นนี้อยู่ใน insertDeclaration ซึ่งไม่มีใครเรียก → อัปโหลดเอกสารแล้วไม่เคยได้ค่าจาก Master
     // ── ปรับหน่วย/สกุลเงิน/รหัสประเทศ ให้ตรงรหัสที่กรมฯ รับ ก่อนบันทึก ──
@@ -937,6 +941,28 @@ export async function createDeclaration(
     reconcileWeights(record);
     reconcileItemAmounts(record, await extraAmountAlloc(String(record.customer_name ?? "")));
     normalizeItemText(record, await customerPreset(String(record.customer_name ?? ""), "__product_code_from"));
+
+
+  return { record, fieldModes, codeFixes };
+}
+
+export async function createDeclaration(
+  record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
+  opts: {
+    source?: string; status?: string; fieldModes?: { [k: string]: string };
+    /** บังคับใช้ Master ตัวนี้ (ผู้ใช้เลือกเองตอนอัปโหลด) — ไม่ต้องให้ระบบจับคู่เอง */
+    templateId?: string;
+  } = {},
+): Promise<{ id: string; codeFixes?: { label: string; from: string; to: string }[] } | null> {
+  const sb = getClient();
+  if (!sb) return null;
+  try {
+    const prepared = await prepareDeclarationRecord(record, {
+      fieldModes: opts.fieldModes, templateId: opts.templateId,
+    });
+    record = prepared.record;
+    const fieldModes = prepared.fieldModes;
+    const codeFixes = prepared.codeFixes;
 
     const payload: Record<string, unknown> = {};
     for (const col of DECL_COLUMNS) if (record[col] !== undefined) payload[col] = record[col] ?? null;

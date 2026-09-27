@@ -1,0 +1,59 @@
+{
+  "name": "hitachi-kw",
+  "customer": "SIAM-HITACHI",
+  "note": "สยามฮิตาชิ → คูเวต · เฉลยจากใบที่ยื่นกรมฯ DCTK000035738 (ขาย SG ส่ง KW · ยอด 5,573.48 · แถวแรก 1,102.31)",
+  "sources": [
+    "Cusine & Siam Hitachi/BD_ST05414-KW.xlsx",
+    "Cusine & Siam Hitachi/INV_ST05414-KW_KW000985.pdf"
+  ],
+  "aiAnswer": "```json\n{\n  \"buyer_country_code\": \"SG\",\n  \"destination_country_code\": \"KW\",\n  \"customer_name\": \"SIAM-HITACHI\",\n  \"vessel_name\": \"\",\n  \"voyage_number\": \"\",\n  \"release_port_code\": \"\",\n  \"loading_port_code\": \"2801\",\n  \"shipping_mark\": \"AS PER INVOICE NO. KW000985\",\n  \"tax_payment_method_code\": \"A\",\n  \"etd\": \"2026-09-20\",\n  \"invoice_number\": \"KW000985\",\n  \"invoice_date\": \"2026-09-07\",\n  \"consignee_name\": \"AHMADIAH INTERNATIONAL ELEVATOR CO.\",\n  \"incoterms\": \"CIF\",\n  \"currency\": \"USD\",\n  \"total_goods_amount\": 4682.97,\n  \"freight_charge\": 845.98,\n  \"insurance_charge\": 44.53,\n  \"net_weight_kg\": 12.60,\n  \"gross_weight_kg\": 47.00,\n  \"description_eng\": \"\",\n  \"net_weight_ton\": 0.0126,\n  \"net_weight_unit_code\": \"TO\",\n  \"container_or_volume_qty\": 5,\n  \"container_unit_code\": \"CT\",\n  \"export_tariff\": \"9PART3\",\n  \"customs_unit_code\": \"\",\n  \"items\": [\n    {\n      \"description_eng\": \"PCB ASSY (E08509) DWG:J0005473-A-0000\",\n      \"description_eng_field\": \"PCB ASSY (E08509) DWG:J0005473-A-0000\",\n      \"product_description_thai\": \"แผงวงจรไฟฟ้า\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": 1,\n      \"container_unit_code\": \"C62\",\n      \"net_weight_kg\": 0.60,\n      \"gross_weight_kg\": 4.00,\n      \"net_weight_ton\": 0.0006,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 211.80,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"9PART3\",\n      \"customs_unit_code\": \"C62\",\n      \"quantity\": 1,\n      \"customs_product_code\": \"ST05414-KW\",\n      \"tariff_code\": \"000085371099\",\n      \"origin_country_code\": \"JP\",\n      \"is_foc\": false\n    },\n    {\n      \"description_eng\": \"PCB ASSY (E08522) DWG:J0089001-A-0000\",\n      \"description_eng_field\": \"PCB ASSY (E08522) DWG:J0089001-A-0000\",\n      \"product_description_thai\": \"แผงวงจรไฟฟ้า\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": 1,\n      \"container_unit_code\": \"C62\",\n      \"net_weight_kg\": 0.50,\n      \"gross_weight_kg\": 1.00,\n      \"net_weight_ton\": 0.0005,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 665.94,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"9PART3\",\n      \"customs_unit_code\": \"C62\",\n      \"quantity\": 2,\n      \"customs_product_code\": \"ST05414-KW\",\n      \"tariff_code\": \"000085371099\",\n      \"origin_country_code\": \"JP\",\n      \"is_foc\": false\n    },\n    {\n      \"description_eng\": \"MOTOR ASSY DWG:Q0033011-B-0000\",\n      \"description_eng_field\": \"MOTOR ASSY DWG:Q0033011-B-0000\",\n      \"product_description_thai\": \"มอเตอร์\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": 1,\n      \"container_unit_code\": \"C62\",\n      \"net_weight_kg\": 5.00,\n      \"gross_weight_kg\": 15.00,\n      \"net_weight_ton\": 0.005,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 1051.28,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"9PART3\",\n      \"customs_unit_code\": \"C62\",\n      \"quantity\": 1,\n      \"customs_product_code\": \"ST05414-KW\",\n      \"tariff_code\": \"000085013170\",\n      \"origin_country_code\": \"JP\",\n      \"is_foc\": false\n    },\n    {\n      \"description_eng\": \"PHOTO.D DWG:G0055231-B-0000\",\n      \"description_eng_field\": \"PHOTO.D DWG:G0055231-B-0000\",\n      \"product_description_thai\": \"เซ็นเซอร์ป้องกันประตูลิฟท์หนีบ\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": 1,\n      \"container_unit_code\": \"C62\",\n      \"net_weight_kg\": 6.00,\n      \"gross_weight_kg\": 26.00,\n      \"net_weight_ton\": 0.006,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 2165.32,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"9PART3\",\n      \"customs_unit_code\": \"C62\",\n      \"quantity\": 2,\n      \"customs_product_code\": \"ST05414-KW\",\n      \"tariff_code\": \"000090328939\",\n      \"origin_country_code\": \"TH\",\n      \"is_foc\": false\n    },\n    {\n      \"description_eng\": \"PCB (E08505) [WITH PROGRAM] DWG:42002412-A-0000\",\n      \"description_eng_field\": \"PCB (E08505) [WITH PROGRAM] DWG:42002412-A-0000\",\n      \"product_description_thai\": \"แผงวงจรไฟฟ้า\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": 1,\n      \"container_unit_code\": \"C62\",\n      \"net_weight_kg\": 0.50,\n      \"gross_weight_kg\": 1.00,\n      \"net_weight_ton\": 0.0005,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 588.63,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"9PART3\",\n      \"customs_unit_code\": \"C62\",\n      \"quantity\": 1,\n      \"customs_product_code\": \"ST05414-KW\",\n      \"tariff_code\": \"000085371099\",\n      \"origin_country_code\": \"JP\",\n      \"is_foc\": false\n    }\n  ]\n}\n```",
+  "expectHeader": {
+    "customer_name": "SIAM-HITACHI",
+    "invoice_number": "KW000985",
+    "currency": "USD",
+    "total_goods_amount": 5573.48,
+    "freight_charge": 845.98,
+    "insurance_charge": 44.53,
+    "buyer_country_code": "SG",
+    "destination_country_code": "KW",
+    "net_weight_kg": 12.6,
+    "gross_weight_kg": 47
+  },
+  "expectItems": [
+    {
+      "amount": 1102.31,
+      "customs_unit_code": "C62",
+      "tariff_code": "000085371099",
+      "origin_country_code": "JP",
+      "net_weight_kg": 0.6
+    },
+    {
+      "amount": 665.94,
+      "customs_unit_code": "C62",
+      "tariff_code": "000085371099",
+      "origin_country_code": "JP",
+      "net_weight_kg": 0.5
+    },
+    {
+      "amount": 1051.28,
+      "customs_unit_code": "C62",
+      "tariff_code": "000085013170",
+      "origin_country_code": "JP",
+      "net_weight_kg": 5
+    },
+    {
+      "amount": 2165.32,
+      "customs_unit_code": "C62",
+      "tariff_code": "000090328939",
+      "origin_country_code": "TH",
+      "net_weight_kg": 6
+    },
+    {
+      "amount": 588.63,
+      "customs_unit_code": "C62",
+      "tariff_code": "000085371099",
+      "origin_country_code": "JP",
+      "net_weight_kg": 0.5
+    }
+  ]
+}

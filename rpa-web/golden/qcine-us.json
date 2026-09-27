@@ -1,0 +1,41 @@
+{
+  "name": "qcine-us",
+  "customer": "CUISINE",
+  "note": "Q-Cine → อเมริกา · เฉลยจากใบที่ยื่นกรมฯ DCTK000035927",
+  "sources": [
+    "source/2026-09/1790327616130_IN03462 (INV&PL).xlsx",
+    "source/2026-09/1790327614987_BKG-ZIMUBKK80483069.pdf"
+  ],
+  "aiAnswer": "```json\n{\n  \"buyer_country_code\": \"US\",\n  \"destination_country_code\": \"US\",\n  \"customer_name\": \"CUISINE\",\n  \"vessel_name\": \"SANTA LORETTA\",\n  \"voyage_number\": \"GU639W\",\n  \"release_port_code\": \"2840\",\n  \"loading_port_code\": \"2801\",\n  \"shipping_mark\": \"CUISINE SOLUTIONS\",\n  \"tax_payment_method_code\": \"A\",\n  \"etd\": \"2026-09-29\",\n  \"invoice_number\": \"IN03462\",\n  \"invoice_date\": \"2026-09-26\",\n  \"consignee_name\": \"CUISINE SOLUTIONS INC\",\n  \"incoterms\": \"\",\n  \"currency\": \"THB\",\n  \"total_goods_amount\": 2933180.00,\n  \"freight_charge\": 456000.00,\n  \"insurance_charge\": 0.00,\n  \"net_weight_kg\": 17835.96,\n  \"gross_weight_kg\": 19281.92,\n  \"description_eng\": \"ผลิตภัณฑ์อาหารสำเร็จรูปปรุงสุกแช่แข็ง\",\n  \"net_weight_ton\": 17.836,\n  \"net_weight_unit_code\": \"TO\",\n  \"container_or_volume_qty\": 1,\n  \"container_unit_code\": \"40RF\",\n  \"export_tariff\": \"9PART3\",\n  \"customs_unit_code\": \"KGM\",\n  \"items\": [\n    {\n      \"description_eng\": \"OATMEAL COCONUT CHIA\",\n      \"description_eng_field\": \"15410 OATMEAL WITH COCONUT MILK AND CHIA SEEDS (FROZEN FULLY COOKED)\",\n      \"product_description_thai\": \"ผลิตภัณฑ์อาหารสำเร็จรูปปรุงสุกแช่แข็ง\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": 2000,\n      \"container_unit_code\": \"CT\",\n      \"net_weight_kg\": 14187.01,\n      \"gross_weight_kg\": 15331.02,\n      \"net_weight_ton\": 14.187,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 2455040.00,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"19042090\",\n      \"customs_unit_code\": \"KGM\",\n      \"quantity\": \"\",\n      \"customs_product_code\": \"15410\",\n      \"tariff_code\": \"19042090\",\n      \"origin_country_code\": \"TH\",\n      \"is_foc\": false\n    },\n    {\n      \"description_eng\": \"COCONUT CHIA PUDDING\",\n      \"description_eng_field\": \"27058 COCONUT CHIA PUDDING (FROZEN FULLY COOKED)\",\n      \"product_description_thai\": \"ผลิตภัณฑ์อาหารสำเร็จรูปปรุงสุกแช่แข็ง\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": 500,\n      \"container_unit_code\": \"CT\",\n      \"net_weight_kg\": 3648.95,\n      \"gross_weight_kg\": 3950.90,\n      \"net_weight_ton\": 3.649,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 934140.00,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"19042090\",\n      \"customs_unit_code\": \"KGM\",\n      \"quantity\": \"\",\n      \"customs_product_code\": \"27058\",\n      \"tariff_code\": \"19042090\",\n      \"origin_country_code\": \"TH\",\n      \"is_foc\": false\n    }\n  ]\n}\n```",
+  "expectHeader": {
+    "customer_name": "CUISINE",
+    "invoice_number": "IN03462",
+    "currency": "THB",
+    "total_goods_amount": 3389180,
+    "freight_charge": 456000,
+    "container_or_volume_qty": "2500",
+    "container_unit_code": "CT",
+    "buyer_country_code": "US",
+    "destination_country_code": "US",
+    "release_port_code": "2840",
+    "loading_port_code": "2801",
+    "net_weight_kg": 17835.96,
+    "gross_weight_kg": 19281.92
+  },
+  "expectItems": [
+    {
+      "amount": 2455040,
+      "container_or_volume_qty": "2000",
+      "customs_unit_code": "CT",
+      "tariff_code": "000019042090",
+      "net_weight_kg": 14187.01
+    },
+    {
+      "amount": 934140,
+      "container_or_volume_qty": "500",
+      "customs_unit_code": "CT",
+      "tariff_code": "000019042090",
+      "net_weight_kg": 3648.95
+    }
+  ]
+}
