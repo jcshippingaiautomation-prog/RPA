@@ -1,0 +1,37 @@
+{
+  "name": "hitachi-in",
+  "customer": "SIAM-HITACHI",
+  "note": "IN001756 · เฉลยจากใบที่ยื่นกรมฯ DCTK000033260",
+  "sources": [
+    "source/2026-09/1789839901146_INV_XP0675-JP_IN001756.pdf",
+    "source/2026-09/1789839900418_BD_XP0675-JP.xlsx"
+  ],
+  "aiAnswer": "```json\n{\n  \"buyer_country_code\": \"JP\",\n  \"destination_country_code\": \"IN\",\n  \"customer_name\": \"SIAM-HITACHI\",\n  \"vessel_name\": null,\n  \"voyage_number\": null,\n  \"release_port_code\": null,\n  \"loading_port_code\": \"2801\",\n  \"shipping_mark\": \"AS PER INVOICE NO. IN001756\",\n  \"tax_payment_method_code\": \"A\",\n  \"etd\": \"2026-06-02\",\n  \"invoice_number\": \"IN001756\",\n  \"invoice_date\": \"2026-05-28\",\n  \"consignee_name\": \"HITACHI LIFT INDIA PVT. LTD.\",\n  \"incoterms\": \"CIF\",\n  \"currency\": \"THB\",\n  \"total_goods_amount\": 140000.00,\n  \"freight_charge\": 29611.50,\n  \"insurance_charge\": 1558.50,\n  \"net_weight_kg\": 5.00,\n  \"gross_weight_kg\": 35.00,\n  \"description_eng\": \"ELEVATOR PARTS\",\n  \"net_weight_ton\": 0.005,\n  \"net_weight_unit_code\": \"TO\",\n  \"container_or_volume_qty\": null,\n  \"container_unit_code\": null,\n  \"export_tariff\": \"9PART3\",\n  \"customs_unit_code\": \"C62\",\n  \"items\": [\n    {\n      \"description_eng\": \"PCB ASSY\",\n      \"description_eng_field\": \"PCB ASSY (HEN1-PES) DWG:J0169102-A-0000\",\n      \"product_description_thai\": \"แผงวงจรไฟฟ้า\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": \"1\",\n      \"container_unit_code\": \"C62\",\n      \"net_weight_kg\": 5.00,\n      \"gross_weight_kg\": 35.00,\n      \"net_weight_ton\": 0.005,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 140000.00,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"9PART3\",\n      \"customs_unit_code\": \"C62\",\n      \"quantity\": \"10\",\n      \"customs_product_code\": \"XP0675-JP\",\n      \"tariff_code\": \"000085371099\",\n      \"origin_country_code\": \"JP\",\n      \"is_foc\": false\n    }\n  ]\n}\n```",
+  "expectHeader": {
+    "customer_name": "SIAM-HITACHI",
+    "invoice_number": "IN001756",
+    "currency": "THB",
+    "total_goods_amount": 171170,
+    "freight_charge": 29611.5,
+    "insurance_charge": 1558.5,
+    "container_unit_code": "CS",
+    "buyer_country_code": "JP",
+    "destination_country_code": "IN",
+    "release_port_code": "0251",
+    "loading_port_code": "2801",
+    "net_weight_kg": 5,
+    "gross_weight_kg": 35,
+    "incoterms": "CIF",
+    "tax_payment_method_code": "A"
+  },
+  "expectItems": [
+    {
+      "amount": 171170,
+      "container_or_volume_qty": "1",
+      "customs_unit_code": "C62",
+      "tariff_code": "000085371099",
+      "net_weight_kg": 5,
+      "origin_country_code": "JP"
+    }
+  ]
+}

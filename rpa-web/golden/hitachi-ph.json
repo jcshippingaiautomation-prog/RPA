@@ -1,0 +1,38 @@
+{
+  "name": "hitachi-ph",
+  "customer": "SIAM-HITACHI",
+  "note": "PH002047 · เฉลยจากใบที่ยื่นกรมฯ DCTK000034898",
+  "sources": [
+    "source/2026-09/1789839929885_INV_XP0678-JP_PH002047.pdf",
+    "source/2026-09/1789839929169_BD_XP0678-JP.xlsx"
+  ],
+  "aiAnswer": "```json\n{\n  \"buyer_country_code\": \"JP\",\n  \"destination_country_code\": \"PH\",\n  \"customer_name\": \"SIAM-HITACHI\",\n  \"vessel_name\": \"PIYA BHUM\",\n  \"voyage_number\": \"V.091N\",\n  \"release_port_code\": \"2801\",\n  \"loading_port_code\": \"2801\",\n  \"shipping_mark\": \"AS PER INVOICE NO. PH002047\",\n  \"tax_payment_method_code\": \"A\",\n  \"etd\": \"2026-07-24\",\n  \"invoice_number\": \"PH002047\",\n  \"invoice_date\": \"2026-07-10\",\n  \"consignee_name\": \"HITACHI ELEVATOR PHILIPPINES CORPORATION\",\n  \"incoterms\": \"CIF\",\n  \"currency\": \"THB\",\n  \"total_goods_amount\": 18000.00,\n  \"freight_charge\": 24038.60,\n  \"insurance_charge\": 1265.19,\n  \"net_weight_kg\": 17.05,\n  \"gross_weight_kg\": 40.00,\n  \"description_eng\": null,\n  \"net_weight_ton\": 0.01705,\n  \"net_weight_unit_code\": \"TO\",\n  \"container_or_volume_qty\": 1,\n  \"container_unit_code\": \"CT\",\n  \"export_tariff\": \"9PART3\",\n  \"customs_unit_code\": null,\n  \"items\": [\n    {\n      \"description_eng\": \"MOTOR ASSY, LEAD.W ASSY\",\n      \"description_eng_field\": \"MOTOR ASSY, LEAD.W ASSY DWG:G0010285-A, Q0002806-B\",\n      \"product_description_thai\": \"มอเตอร์\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": 1,\n      \"container_unit_code\": \"CT\",\n      \"net_weight_kg\": 17.05,\n      \"gross_weight_kg\": 40.00,\n      \"net_weight_ton\": 0.01705,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 18000.00,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"9PART3\",\n      \"customs_unit_code\": \"C62\",\n      \"quantity\": 1.00,\n      \"customs_product_code\": \"XP0678-JP\",\n      \"tariff_code\": \"000085013170\",\n      \"origin_country_code\": \"CN\",\n      \"is_foc\": false\n    }\n  ]\n}\n```",
+  "expectHeader": {
+    "customer_name": "SIAM-HITACHI",
+    "invoice_number": "PH002047",
+    "currency": "THB",
+    "total_goods_amount": 43303.79,
+    "freight_charge": 24038.6,
+    "insurance_charge": 1265.19,
+    "container_or_volume_qty": "1",
+    "container_unit_code": "CS",
+    "buyer_country_code": "JP",
+    "destination_country_code": "PH",
+    "release_port_code": "2814",
+    "loading_port_code": "2801",
+    "net_weight_kg": 17.05,
+    "gross_weight_kg": 40,
+    "incoterms": "CIF",
+    "tax_payment_method_code": "A"
+  },
+  "expectItems": [
+    {
+      "amount": 43303.79,
+      "container_or_volume_qty": "1",
+      "customs_unit_code": "C62",
+      "tariff_code": "000085013170",
+      "net_weight_kg": 17.05,
+      "origin_country_code": "CN"
+    }
+  ]
+}

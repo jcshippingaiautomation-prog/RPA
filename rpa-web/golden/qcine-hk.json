@@ -1,0 +1,110 @@
+{
+  "name": "qcine-hk",
+  "customer": "CUISINE",
+  "note": "IN03402 · เฉลยจากใบที่ยื่นกรมฯ DCTK000035666",
+  "sources": [
+    "source/2026-09/1789839751066_BKG-320BK6020815.pdf",
+    "source/2026-09/1789839749520_IN03402 (INV_PL).xlsx"
+  ],
+  "aiAnswer": "```json\n{\n  \"buyer_country_code\": \"HK\",\n  \"destination_country_code\": \"HK\",\n  \"customer_name\": \"CUISINE\",\n  \"vessel_name\": \"KMTC TOKYO\",\n  \"voyage_number\": \"2610N\",\n  \"release_port_code\": \"2815\",\n  \"loading_port_code\": \"2801\",\n  \"shipping_mark\": \"CUISINE SOLUTIONS\",\n  \"tax_payment_method_code\": \"A\",\n  \"etd\": \"2026-09-13\",\n  \"invoice_number\": \"IN03402\",\n  \"invoice_date\": \"2026-09-09\",\n  \"consignee_name\": \"CLASSIC FINE FOODS (HONG KONG) LTD\",\n  \"incoterms\": \"CIF\",\n  \"currency\": \"USD\",\n  \"total_goods_amount\": 33896.55,\n  \"freight_charge\": 450.00,\n  \"insurance_charge\": 0.00,\n  \"net_weight_kg\": 3158.98,\n  \"gross_weight_kg\": 3506.78,\n  \"description_eng\": \"FROZEN FULLY COOKED / READY TO COOK FOODS\",\n  \"net_weight_ton\": 3.159,\n  \"net_weight_unit_code\": \"TO\",\n  \"container_or_volume_qty\": 1,\n  \"container_unit_code\": \"20'RF\",\n  \"export_tariff\": \"9PART3\",\n  \"customs_unit_code\": \"KGM\",\n  \"items\": [\n    {\n      \"description_eng\": \"7313 SALMON WELLINGTON\",\n      \"description_eng_field\": \"7313 SALMON WELLINGTON GROUND WITH SPINACH STUFFING ( READY TO COOK)\",\n      \"product_description_thai\": \"ผลิตภัณฑ์อาหารสำเร็จรูปปรุงสุกแช่แข็ง\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": 1,\n      \"container_unit_code\": \"CT\",\n      \"net_weight_kg\": 4.17,\n      \"gross_weight_kg\": 4.80,\n      \"net_weight_ton\": 0.004,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 96.38,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"9PART3\",\n      \"customs_unit_code\": \"KGM\",\n      \"quantity\": null,\n      \"customs_product_code\": \"7313\",\n      \"tariff_code\": \"16041190\",\n      \"origin_country_code\": \"TH\",\n      \"is_foc\": false\n    },\n    {\n      \"description_eng\": \"5255H SEARED BEEF\",\n      \"description_eng_field\": \"5255H SEARED BEEF SHORT RIBS (FROZEN FULLY COOKED)\",\n      \"product_description_thai\": \"ผลิตภัณฑ์อาหารสำเร็จรูปปรุงสุกแช่แข็ง\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": 19,\n      \"container_unit_code\": \"CT\",\n      \"net_weight_kg\": 169.84,\n      \"gross_weight_kg\": 182.95,\n      \"net_weight_ton\": 0.170,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 4477.82,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"9PART3\",\n      \"customs_unit_code\": \"KGM\",\n      \"quantity\": null,\n      \"customs_product_code\": \"5255H\",\n      \"tariff_code\": \"16025090\",\n      \"origin_country_code\": \"TH\",\n      \"is_foc\": false\n    },\n    {\n      \"description_eng\": \"7808H GRILLED CHICKEN\",\n      \"description_eng_field\": \"7808H GRILLED CHICKEN BREAST (FROZEN FULLY COOKED)\",\n      \"product_description_thai\": \"ผลิตภัณฑ์อาหารสำเร็จรูปปรุงสุกแช่แข็ง\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": 144,\n      \"container_unit_code\": \"CT\",\n      \"net_weight_kg\": 929.73,\n      \"gross_weight_kg\": 1043.49,\n      \"net_weight_ton\": 0.930,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 8388.36,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"9PART3\",\n      \"customs_unit_code\": \"KGM\",\n      \"quantity\": null,\n      \"customs_product_code\": \"7808H\",\n      \"tariff_code\": \"16023290\",\n      \"origin_country_code\": \"TH\",\n      \"is_foc\": false\n    },\n    {\n      \"description_eng\": \"3853 PLAIN OATMEAL\",\n      \"description_eng_field\": \"3853 PLAIN STEEL CUT OATMEAL (FROZEN FULLY COOKED)\",\n      \"product_description_thai\": \"ผลิตภัณฑ์อาหารสำเร็จรูปปรุงสุกแช่แข็ง\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": 4,\n      \"container_unit_code\": \"CT\",\n      \"net_weight_kg\": 44.96,\n      \"gross_weight_kg\": 48.80,\n      \"net_weight_ton\": 0.045,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 210.04,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"9PART3\",\n      \"customs_unit_code\": \"KGM\",\n      \"quantity\": null,\n      \"customs_product_code\": \"3853\",\n      \"tariff_code\": \"19042090\",\n      \"origin_country_code\": \"TH\",\n      \"is_foc\": false\n    },\n    {\n      \"description_eng\": \"5410 OATMEAL COCONUT\",\n      \"description_eng_field\": \"5410 OATMEAL WITH COCONUT MILK AND CHIA SEEDS (FROZEN FULLY COOKED)\",\n      \"product_description_thai\": \"ผลิตภัณฑ์อาหารสำเร็จรูปปรุงสุกแช่แข็ง\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": 8,\n      \"container_unit_code\": \"CT\",\n      \"net_weight_kg\": 57.93,\n      \"gross_weight_kg\": 62.65,\n      \"net_weight_ton\": 0.058,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 367.72,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"9PART3\",\n      \"customs_unit_code\": \"KGM\",\n      \"quantity\": null,\n      \"customs_product_code\": \"5410\",\n      \"tariff_code\": \"19042090\",\n      \"origin_country_code\": \"TH\",\n      \"is_foc\": false\n    },\n    {\n      \"description_eng\": \"7204 DUCK LEG\",\n      \"description_eng_field\": \"7204 DUCK LEG CONFIT (FROZEN FULLY COOKED)\",\n      \"product_description_thai\": \"ผลิตภัณฑ์อาหารสำเร็จรูปปรุงสุกแช่แข็ง\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": 240,\n      \"container_unit_code\": \"CT\",\n      \"net_weight_kg\": 1562.59,\n      \"gross_weight_kg\": 1737.79,\n      \"net_weight_ton\": 1.563,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 17322.79,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"9PART3\",\n      \"customs_unit_code\": \"KGM\",\n      \"quantity\": null,\n      \"customs_product_code\": \"7204\",\n      \"tariff_code\": \"16023290\",\n      \"origin_country_code\": \"TH\",\n      \"is_foc\": false\n    },\n    {\n      \"description_eng\": \"7251 SOUS-VIDE CHICKEN\",\n      \"description_eng_field\": \"7251 SOUS-VIDE CHICKEN LEG WITH HAINANESE STYLE SEASONING (FROZEN FULLY COOKED)\",\n      \"product_description_thai\": \"ผลิตภัณฑ์อาหารสำเร็จรูปปรุงสุกแช่แข็ง\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": 5,\n      \"container_unit_code\": \"CT\",\n      \"net_weight_kg\": 36.60,\n      \"gross_weight_kg\": 40.00,\n      \"net_weight_ton\": 0.037,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 304.44,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"9PART3\",\n      \"customs_unit_code\": \"KGM\",\n      \"quantity\": null,\n      \"customs_product_code\": \"7251\",\n      \"tariff_code\": \"16023290\",\n      \"origin_country_code\": \"TH\",\n      \"is_foc\": false\n    },\n    {\n      \"description_eng\": \"7058 COCONUT PUDDING\",\n      \"description_eng_field\": \"7058 COCONUT CHIA PUDDING (FROZEN FULLY COOKED)\",\n      \"product_description_thai\": \"ผลิตภัณฑ์อาหารสำเร็จรูปปรุงสุกแช่แข็ง\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": 14,\n      \"container_unit_code\": \"CT\",\n      \"net_weight_kg\": 101.51,\n      \"gross_weight_kg\": 110.05,\n      \"net_weight_ton\": 0.102,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 731.28,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"9PART3\",\n      \"customs_unit_code\": \"KGM\",\n      \"quantity\": null,\n      \"customs_product_code\": \"7058\",\n      \"tariff_code\": \"19042090\",\n      \"origin_country_code\": \"TH\",\n      \"is_foc\": false\n    },\n    {\n      \"description_eng\": \"7224 SLICED CHICKEN\",\n      \"description_eng_field\": \"7224 SLICED GRILLED CHICKEN BREAST (FROZEN FULLY COOKED)\",\n      \"product_description_thai\": \"ผลิตภัณฑ์อาหารสำเร็จรูปปรุงสุกแช่แข็ง\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": 28,\n      \"container_unit_code\": \"CT\",\n      \"net_weight_kg\": 241.18,\n      \"gross_weight_kg\": 264.70,\n      \"net_weight_ton\": 0.241,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 1922.40,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"9PART3\",\n      \"customs_unit_code\": \"KGM\",\n      \"quantity\": null,\n      \"customs_product_code\": \"7224\",\n      \"tariff_code\": \"16023290\",\n      \"origin_country_code\": \"TH\",\n      \"is_foc\": false\n    },\n    {\n      \"description_eng\": \"7150 BEEF WELLINGTON\",\n      \"description_eng_field\": \"7150 BEEF WELLINGTON (READY TO COOK)\",\n      \"product_description_thai\": \"ผลิตภัณฑ์อาหารสำเร็จรูปปรุงสุกแช่แข็ง\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": 2,\n      \"container_unit_code\": \"CT\",\n      \"net_weight_kg\": 10.47,\n      \"gross_weight_kg\": 11.55,\n      \"net_weight_ton\": 0.010,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 525.32,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"9PART3\",\n      \"customs_unit_code\": \"KGM\",\n      \"quantity\": null,\n      \"customs_product_code\": \"7150\",\n      \"tariff_code\": \"16025090\",\n      \"origin_country_code\": \"TH\",\n      \"is_foc\": false\n    }\n  ]\n}\n```",
+  "expectHeader": {
+    "customer_name": "CUISINE",
+    "invoice_number": "IN03402",
+    "currency": "USD",
+    "total_goods_amount": 34346.55,
+    "freight_charge": 450,
+    "insurance_charge": 0,
+    "container_or_volume_qty": "465",
+    "container_unit_code": "CT",
+    "buyer_country_code": "HK",
+    "destination_country_code": "HK",
+    "release_port_code": "2815",
+    "loading_port_code": "2801",
+    "net_weight_kg": 3158.98,
+    "gross_weight_kg": 3506.78,
+    "incoterms": "CFR",
+    "tax_payment_method_code": "A"
+  },
+  "expectItems": [
+    {
+      "amount": 96.38,
+      "container_or_volume_qty": "1",
+      "customs_unit_code": "CT",
+      "tariff_code": "000016041190",
+      "net_weight_kg": 4.17,
+      "origin_country_code": "TH"
+    },
+    {
+      "amount": 4477.82,
+      "container_or_volume_qty": "19",
+      "customs_unit_code": "CT",
+      "tariff_code": "000016025090",
+      "net_weight_kg": 169.84,
+      "origin_country_code": "TH"
+    },
+    {
+      "amount": 8388.36,
+      "container_or_volume_qty": "144",
+      "customs_unit_code": "CT",
+      "tariff_code": "000016023290",
+      "net_weight_kg": 929.73,
+      "origin_country_code": "TH"
+    },
+    {
+      "amount": 210.04,
+      "container_or_volume_qty": "4",
+      "customs_unit_code": "CT",
+      "tariff_code": "000019042090",
+      "net_weight_kg": 44.96,
+      "origin_country_code": "TH"
+    },
+    {
+      "amount": 367.72,
+      "container_or_volume_qty": "8",
+      "customs_unit_code": "CT",
+      "tariff_code": "000019042090",
+      "net_weight_kg": 57.93,
+      "origin_country_code": "TH"
+    },
+    {
+      "amount": 17322.79,
+      "container_or_volume_qty": "240",
+      "customs_unit_code": "CT",
+      "tariff_code": "000016023290",
+      "net_weight_kg": 1562.59,
+      "origin_country_code": "TH"
+    },
+    {
+      "amount": 304.44,
+      "container_or_volume_qty": "5",
+      "customs_unit_code": "CT",
+      "tariff_code": "000016023290",
+      "net_weight_kg": 36.6,
+      "origin_country_code": "TH"
+    },
+    {
+      "amount": 731.28,
+      "container_or_volume_qty": "14",
+      "customs_unit_code": "CT",
+      "tariff_code": "000019042090",
+      "net_weight_kg": 101.51,
+      "origin_country_code": "TH"
+    },
+    {
+      "amount": 1922.4,
+      "container_or_volume_qty": "28",
+      "customs_unit_code": "CT",
+      "tariff_code": "000016023290",
+      "net_weight_kg": 241.18,
+      "origin_country_code": "TH"
+    },
+    {
+      "amount": 525.32,
+      "container_or_volume_qty": "2",
+      "customs_unit_code": "CT",
+      "tariff_code": "000016025090",
+      "net_weight_kg": 10.47,
+      "origin_country_code": "TH"
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "name": "hitachi-sg",
+  "customer": "SIAM-HITACHI",
+  "note": "SG015277 · เฉลยจากใบที่ยื่นกรมฯ DCTK000035696",
+  "sources": [
+    "source/2026-09/1789839821616_INV_PL_SG015277_XP0735-SG.pdf",
+    "source/2026-09/1789839820964_BD_SG015277.xlsx"
+  ],
+  "aiAnswer": "```json\n{\n  \"buyer_country_code\": \"SG\",\n  \"destination_country_code\": \"SG\",\n  \"customer_name\": \"SIAM-HITACHI\",\n  \"vessel_name\": \"\",\n  \"voyage_number\": \"\",\n  \"release_port_code\": \"2801\",\n  \"loading_port_code\": \"2801\",\n  \"shipping_mark\": \"AS PER INVOICE NO. SG015277\",\n  \"tax_payment_method_code\": \"A\",\n  \"etd\": \"2026-09-16\",\n  \"invoice_number\": \"SG015277\",\n  \"invoice_date\": \"2026-09-04\",\n  \"consignee_name\": \"HITACHI ELEVATOR ASIA PTE.LTD.\",\n  \"incoterms\": \"CIF\",\n  \"currency\": \"USD\",\n  \"total_goods_amount\": 3556.80,\n  \"freight_charge\": 749.03,\n  \"insurance_charge\": 39.42,\n  \"net_weight_kg\": 27.20,\n  \"gross_weight_kg\": 65.00,\n  \"description_eng\": \"PHOTO D ESX-2000PREH\",\n  \"net_weight_ton\": 0.0272,\n  \"net_weight_unit_code\": \"TO\",\n  \"container_or_volume_qty\": 1,\n  \"container_unit_code\": \"CS\",\n  \"export_tariff\": \"9PART3\",\n  \"customs_unit_code\": \"C62\",\n  \"items\": [\n    {\n      \"description_eng\": \"PHOTO D ESX-2000PREH\",\n      \"description_eng_field\": \"PHOTO D ESX-2000PREH DWG:J0000200-D-0000\",\n      \"product_description_thai\": \"เซ็นเซอร์ป้องกันประตูลิ\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": 1,\n      \"container_unit_code\": \"CS\",\n      \"net_weight_kg\": 27.20,\n      \"gross_weight_kg\": 65.00,\n      \"net_weight_ton\": 0.0272,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 3556.80,\n      \"insurance\": 0.00,\n      \"export_tariff\": \"9PART3\",\n      \"customs_unit_code\": \"C62\",\n      \"quantity\": 8,\n      \"customs_product_code\": \"XP0735-SG\",\n      \"tariff_code\": \"000090328939\",\n      \"origin_country_code\": \"TH\",\n      \"is_foc\": false\n    }\n  ]\n}\n```",
+  "expectHeader": {
+    "customer_name": "SIAM-HITACHI",
+    "invoice_number": "SG015277",
+    "currency": "USD",
+    "total_goods_amount": 4345.25,
+    "freight_charge": 749.03,
+    "insurance_charge": 39.42,
+    "container_or_volume_qty": "1",
+    "container_unit_code": "CS",
+    "buyer_country_code": "SG",
+    "destination_country_code": "SG",
+    "release_port_code": "2821",
+    "loading_port_code": "2801",
+    "net_weight_kg": 27.2,
+    "gross_weight_kg": 65,
+    "incoterms": "CIF",
+    "tax_payment_method_code": "A"
+  },
+  "expectItems": [
+    {
+      "amount": 4345.25,
+      "container_or_volume_qty": "1",
+      "customs_unit_code": "C62",
+      "tariff_code": "000090328939",
+      "net_weight_kg": 27.2,
+      "origin_country_code": "TH"
+    }
+  ]
+}

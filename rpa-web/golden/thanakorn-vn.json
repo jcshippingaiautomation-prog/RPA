@@ -1,0 +1,36 @@
+{
+  "name": "thanakorn-vn",
+  "customer": "THANAKORN",
+  "note": "MEK 18(C)/2026 · เฉลยจากใบที่ยื่นกรมฯ DCTK000035904 · ผู้ซื้อมาจากช่อง Notify Party ไม่ใช่ Sold to",
+  "sources": [
+    "source/2026-09/1790490374385_FOB_MEK 18(C).2026.pdf",
+    "source/2026-09/1790490373207_BKG 276827563.pdf"
+  ],
+  "aiAnswer": "```json\n{\n  \"buyer_country_code\": \"VN\",\n  \"destination_country_code\": \"VN\",\n  \"customer_name\": \"THANAKORN\",\n  \"vessel_name\": \"NUUK MAERSK\",\n  \"voyage_number\": \"639N\",\n  \"release_port_code\": \"0520\",\n  \"loading_port_code\": \"2801\",\n  \"shipping_mark\": \"SOYBEAN LECITHIN\\nPACKING: IN FLEXIBAG\\nNO BRAND\",\n  \"tax_payment_method_code\": \"A\",\n  \"etd\": \"2026-09-25\",\n  \"invoice_number\": \"MEK 18(C)/2026\",\n  \"invoice_date\": \"2026-09-24\",\n  \"consignee_name\": \"AUSTRALASIAN COMMODITIES PTY LTD.\",\n  \"incoterms\": \"CIF\",\n  \"currency\": \"USD\",\n  \"total_goods_amount\": 48620.00,\n  \"freight_charge\": 740.00,\n  \"insurance_charge\": 46.80,\n  \"net_weight_kg\": 44000.00,\n  \"gross_weight_kg\": 44200.00,\n  \"description_eng\": \"SOYBEAN LECITHIN\",\n  \"net_weight_ton\": 44.000,\n  \"net_weight_unit_code\": \"TO\",\n  \"container_or_volume_qty\": \"2\",\n  \"container_unit_code\": \"1F\",\n  \"export_tariff\": \"\",\n  \"customs_unit_code\": \"\",\n  \"items\": [\n    {\n      \"description_eng\": \"SOYBEAN LECITHIN\",\n      \"description_eng_field\": \"SOYBEAN LECITHIN\\nPACKING: IN FLEXIBAG\\nORIGIN: THAILAND\",\n      \"product_description_thai\": \"\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": \"2\",\n      \"container_unit_code\": \"1F\",\n      \"net_weight_kg\": 44000.00,\n      \"gross_weight_kg\": 44200.00,\n      \"net_weight_ton\": 44.000,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 48620.00,\n      \"insurance\": 46.80,\n      \"export_tariff\": \"\",\n      \"customs_unit_code\": \"KGM\",\n      \"quantity\": \"\",\n      \"customs_product_code\": \"\",\n      \"tariff_code\": \"\",\n      \"origin_country_code\": \"TH\",\n      \"is_foc\": false\n    }\n  ]\n}\n```",
+  "expectHeader": {
+    "customer_name": "THANAKORN",
+    "invoice_number": "MEK 18(C)/2026",
+    "consignee_name": "AUSTRALASIAN COMMODITIES PTY LTD.",
+    "currency": "USD",
+    "total_goods_amount": 48620,
+    "freight_charge": 740,
+    "insurance_charge": 46.8,
+    "container_or_volume_qty": "2",
+    "container_unit_code": "1F",
+    "buyer_country_code": "AU",
+    "destination_country_code": "VN",
+    "loading_port_code": "2801",
+    "net_weight_kg": 44000,
+    "gross_weight_kg": 44200,
+    "incoterms": "CIF",
+    "tax_payment_method_code": "A"
+  },
+  "expectItems": [
+    {
+      "amount": 48620,
+      "container_or_volume_qty": "2",
+      "customs_unit_code": "KGM",
+      "net_weight_kg": 44000
+    }
+  ]
+}
