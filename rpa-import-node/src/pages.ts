@@ -1318,6 +1318,24 @@ async function fillOneGoodsItem(
     });
   }
 
+  // ไม่ได้เลือกสินค้าจากคลังของ DCTK → DCTK จะไม่เติม "ประเภทพิกัดขาออก" กับ "ยี่ห้อสินค้า" ให้
+  //   ซึ่งเป็นช่องบังคับ ถ้าปล่อยว่างจะบันทึกหน้า 3 ไม่ผ่าน:
+  //   "ไม่สามารถบันทึกข้อมูลได้ · ประเภทพิกัดขาออก: ไม่สามารถว่างได้ · ยี่ห้อสินค้า: ไม่สามารถว่างได้"
+  //   → กรอกเองจากค่าใน Master (ตรงกับที่ตกลงกับคุณแนทว่า "ตรงนี้จะเหมือนเดิมทุกรอบ")
+  //   ทำเฉพาะตอนไม่ได้เลือกจากคลัง — ถ้าเลือกแล้วยังปล่อยให้ DCTK เติมเองเหมือนเดิม
+  if (!descVal) {
+    const brandNo = String(item.brand_name ?? r.brand_name ?? "").trim();
+    if (brandNo) {
+      await clickThenType(page, S.SEL_BRAND, brandNo, { commit: true }).catch(() => { /* */ });
+      log(`  ✓ ยี่ห้อสินค้า = ${brandNo} (กรอกเองเพราะไม่ได้เลือกจากคลังสินค้า DCTK)`);
+    }
+    const etNo = String(item.export_tariff ?? r.export_tariff ?? "").trim();
+    if (etNo) {
+      await comboPick(page, S.SEL_EXPORT_TARIFF_INPUT, etNo).catch(() => { /* */ });
+      log(`  ✓ ประเภทพิกัดขาออก = ${etNo} (กรอกเองเพราะไม่ได้เลือกจากคลังสินค้า DCTK)`);
+    }
+  }
+
   // ⚠ ทำตาม Python ที่สำเร็จเป๊ะ: Python "ไม่แตะ" Brand/descThai/descEng/พิกัด/หน่วยช่อง2/ค่าระวาง
   //   เพราะ DCTK auto-fill ช่องเหล่านี้จากรหัสสินค้า การไปกรอกทับ = trigger validation → Save ไม่ผ่าน/tab ไม่ปิด
   //   ช่องเสริมพวกนี้เปิดได้ผ่าน env (RPA_FILL_EXTRA_GOODS=1) เมื่อจำเป็นจริง — default ปิดเหมือน Python

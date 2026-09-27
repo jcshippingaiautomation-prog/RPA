@@ -32,6 +32,14 @@ export interface DeclarationRecord {
   _needs_review?: boolean;
 }
 
+/** พิกัดศุลกากร → ตัวเลขล้วนเติมศูนย์หน้าครบ 12 หลัก ("8431.31.20-000" → "000084313120") */
+function tariffCode(v: string): string {
+  const digits = v.replace(/\D/g, "");
+  if (!digits) return "";
+  const core = digits.length > 12 ? digits.slice(0, 12) : digits;
+  return core.padStart(12, "0");
+}
+
 /** ดึงเฉพาะตัวเลขออกจากข้อความ เช่น "TE1" → "1" (ไม่มีตัวเลข = คืนค่าเดิม) */
 function digitsOnly(v: string): string {
   const t = v.trim();
@@ -131,6 +139,8 @@ export function postProcess(rawText: string): DeclarationRecord {
       customs_product_code: toStr(it.customs_product_code),
       // ประเทศต้นกำเนิดต่อรายการ — ใบเดียวกันมีได้หลายประเทศ (สยามฮิตาชิ: TH/JP/CN)
       origin_country_code: originCode(toStr(it.origin_country_code)),
+      // พิกัดศุลกากรของรายการนี้ — เติมศูนย์หน้าให้ครบ 12 หลัก (DCTK ค้นด้วยรูปแบบนี้)
+      tariff_code: tariffCode(toStr(it.tariff_code)),
       is_foc: !!it.is_foc,
     };
     // ถ้า item ไม่มีพิกัด ใช้พิกัดระดับบนเป็น fallback
