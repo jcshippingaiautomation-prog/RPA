@@ -1323,13 +1323,15 @@ async function forceItemMoneyBeforeSave(page: Page, item: Record): Promise<void>
   // ช่องปริมาณ — ถ้าผู้ใช้แก้ค่าในหน้าเว็บ ค่านั้นต้องชนะค่าที่เราคำนวณจากน้ำหนัก/จำนวนหีบห่อ
   //   (เป็น Kendo NumericTextBox เหมือนกัน ตัวกรอกช่องเสริมจึงพิมพ์ให้ไม่ได้)
   for (const [key, name, label] of [
-    ["inv_quantity", "InvQuantity", "ในใบกำกับ"],
-    ["quantity", "Quantity", "ในใบขน"],
+    ["inv_quantity", "InvQuantity", "ปริมาณในใบกำกับ"],
+    ["quantity", "Quantity", "ปริมาณในใบขน"],
+    // ปีสินค้า — ถ้าไม่ตั้งเอง DCTK ค้างค่าปริยายของมัน (เจอจริง: ขึ้น 2024 ทั้งที่ Master สั่ง 2026)
+    ["product_year", "ProductYear", "ปีสินค้า"],
   ] as const) {
     const q = itemNumber(item, key);
     if (q > 0) {
       const got = await setKendoNumeric(page, name, q);
-      log(`  🔑 ย้ำปริมาณ${label}ก่อนเซฟ = ${q.toLocaleString()} (ช่องตอบกลับ "${got ?? "ไม่เจอช่อง"}")`);
+      log(`  🔑 ย้ำ${label}ก่อนเซฟ = ${q.toLocaleString()} (ช่องตอบกลับ "${got ?? "ไม่เจอช่อง"}")`);
     }
   }
 }
