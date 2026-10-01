@@ -80,7 +80,11 @@ COLUMN_MAP_ITEM = {
     "ProductDescriptionThai": "product_description_thai",
     "Brand": "brand_name",
     "ExportTariff_input": "export_tariff",
-    "InvQuantity": "net_weight_ton",
+    # ⚠ เดิมผูก InvQuantity → net_weight_ton ซึ่งคนละเรื่องกัน
+    #   "ปริมาณในใบกำกับ" คือจำนวนตามหน่วยที่ใบกำกับใช้ (เช่น 2,000 CT)
+    #   ไม่ใช่น้ำหนักสุทธิเป็นตัน (14.184) → RPA พิมพ์น้ำหนักลงช่องปริมาณทุกใบ
+    #   (ลูกค้า Q-Cine แจ้งเข้ามา: ปริมาณต้องเท่าจำนวนหีบห่อ)
+    #   ให้เก็บใน extra_fields แทน แล้วให้ระบบคำนวณค่าที่ถูกต้องใส่ให้
     "InvQuantityUnitCode_input": "net_weight_unit_code",
     "QuantityUnitCode_input": "customs_unit_code",
     "NetWeight": "net_weight_kg",

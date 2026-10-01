@@ -1267,6 +1267,74 @@ async function dismissAlertIfPresent(page: Page): Promise<void> {
 }
 
 /**
+ * ตั้งค่าตัวเลขของช่อง Kendo NumericTextBox แบบ "ถึงตัว widget จริง"
+ *
+ * ช่องเงินในหน้า 3 ของ DCTK เป็น Kendo NumericTextBox ซึ่งมี input 2 ตัวซ้อนกัน:
+ * ตัวที่มีชื่อจริง (_FreightForeign) ถูกซ่อนไว้ ส่วนตัวที่เห็นบนจอไม่มีชื่อ
+ * ตัวกรอกช่องเสริมจึงไม่ยอมพิมพ์ให้ (กันพิมพ์ผิดช่อง) แล้วค่าระวางรายรายการก็ว่าง
+ * พอว่าง DCTK จะเฉลี่ยค่าระวางทั้งใบ "ตามน้ำหนัก" ให้เอง
+ *   (เจอจริง Q-Cine IN03462: ตั้งใจใส่แถวละ 228,000 แต่ใบที่ได้ขึ้น 362,695.10 / 93,304.90
+ *    ซึ่งคือ 456,000 เฉลี่ยตามน้ำหนัก 14,184.21 : 3,648.95 — ใบของลูกค้าจริงเป็น 228,000 เท่ากัน)
+ * ทางแก้: เรียกผ่าน Kendo API ของ widget ตรง ๆ ถ้าไม่มีก็ตั้งค่า input ที่มีชื่อแล้วส่ง event
+ */
+async function setKendoNumeric(page: Page, name: string, value: number): Promise<string | null> {
+  return await page.evaluate(({ n, v }: { n: string; v: number }) => {
+    const el = document.querySelector(`[name="${n}"]`) as HTMLInputElement | null;
+    if (!el) return null;
+    const $ = (window as unknown as { jQuery?: (x: Element) => { data: (k: string) => unknown } }).jQuery;
+    const w = $ ? ($(el).data("kendoNumericTextBox") as { value: (x?: number) => void; trigger: (e: string) => void } | undefined) : undefined;
+    if (w && typeof w.value === "function") {
+      w.value(v);
+      try { w.trigger("change"); } catch { /* widget เก่าบางตัวไม่มี trigger */ }
+    }
+    el.value = String(v);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    return el.value;
+  }, { n: name, v: value }).catch(() => null);
+}
+
+/** ค่าตัวเลข "ของรายการนี้" ที่ต้องกรอกเอง (0 = ไม่ต้องกรอก ปล่อยค่าที่ DCTK เติม/คำนวณ) */
+function itemNumber(item: Record, key: string): number {
+  const ex = (item.__extra_fields__ ?? {}) as { [k: string]: unknown };
+  const raw = ex[key]
+    ?? (key === "insurance_foreign" ? item.insurance : undefined)
+    ?? (item as unknown as { [k: string]: unknown })[key];
+  const n = Number(String(raw ?? "").replace(/,/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * ย้ำค่าเงินรายรายการก่อนกดบันทึก — Kendo คำนวณใหม่ทุกครั้งที่แตะช่องอื่น
+ * จึงต้องตั้งค่าซ้ำ "ตอนสุดท้ายก่อนเซฟ" ทั้งแถวสุดท้ายและแถวระหว่างทาง
+ */
+async function forceItemMoneyBeforeSave(page: Page, item: Record): Promise<void> {
+  // ช่องเงิน — DCTK เฉลี่ยให้เองถ้าปล่อยว่าง (ตามน้ำหนัก ซึ่งไม่ใช่สิ่งที่ใบกำกับเขียนไว้)
+  const freight = itemNumber(item, "freight_foreign");
+  if (freight > 0) {
+    const got = await setKendoNumeric(page, "_FreightForeign", freight);
+    log(`  🔑 ย้ำค่าระวางรายรายการก่อนเซฟ = ${freight.toLocaleString()} (ช่องตอบกลับ "${got ?? "ไม่เจอช่อง"}")`);
+  }
+  const ins = itemNumber(item, "insurance_foreign");
+  if (ins > 0) {
+    const got = await setKendoNumeric(page, "_InsuranceForeign", ins);
+    log(`  🔑 ย้ำค่าประกันรายรายการก่อนเซฟ = ${ins.toLocaleString()} (ช่องตอบกลับ "${got ?? "ไม่เจอช่อง"}")`);
+  }
+  // ช่องปริมาณ — ถ้าผู้ใช้แก้ค่าในหน้าเว็บ ค่านั้นต้องชนะค่าที่เราคำนวณจากน้ำหนัก/จำนวนหีบห่อ
+  //   (เป็น Kendo NumericTextBox เหมือนกัน ตัวกรอกช่องเสริมจึงพิมพ์ให้ไม่ได้)
+  for (const [key, name, label] of [
+    ["inv_quantity", "InvQuantity", "ในใบกำกับ"],
+    ["quantity", "Quantity", "ในใบขน"],
+  ] as const) {
+    const q = itemNumber(item, key);
+    if (q > 0) {
+      const got = await setKendoNumeric(page, name, q);
+      log(`  🔑 ย้ำปริมาณ${label}ก่อนเซฟ = ${q.toLocaleString()} (ช่องตอบกลับ "${got ?? "ไม่เจอช่อง"}")`);
+    }
+  }
+}
+
+/**
  * กรอกฟิลด์รายการสินค้า 1 รายการ (ไม่กดปุ่ม Save/Add)
  * อ่านค่าจาก item (__items__) แต่ใช้ field-rule gating จาก r (ลูกค้าเดียวกัน)
  */
@@ -1504,6 +1572,9 @@ async function fillOneGoodsItem(
     log("  ⏭ ข้ามกรอกค่าประกันต่อ item (item ไม่มีค่าเฉพาะ) — คงค่าที่ DCTK เติมอัตโนมัติ (กัน 0 ทับ + กัน multi-item เกิน)");
   }
 
+  // ---- STEP: จำนวนเงิน "ค่าระวาง" ต่อ item (Kendo NumericTextBox — ตัวกรอกช่องเสริมพิมพ์ไม่ได้)
+  await forceItemMoneyBeforeSave(page, item);
+
   // ---- ช่องเสริมต่อรายการจากทะเบียนช่อง (รหัสสิทธิพิเศษ, ประเทศต้นกำเนิด, หมายเหตุรายการ ฯลฯ)
   //   ⚠ ตัวกรอกนี้ข้ามช่อง computed ทั้งหมด (พิกัด/หน่วยหลังพิกัด/ราคาต่อหน่วย) ที่ DCTK เติมเอง
   await fillFromRegistry(page, r, 3, "item", item.__extra_fields__ as { [k: string]: unknown } | undefined);
@@ -1625,6 +1696,7 @@ export async function fillPage3(page: Page, r: Record): Promise<void> {
         }, { want: curP3, doFreight: hasFreightP3, doIns: hasInsuranceP3 });
         log(`  🔑 force สกุลเงินก่อนเซฟ (freight=${hasFreightP3} insurance=${hasInsuranceP3}): ${JSON.stringify(forced)}`);
       }
+      await forceItemMoneyBeforeSave(page, item);
       await page.click(S.SEL_BTN_SAVE_CLOSE);
       // ⏱ รอจน tab ปิดจริง (= DCTK บันทึก Page 3 + ปิดหน้าสำเร็จ) แทน sleep(5000) ตายตัว
       //   🔑 ROOT CAUSE จริง (ที่ทำให้ใบไม่สมบูรณ์ → พิมพ์ไม่ออก): หลัง Save&Close DCTK เด้ง
@@ -1708,6 +1780,7 @@ export async function fillPage3(page: Page, r: Record): Promise<void> {
         log(`  🔎 สภาพช่องพิกัดก่อนกดบันทึก (รายการ 1):`);
         await dumpTariffWidgets(page);
       }
+      await forceItemMoneyBeforeSave(page, item);
       await page.click(S.SEL_BTN_SAVE_AND_ADD);
       await sleep(2000);
       await dismissAlertIfPresent(page); // บางลูกค้าเด้ง modal หลังบันทึก

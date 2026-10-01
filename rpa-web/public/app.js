@@ -237,7 +237,16 @@ function rowToRegFields(row, scope) {
 
 // ช่องที่ควรกรอกหลายบรรทัด
 const REG_MULTILINE = new Set(["shipping_mark", "description_eng_field", "product_description_thai",
+  "product_description_eng",
   "item_shipping_mark", "other_charge_detail", "self_certification_remark", "note1", "item_remark"]);
+
+/** ช่องนี้ต้องเป็นกล่องหลายบรรทัดเต็มแถวไหม
+ *  ⚠ เทียบ "ชนิดช่อง" ด้วย ไม่ใช่เทียบรายชื่อ key อย่างเดียว — ไม่งั้นช่องใหม่ที่ทะเบียนบอกว่าเป็น
+ *  textarea จะกลายเป็นช่องบรรทัดเดียวแคบ ๆ (ลูกค้าแจ้ง: ช่องคำอธิบายอังกฤษแก้ไขยาก
+ *  เพราะเล็กกว่าช่องไทยทั้งที่เป็นข้อความชุดเดียวกัน) */
+function regIsMultiline(f) {
+  return REG_MULTILINE.has(f.key) || f.type === "textarea";
+}
 
 
 /**
@@ -271,7 +280,7 @@ function renderRegField(f, row, cls) {
   if (f.computed) {
     return wrap(`<input class="inp inp-auto" value="${val}" readonly tabindex="-1" />`, false);
   }
-  if (REG_MULTILINE.has(f.key)) {
+  if (regIsMultiline(f)) {
     return wrap(`<textarea class="inp ${cls}" data-key="${f.key}" rows="3" placeholder="ใส่ได้หลายบรรทัดตามเอกสาร" ${ruleAttrs(f)}>${val}</textarea>`, true);
   }
   if (f.type === "checkbox") {
@@ -689,7 +698,7 @@ function renderItemFieldCell(it, idx, k, label, opts) {
 function renderRegItemCell(it, idx, f) {
   const label = escapeHtml(f.label);
   const val = escapeHtml(it[f.key] != null ? String(it[f.key]) : "");
-  const full = REG_MULTILINE.has(f.key) ? "fld-full" : "";
+  const full = regIsMultiline(f) ? "fld-full" : "";
   if (f.computed) {
     return `<div class="fld ${full}"><label>${label} <span class="fld-auto">DCTK เติมเอง</span></label>
       <input class="inp inp-auto" value="${val}" readonly tabindex="-1" /></div>`;
@@ -700,7 +709,7 @@ function renderRegItemCell(it, idx, f) {
     return `<div class="fld"><label>${label} ${hint}</label>
       ${regSelectHtml(f, val, "it-edit").replace('class="sel it-edit"', `class="sel it-edit" data-i="${idx}"`)}</div>`;
   }
-  if (REG_MULTILINE.has(f.key)) {
+  if (regIsMultiline(f)) {
     return `<div class="fld fld-full"><label>${label} ${hint}</label>
       <textarea class="inp it-edit" data-i="${idx}" data-key="${f.key}" rows="3">${val}</textarea></div>`;
   }
@@ -1081,9 +1090,18 @@ async function renderExcelInto(elId, url, name) {
     const buf = await res.arrayBuffer();
     const wb = XLSX.read(buf, { type: "array" });
     const parts = wb.SheetNames.map((sn) => {
-      const html = XLSX.utils.sheet_to_html(wb.Sheets[sn], { editable: false });
       const tab = wb.SheetNames.length > 1 ? `<div class="xls-sheet-name">📄 ${escapeHtml(sn)}</div>` : "";
-      return tab + `<div class="xls-table">${html}</div>`;
+      const ws = wb.Sheets[sn];
+      // ⚠ ชีตที่ไม่มีเซลล์เลย (ชีตว่าง/ชีตที่มีแต่รูป) จะไม่มีช่วงข้อมูล "!ref"
+      //   SheetJS เรียก indexOf บนค่าที่ไม่มี แล้วโยน "Cannot read properties of undefined"
+      //   ของเดิมเรนเดอร์ทุกชีตในนิพจน์เดียว ชีตเสียชีตเดียว = ไม่เห็นเอกสารทั้งไฟล์
+      //   (ลูกค้าแจ้งจริง: ไฟล์ IN03462 เปิดดูในหน้าเว็บไม่ได้เลย ต้องโหลดไปเปิดเอง)
+      if (!ws || !ws["!ref"]) return tab + '<div class="doc-empty">— ชีตนี้ไม่มีข้อมูล —</div>';
+      try {
+        return tab + `<div class="xls-table">${XLSX.utils.sheet_to_html(ws, { editable: false })}</div>`;
+      } catch (err) {
+        return tab + `<div class="doc-empty">แสดงชีตนี้ไม่ได้: ${escapeHtml(err.message)}</div>`;
+      }
     });
     el.innerHTML = parts.join("") || '<div class="doc-empty">ไฟล์ Excel ว่าง</div>';
   } catch (e) {
@@ -1207,6 +1225,12 @@ $("mdSave").onclick = async () => {
   $("mdSave").disabled = true;
   try {
     await api(`/api/declarations/${encodeURIComponent(detailId)}`, "POST", patch);
+    // ⚠ ต้องบันทึก "รายการสินค้า" ด้วย — ของเดิมส่งแต่ช่องหัวใบ
+    //   ผู้ใช้แก้คำอธิบายสินค้า/ปริมาณ/Part No ในหน้า 3 แล้วกดบันทึก ค่าหายทุกครั้ง
+    //   (ลูกค้าแจ้งเข้ามา: "เมื่อแก้แล้วกดบันทึกก็ไม่ save ให้")
+    if (editItems.length) {
+      await api(`/api/declarations/${encodeURIComponent(detailId)}/items`, "PUT", { items: editItems });
+    }
     const ok = $("mdSaved"); ok.style.display = "inline";
     setTimeout(() => (ok.style.display = "none"), 2500);
     // sync local

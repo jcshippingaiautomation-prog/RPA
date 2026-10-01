@@ -654,27 +654,71 @@ function pickMasterItem(
  *    แล้วต่อด้วยถ้อยคำจากใบกำกับ (ดูใบที่ยื่นจริง CTN2649)
  *    ถ้าขาดบรรทัดแรกไป ใบขนจะไม่ตรงกับที่เจ้าหน้าที่ทำมือ
  */
+/**
+ * รหัสสถิติสินค้าของพิกัดที่ "ไม่ใช่ 000"
+ *   ถอดจากใบขนที่เจ้าหน้าที่ยื่นกรมฯ จริง — เติมเพิ่มได้เมื่อเจอพิกัดใหม่
+ *   (ที่เห็นมาทั้งหมดเป็น 000 ยกเว้นรายการนี้)
+ */
+const TARIFF_STAT: { [tariff8: string]: string } = {
+  "90328939": "090",   // เซ็นเซอร์ป้องกันประตูลิฟท์ — ใบจริง DCTK000035696 / 035738 ลง 090
+};
+
 function normalizeItemText(
   record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
   productCodeFrom = "",
+  skipCatalog = false,
+  plainText = false,
 ): void {
   for (const it of record._items ?? []) {
     const extra = (it.extra_fields ?? {}) as Record<string, unknown>;
     extra.nature_trans = it.is_foc === true ? "21" : "11";
 
-    // ช่อง "ปริมาณ" ใช้เฉพาะหน่วยที่ไม่ใช่น้ำหนัก/ปริมาตร (MTK ตารางเมตร · C62 ชิ้น)
-    //   ถ้าหน่วยเป็น KGM/TNE/LTR ตัวเลขก็คือน้ำหนักสุทธินั่นเอง เก็บซ้ำจะทำให้
-    //   ยอดหัวใบ (เก็บเป็นตัน) กับผลรวมรายการ (เป็นกิโล) ขัดกันเอง แล้วขึ้นเตือนผิด ๆ
-    const cu = String(it.customs_unit_code ?? "").trim().toUpperCase();
-    if (["TNE", "TON", "TO", "MT", "KGM", "KG", "LTR", "L"].includes(cu)) {
-      delete extra.quantity;
-      delete it.quantity;
-    }
+    // ช่อง "ปริมาณในใบกำกับ / ปริมาณในใบขน" — ตัวเลขต้องเป็นไปตาม "หน่วย" ของช่องนั้นเสมอ
+    //   TNE → จำนวนตัน · KGM/LTR → จำนวนกิโลกรัม · หน่วยหีบห่อ/ชิ้น (CT/BX/C62/MTK) → จำนวนหีบห่อ
+    //   ลูกค้า Q-Cine แจ้งมาจากใบจริง: หน่วย CT แล้วต้องใส่เท่ากับจำนวนหีบห่อ (2,000 CT ไม่ใช่ 14.184)
+    //   เดิมช่องนี้ผูกไว้กับคอลัมน์น้ำหนักเป็นตัน จึงโชว์ 14.184 ในหน้าเว็บทั้งที่หน่วยเป็น CT
+    const qtyForUnit = (u: unknown): string => {
+      const unit = String(u ?? "").trim().toUpperCase();
+      const n = (v: unknown) => {
+        const x = Number(String(v ?? "").replace(/,/g, ""));
+        return Number.isFinite(x) ? x : 0;
+      };
+      if (!unit) return "";
+      if (["TNE", "TON", "TO", "MT"].includes(unit)) {
+        const t = n(it.net_weight_ton) || n(it.net_weight_kg) / 1000;
+        return t > 0 ? String(t) : "";
+      }
+      if (["KGM", "KG", "LTR", "L"].includes(unit)) {
+        const kg = n(it.net_weight_kg);
+        return kg > 0 ? String(kg) : "";
+      }
+      const pack = n(it.container_or_volume_qty);
+      return pack > 0 ? String(pack) : "";
+    };
+    const invQty = qtyForUnit(it.net_weight_unit_code);          // ช่องบน (หน่วยเดียวกับน้ำหนักสุทธิ)
+    const dclQty = qtyForUnit(it.customs_unit_code ?? it.net_weight_unit_code); // ช่องล่าง (หน่วยในใบขน)
+    if (invQty) extra.inv_quantity = invQty; else delete extra.inv_quantity;
+    if (dclQty) extra.quantity = dclQty; else delete extra.quantity;
+    delete it.quantity;                                          // ไม่มีคอลัมน์นี้ในตาราง
 
     // ลูกค้าบางรายลงทะเบียนสินค้าใน DCTK ด้วย "รหัสผู้ผลิต (MFG)" ของตัวเอง
     //   เช่น สยามฮิตาชิ: "XP0659-JP แผงวงจรไฟฟ้า PCB …" · "ST05371-PH ประตูนอก …"
     //   ช่องค้น combo จึงต้องใช้รหัสนั้น ไม่ใช่ชื่อสินค้า ไม่งั้นค้นไม่เจอทุกรายการ
-    if (productCodeFrom === "customs_product_code") {
+    // รหัสสถิติสินค้า — ปกติ DCTK เติมให้เองจากคลังสินค้า
+    //   แต่ถ้าไม่ได้เลือกจากคลัง (ช่องรหัสสินค้าว่าง) จะไม่มีใครเติม แล้วแถวนั้นจะไม่ถูกบันทึก
+    //   เงียบ ๆ (DCTK บันทึกแถวอื่นได้แต่ทิ้งแถวนี้ → ผลรวมไม่ตรงหัวใบ)
+    //   เท่าที่เห็นจากใบที่ยื่นจริง ค่าปกติคือ "000" มีเฉพาะบางพิกัดที่ต่างออกไป
+    //   ถ้าเดาผิด DCTK จะตีกลับให้เห็นทันที ไม่ใช่ความผิดพลาดแบบเงียบ
+    if (skipCatalog) {
+      it.description_eng = "";                            // ไม่ต้องไปค้นในคลังสินค้าของ DCTK
+      if (!String(extra.statistical_code ?? "").trim()) {
+        // ค่าจาก AI อาจยังอยู่ระดับบนของ item (ย้ายลง extra_fields ตอนบันทึก) — อ่านทั้งสองที่
+        const t = String(extra.tariff_code ?? it.tariff_code ?? "").replace(/\D/g, "").slice(-8);
+        extra.statistical_code = TARIFF_STAT[t] ?? "000";
+      }
+    }
+
+    if (!skipCatalog && productCodeFrom === "customs_product_code") {
       // ⚠ ค่าจาก AI ยังอยู่ระดับบนของ item ตอนนี้ — ย้ายลง extra_fields ทีหลังตอนบันทึก
       //   ถ้าอ่านจาก extra อย่างเดียวจะได้ค่าว่างเสมอ
       const mfg = String(extra.customs_product_code ?? it.customs_product_code ?? "").trim();
@@ -699,9 +743,12 @@ function normalizeItemText(
 
     it.extra_fields = extra;
 
+    //   ⚠ ลูกค้าบางรายไม่ต้องการให้เติมอะไรนำหน้า (preset __item_text_mode = "plain")
+    //      Q-Cine: ใบขนจริงเขียน "5410 OATMEAL WITH COCONUT MILK AND CHIA SEEDS (FROZEN FULLY COOKED)"
+    //      บรรทัดเดียว ไม่มีชื่อจากคลังสินค้าซ้ำข้างหน้า และคำอธิบายไทยไม่มีรหัสนำหน้า
     const code = String(it.description_eng ?? "").trim();
     const desc = String(it.description_eng_field ?? "").trim();
-    if (code && desc && !desc.toUpperCase().startsWith(code.toUpperCase())) {
+    if (!plainText && code && desc && !desc.toUpperCase().startsWith(code.toUpperCase())) {
       it.description_eng_field = `${code}\n${desc}`;
     }
 
@@ -715,7 +762,12 @@ function normalizeItemText(
       ?? "",
     ).trim();
     const thai = String(it.product_description_thai ?? "").trim();
-    if (partNo && thai) {
+    if (plainText) {
+      // ตัดรหัสที่ติดมานำหน้าออก เหลือเฉพาะชื่อสินค้าภาษาไทย
+      if (thai.includes("\n")) it.product_description_thai = thai.split("\n").slice(1).join("\n").trim() || thai;
+      delete extra.customs_product_code;        // ลูกค้าแจ้งว่าช่อง Part No ไม่ต้องใส่
+      delete it.customs_product_code;
+    } else if (partNo && thai) {
       // ตัดบรรทัด Part No เดิมที่ติดมากับ Master ออกก่อน (เป็นของชิปเมนต์เก่า)
       const body = thai.split("\n").filter((l) => !/^[A-Z]{2,}-\d/i.test(l.trim())).join("\n").trim();
       it.product_description_thai = body ? `${partNo}\n${body}` : partNo;
@@ -940,7 +992,10 @@ export async function prepareDeclarationRecord(
     reconcilePackageCount(record, await packageFromItems(String(record.customer_name ?? "")));
     reconcileWeights(record);
     reconcileItemAmounts(record, await extraAmountAlloc(String(record.customer_name ?? "")));
-    normalizeItemText(record, await customerPreset(String(record.customer_name ?? ""), "__product_code_from"));
+    normalizeItemText(record,
+      await customerPreset(String(record.customer_name ?? ""), "__product_code_from"),
+      /^(1|true|yes)$/i.test(await customerPreset(String(record.customer_name ?? ""), "__skip_product_catalog")),
+      (await customerPreset(String(record.customer_name ?? ""), "__item_text_mode")) === "plain");
 
 
   return { record, fieldModes, codeFixes };
@@ -1375,7 +1430,9 @@ export async function insertDeclaration(
     reconcilePackageCount(rec, await packageFromItems(customer));
     reconcileWeights(rec);
     reconcileItemAmounts(rec, await extraAmountAlloc(customer));
-    normalizeItemText(rec, await customerPreset(customer, "__product_code_from"));
+    normalizeItemText(rec, await customerPreset(customer, "__product_code_from"),
+      /^(1|true|yes)$/i.test(await customerPreset(customer, "__skip_product_catalog")),
+      (await customerPreset(customer, "__item_text_mode")) === "plain");
 
     const payload: Record<string, unknown> = {};
     for (const col of DECL_COLUMNS) payload[col] = rec[col] ?? null;
