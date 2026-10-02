@@ -32,7 +32,9 @@
       "customs_unit_code": "C62",
       "tariff_code": "000090328939",
       "net_weight_kg": 27.2,
-      "origin_country_code": "TH"
+      "origin_country_code": "TH",
+      "quantity": "8",
+      "inv_quantity": "0.0272"
     }
   ]
 }

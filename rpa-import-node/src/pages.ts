@@ -1325,8 +1325,10 @@ async function forceItemMoneyBeforeSave(page: Page, item: Record): Promise<void>
   for (const [key, name, label] of [
     ["inv_quantity", "InvQuantity", "ปริมาณในใบกำกับ"],
     ["quantity", "Quantity", "ปริมาณในใบขน"],
-    // ปีสินค้า — ถ้าไม่ตั้งเอง DCTK ค้างค่าปริยายของมัน (เจอจริง: ขึ้น 2024 ทั้งที่ Master สั่ง 2026)
-    ["product_year", "ProductYear", "ปีสินค้า"],
+    // ⚠ "ปีสินค้า" ก็เป็นช่องแบบเดียวกันและตั้งไม่ติดเหมือนกัน (DCTK ค้างที่ 2024 ทั้งที่ Master สั่ง 2026)
+    //   แต่ยังไม่ใส่ไว้ตรงนี้ — ใบขนจริงที่พิมพ์ออกมาไม่โชว์ช่องนี้ จึงยังไม่มีเฉลยว่าค่าไหนถูก
+    //   และ Master ของลูกค้ารายอื่นมีปีเก่าค้างอยู่ (COCOS 2016 · THANAKORN 2021) ถ้าเปิดพรวดเดียว
+    //   จะไปเปลี่ยนใบของรายที่เขายังไม่ได้แจ้งอะไรมา → รอให้ผู้ใช้ยืนยันก่อน
   ] as const) {
     const q = itemNumber(item, key);
     if (q > 0) {

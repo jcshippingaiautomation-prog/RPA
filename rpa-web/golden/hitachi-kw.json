@@ -25,35 +25,45 @@
       "customs_unit_code": "C62",
       "tariff_code": "000085371099",
       "origin_country_code": "JP",
-      "net_weight_kg": 0.6
+      "net_weight_kg": 0.6,
+      "quantity": "1",
+      "inv_quantity": "0.0006"
     },
     {
       "amount": 665.94,
       "customs_unit_code": "C62",
       "tariff_code": "000085371099",
       "origin_country_code": "JP",
-      "net_weight_kg": 0.5
+      "net_weight_kg": 0.5,
+      "quantity": "2",
+      "inv_quantity": "0.0005"
     },
     {
       "amount": 1051.28,
       "customs_unit_code": "C62",
       "tariff_code": "000085013170",
       "origin_country_code": "JP",
-      "net_weight_kg": 5
+      "net_weight_kg": 5,
+      "quantity": "1",
+      "inv_quantity": "0.005"
     },
     {
       "amount": 2165.32,
       "customs_unit_code": "C62",
       "tariff_code": "000090328939",
       "origin_country_code": "TH",
-      "net_weight_kg": 6
+      "net_weight_kg": 6,
+      "quantity": "2",
+      "inv_quantity": "0.006"
     },
     {
       "amount": 588.63,
       "customs_unit_code": "C62",
       "tariff_code": "000085371099",
       "origin_country_code": "JP",
-      "net_weight_kg": 0.5
+      "net_weight_kg": 0.5,
+      "quantity": "1",
+      "inv_quantity": "0.0005"
     }
   ]
 }

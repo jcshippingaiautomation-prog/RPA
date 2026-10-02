@@ -31,7 +31,9 @@
       "customs_unit_code": "C62",
       "tariff_code": "000085371099",
       "net_weight_kg": 5,
-      "origin_country_code": "JP"
+      "origin_country_code": "JP",
+      "quantity": "10",
+      "inv_quantity": "0.005"
     }
   ]
 }

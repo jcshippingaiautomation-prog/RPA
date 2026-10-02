@@ -677,29 +677,38 @@ function normalizeItemText(
     //   TNE → จำนวนตัน · KGM/LTR → จำนวนกิโลกรัม · หน่วยหีบห่อ/ชิ้น (CT/BX/C62/MTK) → จำนวนหีบห่อ
     //   ลูกค้า Q-Cine แจ้งมาจากใบจริง: หน่วย CT แล้วต้องใส่เท่ากับจำนวนหีบห่อ (2,000 CT ไม่ใช่ 14.184)
     //   เดิมช่องนี้ผูกไว้กับคอลัมน์น้ำหนักเป็นตัน จึงโชว์ 14.184 ในหน้าเว็บทั้งที่หน่วยเป็น CT
+    const num = (v: unknown) => {
+      const x = Number(String(v ?? "").replace(/,/g, ""));
+      return Number.isFinite(x) ? x : 0;
+    };
+    // ปริมาณที่ "เอกสารเขียนมาเอง" ต่อแถว (เช่น 10 ชิ้น C62 ของสยามฮิตาชิ · 90.246 ตร.ม. MTK ของไทยซิง)
+    //   ⚠ ค่านี้ต้องมาก่อนเสมอ ห้ามเอาจำนวนหีบห่อไปทับ — กล่องเดียวอาจมีสินค้า 10 ชิ้น
+    const docQty = num(extra.quantity ?? it.quantity ?? extra.inv_quantity ?? it.inv_quantity);
+    const packQty = num(it.container_or_volume_qty);
+    const packUnit = String(it.container_unit_code ?? "").trim().toUpperCase();
     const qtyForUnit = (u: unknown): string => {
       const unit = String(u ?? "").trim().toUpperCase();
-      const n = (v: unknown) => {
-        const x = Number(String(v ?? "").replace(/,/g, ""));
-        return Number.isFinite(x) ? x : 0;
-      };
       if (!unit) return "";
       if (["TNE", "TON", "TO", "MT"].includes(unit)) {
-        const t = n(it.net_weight_ton) || n(it.net_weight_kg) / 1000;
+        const t = num(it.net_weight_ton) || num(it.net_weight_kg) / 1000;
         return t > 0 ? String(t) : "";
       }
       if (["KGM", "KG", "LTR", "L"].includes(unit)) {
-        const kg = n(it.net_weight_kg);
+        const kg = num(it.net_weight_kg);
         return kg > 0 ? String(kg) : "";
       }
-      const pack = n(it.container_or_volume_qty);
-      return pack > 0 ? String(pack) : "";
+      // หน่วยนับชิ้น/หีบห่อ/พื้นที่ — ใช้เลขในเอกสารก่อน ถ้าไม่มีค่อยใช้จำนวนหีบห่อ
+      //   และใช้จำนวนหีบห่อได้เฉพาะเมื่อ "หน่วยตรงกับหน่วยหีบห่อ" เท่านั้น (ไม่งั้นคนละของกัน)
+      if (docQty > 0 && unit !== packUnit) return String(docQty);
+      if (packQty > 0 && (unit === packUnit || !packUnit)) return String(packQty);
+      return docQty > 0 ? String(docQty) : "";
     };
     const invQty = qtyForUnit(it.net_weight_unit_code);          // ช่องบน (หน่วยเดียวกับน้ำหนักสุทธิ)
     const dclQty = qtyForUnit(it.customs_unit_code ?? it.net_weight_unit_code); // ช่องล่าง (หน่วยในใบขน)
     if (invQty) extra.inv_quantity = invQty; else delete extra.inv_quantity;
     if (dclQty) extra.quantity = dclQty; else delete extra.quantity;
     delete it.quantity;                                          // ไม่มีคอลัมน์นี้ในตาราง
+    delete it.inv_quantity;
 
     // ลูกค้าบางรายลงทะเบียนสินค้าใน DCTK ด้วย "รหัสผู้ผลิต (MFG)" ของตัวเอง
     //   เช่น สยามฮิตาชิ: "XP0659-JP แผงวงจรไฟฟ้า PCB …" · "ST05371-PH ประตูนอก …"
