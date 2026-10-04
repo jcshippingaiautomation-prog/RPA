@@ -707,11 +707,14 @@ async function runBrowser(
   const envSlow = Number((process.env.RPA_SLOW_MO ?? "").trim());
   const slowMo = Number.isFinite(envSlow) && (process.env.RPA_SLOW_MO ?? "").trim() !== ""
     ? envSlow : (cfg.slow_mo_ms ?? 0);
-  const browser = await chromium.launch({ headless, slowMo });
-  log(`เปิดเบราว์เซอร์ (headless=${headless} · หน่วงต่อ action=${slowMo}ms)`);
   // ⚠ viewport ใหญ่สำคัญมากบน VM (headless): ถ้าไม่ตั้ง = default 1280×720 → Kendo Grid
   //   ของ DCTK render ไม่ครบ/virtualize แถวหาย → เลือกแถวเพื่อพิมพ์ใบขนไม่ได้ → ได้แค่ capture
   //   (บน Mac headed จอกว้าง grid ขึ้นครบ → ผ่าน; นี่คือเหตุ "localhost ผ่าน VM ไม่ผ่าน")
+  //   📏 เคยลองใช้ "โปรไฟล์ถาวร" เพื่อให้เบราว์เซอร์จำไฟล์ของ DCTK ไว้ (หน้าเว็บโหลด ~19MB ทุกครั้ง)
+  //      วัดแล้วไม่ช่วยเลย: DCTK ส่ง header ห้ามแคช → โหลดใหม่ทุกครั้งอยู่ดี (304/แคช = 0 ทั้ง 3 รอบ)
+  //      จึงกลับมาใช้โปรไฟล์ใหม่ทุกครั้ง ซึ่งไม่มีปัญหาสถานะค้าง
+  const browser = await chromium.launch({ headless, slowMo });
+  log(`เปิดเบราว์เซอร์ (headless=${headless} · หน่วงต่อ action=${slowMo}ms)`);
   const context: BrowserContext = await browser.newContext({
     acceptDownloads: true,
     viewport: { width: 1920, height: 1080 },
@@ -778,8 +781,7 @@ async function runBrowser(
     const holdSec = Number(process.env.RPA_INSPECT_SECONDS ?? "600") || 600;
     log(`⏸ inspect-edit — ค้างเบราว์เซอร์ ${holdSec}s ให้ดูหน้าจอ (ดู element ใน inspect/)`);
     await sleep(holdSec * 1000);
-    await context.close();
-    await browser.close();
+    await context.close(); await browser.close();
     return;
   }
 
@@ -1076,8 +1078,7 @@ async function runBrowser(
     const holdSec = Number(process.env.RPA_INSPECT_SECONDS ?? "600") || 600;
     log(`⏸ inspect mode — ค้างเบราว์เซอร์ ${holdSec}s ให้ดูหน้าจอ (ดู element ใน inspect/)`);
     await sleep(holdSec * 1000);
-    await context.close();
-    await browser.close();
+    await context.close(); await browser.close();
     return;
   }
 
@@ -1094,6 +1095,5 @@ async function runBrowser(
     log("done — closing in 2s");
     await sleep(2000);
   }
-  await context.close();
-  await browser.close();
+  await context.close(); await browser.close();
 }

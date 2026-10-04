@@ -118,6 +118,9 @@ FILLED_ITEM = {
 
 # ── ช่องที่ DCTK เติม/คำนวณให้เอง (ห้ามกรอกทับ) นอกเหนือจาก readonly ────
 FORCE_COMPUTED = {
+    # ช่อง "ตามสภาพโดย" DCTK ปิดไว้เสมอสำหรับใบขนขาออก (อากร FREE) — กรอกไม่ได้จริง
+    #   ถ้าไม่มาร์คไว้ ตัวกรอกจะรอ timeout 4 วินาทีต่อรายการสินค้าทุกใบโดยเปล่าประโยชน์
+    "SpecificCalBy",
     "ReferenceNo", "DeclarationNo", "CustomsCheckingStatusName", "PaymentNo",
     "ItemNo", "InvItemNo", "CmpTaxNo", "CmpNameThai", "CmpBrnNo",
     "PurCountryName", "DestCountryName", "OriginCountryName",

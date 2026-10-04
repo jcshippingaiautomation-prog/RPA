@@ -7321,7 +7321,7 @@
   "column": null,
   "scope": "item",
   "fill": false,
-  "computed": false,
+  "computed": true,
   "system": false,
   "ai": false,
   "required": false,

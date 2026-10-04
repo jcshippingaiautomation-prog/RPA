@@ -5,3 +5,4 @@ error_record_*.png
 data.xlsx
 *.log
 .DS_Store
+.browser-profile/

@@ -1788,7 +1788,7 @@ export async function fillPage3(page: Page, r: Record): Promise<void> {
       await page.click(S.SEL_BTN_SAVE_AND_ADD);
       await sleep(2000);
       await dismissAlertIfPresent(page); // บางลูกค้าเด้ง modal หลังบันทึก
-      await sleep(3000);
+      //   ไม่ต้องหน่วงต่ออีก — ด้านล่างรอ networkidle แล้ววนรอจนฟอร์มเคลียร์จริงอยู่แล้ว
       // 🔑 รอฟอร์มรายการถัดไปพร้อมจริง ก่อนวนไปกรอก (กัน combo รหัสสินค้าค้างของเก่า/โหลดผิด)
       //   อาการเดิม: รายการ 2+ ค้นรหัสสินค้าเจอ master ผิด (เช่น "LIFT") เพราะ dropdown ยังไม่ refresh
       //   → รอช่องรหัสสินค้าว่าง (ฟอร์มใหม่เคลียร์แล้ว) + networkidle ก่อนกรอกรายการถัดไป

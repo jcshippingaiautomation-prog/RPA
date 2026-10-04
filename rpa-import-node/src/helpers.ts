@@ -320,20 +320,25 @@ export async function comboPick(
   await page.fill(inputSelector, "");
   await page.type(inputSelector, value, { delay: 50 });
 
-  // รอ dropdown โผล่ (DCTK ajax — บน VM ช้า รอได้ถึง 12s, เช็กทุก 500ms; พิมพ์ซ้ำกระตุ้นถ้าเกินครึ่งทาง)
+  // รอ dropdown โผล่ (DCTK ajax — เช็กทุก 500ms, พิมพ์ซ้ำกระตุ้นเมื่อผ่านครึ่งทาง)
+  //   ⏱ ช่องอย่างชื่อเรือ/ชื่อผู้รับมักไม่มีรายการให้เลือกอยู่แล้ว (เป็นข้อความอิสระ)
+  //      การรอจนครบจึงเป็นเวลาที่เสียฟรีทุกใบ — ลดเหลือ 7 วินาที (เดิม 12)
+  //      ถ้า VM ช้ากว่านี้จนเลือกคอมโบไม่ติด ปรับขึ้นได้ด้วย RPA_COMBO_WAIT_MS
+  const comboWaitMs = Number(process.env.RPA_COMBO_WAIT_MS ?? 7000);
+  const rounds = Math.max(4, Math.round(comboWaitMs / 500));
   let dropdownUp = false;
-  for (let w = 0; w < 24; w++) {
+  for (let w = 0; w < rounds; w++) {
     const has = await page.locator(
       ".k-animation-container:visible li[role=option], ul.k-list:visible > li.k-item",
     ).count();
     if (has > 0) { dropdownUp = true; break; }
     // กลางทาง (6s) ยังไม่โผล่ → กระตุ้นใหม่ (พิมพ์ตัวสุดท้ายซ้ำ — เผื่อ ajax รอบแรกหลุดบน VM ช้า)
-    if (w === 12) {
+    if (w === Math.floor(rounds / 2)) {
       try { await page.locator(inputSelector).press("Backspace"); await page.type(inputSelector, value.slice(-1), { delay: 50 }); } catch { /* */ }
     }
     await sleep(500);
   }
-  if (!dropdownUp) log(`  ⚠ comboPick: dropdown ไม่โผล่ใน 12s (VM ช้า?) — ลองเลือกจากที่มีต่อ`);
+  if (!dropdownUp) log(`  ⚠ comboPick: dropdown ไม่โผล่ใน ${(comboWaitMs / 1000).toFixed(0)}s — ใช้ค่าที่พิมพ์ไปต่อ`);
 
   // (A) dropdowngrid (Kendo): row = li[role=option] มี span.k-cell (cell แรก = code) — เช็กก่อน
   try {
