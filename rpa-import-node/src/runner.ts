@@ -701,10 +701,14 @@ async function runBrowser(
   const headless = envHeadless === "1" || envHeadless === "true" ? true
     : envHeadless === "0" || envHeadless === "false" ? false
     : (cfg.headless ?? false);
-  const browser = await chromium.launch({
-    headless,
-    slowMo: cfg.slow_mo_ms ?? 0,
-  });
+  // slowMo: หน่วงทุก action ของ Playwright — ตั้งไว้ 400ms ตั้งแต่ตอนไล่บั๊กด้วยตา
+  //   บน VM ที่รันเงียบไม่มีใครดู มันคือเวลาที่เสียฟรี ๆ หลายสิบวินาทีต่อใบ
+  //   ปรับได้ด้วย RPA_SLOW_MO (มิลลิวินาที) โดยไม่ต้องแก้ config.json ที่ใช้ตอน dev
+  const envSlow = Number((process.env.RPA_SLOW_MO ?? "").trim());
+  const slowMo = Number.isFinite(envSlow) && (process.env.RPA_SLOW_MO ?? "").trim() !== ""
+    ? envSlow : (cfg.slow_mo_ms ?? 0);
+  const browser = await chromium.launch({ headless, slowMo });
+  log(`เปิดเบราว์เซอร์ (headless=${headless} · หน่วงต่อ action=${slowMo}ms)`);
   // ⚠ viewport ใหญ่สำคัญมากบน VM (headless): ถ้าไม่ตั้ง = default 1280×720 → Kendo Grid
   //   ของ DCTK render ไม่ครบ/virtualize แถวหาย → เลือกแถวเพื่อพิมพ์ใบขนไม่ได้ → ได้แค่ capture
   //   (บน Mac headed จอกว้าง grid ขึ้นครบ → ผ่าน; นี่คือเหตุ "localhost ผ่าน VM ไม่ผ่าน")
