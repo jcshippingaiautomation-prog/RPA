@@ -212,29 +212,15 @@ async function deleteCopy(page: Page, ref: string): Promise<boolean> {
 
     await page.locator(`#grid tbody tr[data-uid="${target.uid}"]`).first().click({ timeout: 10000 });
     await sleep(1500);
-    const clicked = await page.evaluate(() => {
-      const b = document.querySelector("#BtnDelete") as HTMLElement | null;
-      if (!b) return false;
-      b.click(); return true;
-    });
-    if (!clicked) { log(`   ⚠ ไม่พบปุ่ม "ลบข้อมูล" — ข้าม`); return false; }
-    await sleep(3000);
+    //   ⚠ ต้องคลิกจริง ไม่ใช่ element.click() ผ่าน evaluate — ไม่งั้นค้างที่ confirm() เงียบ ๆ
+    dialogSaid.length = 0;
+    try {
+      await page.locator("#BtnDelete").click({ timeout: 10000 });
+    } catch { log(`   ⚠ กดปุ่ม "ลบข้อมูล" ไม่ได้ — ข้าม`); return false; }
+    await sleep(8000);
+    if (dialogSaid.length) log(`   DCTK ถาม: ${dialogSaid.join(" → ")}`);
 
-    // ยืนยันการลบ (DCTK ถามก่อน) — กดปุ่มยืนยันแบบเทียบข้อความเป๊ะ ๆ
-    for (let i = 0; i < 6; i++) {
-      const ok = await page.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll("button, input[type=button]"));
-        const yes = btns.find((b) => {
-          const t = ((b as HTMLElement).innerText || (b as HTMLInputElement).value || "").trim().toUpperCase();
-          return t === "YES" || t === "ตกลง" || t === "OK";
-        }) as HTMLElement | undefined;
-        if (!yes) return false;
-        yes.click(); return true;
-      }).catch(() => false);
-      if (ok) break;
-      await sleep(1500);
-    }
-    await sleep(5000);
+
 
     const gone = await page.evaluate((v: string) => {
       /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -303,6 +289,14 @@ function shortName(v: string, max = 34): string {
 const browser = await chromium.launch({ headless: process.env.PULL_HEADLESS !== "0" });
 const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
 const page = await context.newPage();
+// ⚠ DCTK ยืนยัน "ลบข้อมูล" ด้วย confirm() ของเบราว์เซอร์ ไม่ใช่กล่องในหน้าเว็บ
+//   ถ้าไม่ดักไว้ Playwright จะตอบ "ยกเลิก" ให้อัตโนมัติ → กดลบเท่าไหร่ใบสำเนาก็ไม่หาย
+//   (เจอจริงตอนดึง Master ของ AN LONG FOOD: อ่านข้อมูลผ่าน แต่ใบสำเนาค้างทุกครั้ง)
+const dialogSaid: string[] = [];
+page.on("dialog", async (d) => {
+  dialogSaid.push(d.message().replace(/\s+/g, " ").trim().slice(0, 80));
+  await d.accept().catch(() => { /* กล่องปิดไปเองแล้ว */ });
+});
 page.setDefaultTimeout(cfg.default_timeout_ms ?? 30000);
 
 async function openRow(cur: Page, gridId: string): Promise<Page | null> {
