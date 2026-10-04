@@ -518,9 +518,13 @@ export async function openPortfolioAndAdd(page: Page): Promise<void> {
   }
   // DCTK ช้า → ให้ click รอเมนูได้นาน (เดิม default 30s บางรอบไม่พอเมื่อ login เพิ่งผ่าน)
   await page.click(S.SEL_PORTFOLIO_MENU, { timeout: 30000 });
-  await sleep(5000);
+  // ⏱ ไม่ต้องหน่วงเวลาคงที่รอหน้ารายการ — Playwright รอให้ปุ่ม "เพิ่ม" กดได้เองอยู่แล้ว
   await page.click(S.SEL_BTN_ADD, { timeout: 30000 });
-  await sleep(5000);
+  // รอ "ฟอร์มใบขนพร้อมกรอกจริง" แทนการเดาเวลา — เร็วกว่าเมื่อ DCTK ว่าง และทนกว่าเมื่อ DCTK ช้า
+  //   (ช่องประเทศผู้ซื้อเป็นช่องแรกที่ fillPage1 แตะ)
+  await page.waitForSelector(S.SEL_PUR_COUNTRY, { state: "visible", timeout: 60000 })
+    .catch(() => log("  ⚠ ยังไม่เห็นช่องแรกของฟอร์มใบขนใน 60s — ลองกรอกต่อ"));
+  await sleep(500);
 }
 
 /**
