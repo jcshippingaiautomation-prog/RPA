@@ -474,7 +474,7 @@
   "type": "text",
   "selector": "#TotalQuantity",
   "selectorConst": null,
-  "column": "net_weight_ton",
+  "column": null,
   "scope": "header",
   "fill": false,
   "computed": false,

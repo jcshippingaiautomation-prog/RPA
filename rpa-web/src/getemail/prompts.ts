@@ -68,8 +68,8 @@ export const EXTRACTOR_SYSTEM_PROMPT =
   '  "description_eng":          "ชื่อสินค้าภาษาอังกฤษ",\n' +
   '  "net_weight_ton":           0.000,\n' +
   '  "net_weight_unit_code":     "TO",\n' +
-  '  "container_or_volume_qty":  "จำนวนตู้ (เลขหน้าตัว X ใน Volume เช่น 1X40RF = 1)",\n' +
-  '  "container_unit_code":      "รหัสหน่วยตู้",\n' +
+  '  "container_or_volume_qty":  "จำนวนหีบห่อทั้งใบ ตามหน่วยที่ใส่ใน container_unit_code — สินค้าบรรจุหน่วยย่อย (กระสอบ/ถัง/กล่อง/ลัง) ให้ใช้จำนวนหน่วยย่อยนั้น เช่น \\"IN 5,000 BAGS\\" = 5000 แม้เอกสารจะบอกจำนวนตู้ไว้ด้วย · เทกองในตู้ (flexibag/ถังในตู้) จึงใช้จำนวนตู้ (เลขหน้าตัว X ใน Volume เช่น 1X40RF = 1)",\n' +
+  '  "container_unit_code":      "หน่วยหีบห่อทั้งใบ เช่น BG กระสอบ · PX ถังพลาสติก · CT/CS กล่องลัง · 1F หรือ FB ตู้ flexibag",\n' +
   '  "export_tariff":            "ประเภทพิกัดขาออก/รหัสสถิติ เลข 8 หลัก (เช่น 29232011) — ดึงเฉพาะตัวเลข 8 หลัก ตัด /KGM หรือ -000 ออก",\n' +
   '  "customs_unit_code":        "หน่วยปริมาณในใบขน (หลังพิกัด เช่น KGM, TNE, C62)",\n' +
   '  "items": [\n' +

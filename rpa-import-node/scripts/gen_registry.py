@@ -72,7 +72,9 @@ COLUMN_MAP_HEADER = {
     "_InsuranceForeign": "insurance_charge",
     "TotalNetWeight": "net_weight_kg",
     "TotalGrossWeight": "gross_weight_kg",
-    "TotalQuantity": "net_weight_ton",
+    # "ปริมาณในใบขน (รวม)" = ผลรวมปริมาณตามหน่วยในใบขน (เช่น 5,000 BG · 2,500 CT)
+    # ไม่ใช่น้ำหนักเป็นตัน — เก็บใน extra_fields แล้วให้ระบบรวมจากรายการสินค้าให้
+    # "TotalQuantity": "net_weight_ton",
 }
 COLUMN_MAP_ITEM = {
     "ProductCode_input": "description_eng",

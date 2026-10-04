@@ -663,6 +663,30 @@ const TARIFF_STAT: { [tariff8: string]: string } = {
   "90328939": "090",   // เซ็นเซอร์ป้องกันประตูลิฟท์ — ใบจริง DCTK000035696 / 035738 ลง 090
 };
 
+/**
+ * ปริมาณรวมหัวใบ = ผลรวมปริมาณของทุกรายการ (หน่วยเดียวกับในใบขน)
+ *
+ * ช่องนี้เคยผูกไว้กับคอลัมน์น้ำหนักเป็นตัน ซึ่งถูกเฉพาะลูกค้าที่หน่วยเป็น TNE
+ * ใบที่หน่วยเป็นกระสอบ/กล่องจะโชว์เลขผิดคนละเรื่อง (DE HEUS: ใบจริง 5,000 BG แต่เราโชว์ 250)
+ * DCTK คำนวณช่องนี้เองจากรายการสินค้าอยู่แล้ว — เราคำนวณให้ตรงกันไว้เพื่อให้หน้าเว็บตรงกับใบจริง
+ */
+function reconcileTotalQuantity(
+  record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
+): void {
+  const items = record._items ?? [];
+  if (!items.length) return;
+  let sum = 0;
+  for (const it of items) {
+    const ex = (it.extra_fields ?? {}) as Record<string, unknown>;
+    const n = Number(String(ex.quantity ?? "").replace(/,/g, ""));
+    if (!Number.isFinite(n) || n <= 0) return;      // รายการไหนไม่มีปริมาณ = ไม่เดารวม
+    sum += n;
+  }
+  const extra = (record.extra_fields ?? {}) as Record<string, unknown>;
+  extra.total_quantity = String(Number(sum.toFixed(3)));
+  record.extra_fields = extra;
+}
+
 function normalizeItemText(
   record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
   productCodeFrom = "",
@@ -1005,6 +1029,7 @@ export async function prepareDeclarationRecord(
       await customerPreset(String(record.customer_name ?? ""), "__product_code_from"),
       /^(1|true|yes)$/i.test(await customerPreset(String(record.customer_name ?? ""), "__skip_product_catalog")),
       (await customerPreset(String(record.customer_name ?? ""), "__item_text_mode")) === "plain");
+    reconcileTotalQuantity(record);
 
 
   return { record, fieldModes, codeFixes };
@@ -1355,7 +1380,19 @@ export async function applyMasterToRecord(
       ? (await findBestTemplate(customer, consigneeName, productCodes, destCountry)) ?? (await getDefaultTemplate(customer))
       : await getDefaultTemplate(customer);
   }
-  if (!tpl) return { record };
+  if (!tpl) {
+    // ⚠ ไม่มี Master = ใบนี้จะขาดค่าที่ Master เก็บไว้ทั้งหมด (พิกัด ท่า รหัสสิทธิ หน่วย ชื่อไทย)
+    //   ของเดิมเงียบสนิท — ผู้ใช้เห็นอีกทีตอน RPA กรอกไม่ผ่าน หรือใบขนออกมาผิด
+    const all = await listTemplates(customer).catch(() => []);
+    if (all.length) {
+      console.warn(
+        `[master] ⚠ ไม่พบ Master ที่เข้ากับใบนี้ (${customer}/${invoice || "-"} · ผู้รับ "${consigneeName || "-"}"` +
+        `${destCountry ? " → " + destCountry : ""}) ทั้งที่ลูกค้ารายนี้มี Master อยู่ ${all.length} อัน — ` +
+        `ใบจะขาดพิกัด/ท่า/รหัสสิทธิ ตรวจชื่อผู้รับกับชื่อสินค้าให้ตรงกับ Master ก่อนรัน`,
+      );
+    }
+    return { record };
+  }
 
   const cur = await rowToFields(record, "header");             // คอลัมน์ → key ของ registry
   const applied = applyTemplate(tpl, cur, { includeItems: false });
@@ -1442,6 +1479,7 @@ export async function insertDeclaration(
     normalizeItemText(rec, await customerPreset(customer, "__product_code_from"),
       /^(1|true|yes)$/i.test(await customerPreset(customer, "__skip_product_catalog")),
       (await customerPreset(customer, "__item_text_mode")) === "plain");
+    reconcileTotalQuantity(rec);
 
     const payload: Record<string, unknown> = {};
     for (const col of DECL_COLUMNS) payload[col] = rec[col] ?? null;
@@ -1871,8 +1909,19 @@ export function scoreTemplate(
   //   (เจอจริง: Master เก็บ "AL ACCAD DEPARTMENT STORE OWNED BY ORGANIC F AND C"
   //    แต่ในเอกสารเขียนแค่ "AL ACCAD DEPARTMENT STORE" → เทียบเป๊ะแล้วไม่ตรง Master ถูกทิ้ง)
   //   ยังไม่เดาสุ่ม: ต้องมีฝ่ายหนึ่งเป็นส่วนขึ้นต้นของอีกฝ่าย และยาวพอที่จะไม่บังเอิญ
-  const consHit = (a: string, b: string) =>
-    a === b || (a.length >= 8 && b.length >= 8 && (a.startsWith(b) || b.startsWith(a)));
+  const consHit = (a: string, b: string) => {
+    if (a === b) return true;
+    if (a.length >= 8 && b.length >= 8 && (a.startsWith(b) || b.startsWith(a))) return true;
+    // สะกดต่างกันเล็กน้อย — ชื่อที่พิมพ์ไว้ใน DCTK กับในใบกำกับไม่ตรงกันเสมอไป
+    //   (เจอจริง: ใบกำกับ "NORTH CONTINENTAL…" แต่ใน DCTK พิมพ์ "NORTH CONTINENTIAL…")
+    //   เกณฑ์เข้ม: ต้องขึ้นต้นด้วยคำเดียวกัน และคำส่วนใหญ่ต้องตรงกัน
+    const tok = (x: string) => x.replace(/[^A-Z0-9ก-๙ ]/g, " ").split(/\s+/).filter(Boolean);
+    const A = tok(a), B = tok(b);
+    if (A.length < 2 || B.length < 2 || A[0] !== B[0]) return false;
+    const setB = new Set(B);
+    const hit = A.filter((w) => setB.has(w)).length;
+    return hit / Math.min(A.length, B.length) >= 0.8;
+  };
 
   // null = Master ไม่ได้ระบุระดับนี้ → ใช้ได้กับทุกค่า
   const consMatch = tCons.length ? (!!cons && tCons.some((c) => consHit(c, cons))) : null;
@@ -1899,7 +1948,13 @@ export function scoreTemplate(
   if (consMatch === false) return null;
   // สินค้าคนละอย่างชัดเจน (แทบไม่มีคำร่วมกันเลย) → ไม่ใช้
   //   กันเคสผู้รับรายเดียวซื้อหลายสินค้า แล้วเอา Master ของสินค้าอื่นมาใส่พิกัดผิด
-  if (prodSim !== null && prodSim < 0.25) return null;
+  //   ⚠ ยกเว้นเมื่อ "ชื่อผู้รับตรง" — ชื่อสินค้าที่ AI อ่านมาไม่แน่นอนพอจะใช้ตัดทิ้ง
+  //     (เจอจริง DE HEUS: ใบกำกับเขียน "RAW MATERIAL FOR ANIMAL FEED SOYBEAN MEAL"
+  //      บางรอบ AI ส่งมาแค่ "RAW MATERIAL FOR ANIMAL FEED" → ไม่มีคำร่วมกับ "SOYBEAN MEAL"
+  //      แล้ว Master ของผู้รับรายนั้นถูกทิ้งเงียบ ๆ ใบขนเลยขาดพิกัด/ท่า/รหัสสิทธิทั้งใบ)
+  //     ผู้รับตรงแต่สินค้าไม่ตรง = ให้คะแนนต่ำไว้ ถ้ามี Master อื่นของผู้รับรายเดียวกัน
+  //     ที่สินค้าตรงกว่า อันนั้นจะชนะเอง
+  if (prodSim !== null && prodSim < 0.25 && consMatch !== true) return null;
 
   // ประเทศปลายทาง — ใช้ "เพิ่มคะแนน" อย่างเดียว ไม่ใช้ตัดทิ้ง
   //   จำเป็นเมื่อผู้รับรายเดียวส่งหลายประเทศ (เจอจริง: FFF ส่งทั้ง NL และ IT)
