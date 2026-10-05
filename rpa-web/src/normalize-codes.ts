@@ -163,18 +163,26 @@ export async function normalizeToDctkCodes(
     { column: "container_unit_code", listId: "package_unit", label: "หน่วยหีบห่อ" },
     { column: "currency", listId: "currency", label: "สกุลเงิน" },
   ];
-  for (const h of HEADER_COLUMN_LIST) {
-    const list = lists.find((l) => l.id === h.listId);
-    if (!list) continue;
-    const cur = record[h.column];
-    if (cur === null || cur === undefined || String(cur).trim() === "") continue;
-    const fixed = matchCode(cur, list);
-    if (!fixed) continue;
-    record[h.column] = fixed;
-    fixes.push({
-      scope: "header", key: h.column, label: `${h.label} (หัวใบ)`,
-      from: String(cur).trim(), to: fixed, listLabel: list.label,
-    });
-  }
+  //   ⚠ ต้องไล่ "รายการสินค้า" ด้วยคอลัมน์ชุดเดียวกันนี้ด้วย ไม่ใช่เฉพาะหัวใบ
+  //      ลูกค้าแจ้งจริง (DK&N VIETNAM, ใบ DKN 29/2026): ช่องปริมาณในใบกำกับขึ้นหน่วย "TO"
+  //      ทั้งที่ต้องเป็น "TNE" — เพราะหน่วยระดับรายการไม่เคยถูกแปลงเป็นรหัสของกรมฯ
+  const fixUnitColumns = (row: Record<string, unknown>, scope: "header" | "item", itemLine?: number) => {
+    for (const h of HEADER_COLUMN_LIST) {
+      const list = lists.find((l) => l.id === h.listId);
+      if (!list) continue;
+      const cur = row[h.column];
+      if (cur === null || cur === undefined || String(cur).trim() === "") continue;
+      const fixed = matchCode(cur, list);
+      if (!fixed || fixed === String(cur).trim()) continue;
+      row[h.column] = fixed;
+      fixes.push({
+        scope, itemLine, key: h.column,
+        label: `${h.label} (${scope === "header" ? "หัวใบ" : "รายการ"})`,
+        from: String(cur).trim(), to: fixed, listLabel: list.label,
+      });
+    }
+  };
+  fixUnitColumns(record, "header");
+  (record._items ?? []).forEach((it, i) => fixUnitColumns(it as Record<string, unknown>, "item", i + 1));
   return fixes;
 }
