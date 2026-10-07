@@ -1,7 +1,7 @@
 {
   "name": "thanakorn-vn",
   "customer": "THANAKORN",
-  "note": "MEK 18(C)/2026 · เฉลยจากใบที่ยื่นกรมฯ DCTK000035904 · ผู้ซื้อมาจากช่อง Notify Party ไม่ใช่ Sold to",
+  "note": "MEK 18(C)/2026 · เฉลยจากใบที่ยื่นกรมฯ DCTK000035904 · ผู้ซื้อมาจากช่อง Notify Party ไม่ใช่ Sold to · หน่วยปริมาณเฉลยจากใบ MEK 18(B)/2026 ที่เจ้าหน้าที่ยื่นเอง (44,000 KGM ทั้งสองช่อง)",
   "sources": [
     "source/2026-09/1790490374385_FOB_MEK 18(C).2026.pdf",
     "source/2026-09/1790490373207_BKG 276827563.pdf"
@@ -30,7 +30,10 @@
       "amount": 48620,
       "container_or_volume_qty": "2",
       "customs_unit_code": "KGM",
-      "net_weight_kg": 44000
+      "net_weight_kg": 44000,
+      "net_weight_unit_code": "KGM",
+      "inv_quantity": "44000",
+      "quantity": "44000"
     }
   ]
 }

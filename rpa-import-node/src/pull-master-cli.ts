@@ -264,6 +264,11 @@ const SHIPMENT_EXACT = new Set([
 const SHIPMENT_SUFFIX = ["_foreign", "_baht", "_exchange_rate"];
 
 function isShipmentField(key: string): boolean {
+  // ⚠ "หน่วย" ไม่ใช่ค่าที่เปลี่ยนรายชิปเมนต์ — มันผูกกับผู้รับ/พิกัดสินค้า
+  //   และ AI เดาจากใบกำกับไม่ได้ (ใบเขียน MT/TO/KGS แต่กรมฯ ใช้ TNE/KGM/BX/CS แล้วแต่ใบจริงของรายนั้น)
+  //   ลูกค้าแจ้ง 2 ครั้งติด: DK&N ได้ "TO" และ AUSTRALASIAN ได้ "44.000 TNE"
+  //   ทั้งที่ใบที่เจ้าหน้าที่ยื่นเองใช้ TNE และ 44,000 KGM ตามลำดับ
+  if (key.endsWith("_unit_code")) return false;
   return SHIPMENT_EXACT.has(key) || SHIPMENT_SUFFIX.some((sfx) => key.endsWith(sfx));
 }
 
@@ -297,7 +302,7 @@ page.on("dialog", async (d) => {
   dialogSaid.push(d.message().replace(/\s+/g, " ").trim().slice(0, 80));
   await d.accept().catch(() => { /* กล่องปิดไปเองแล้ว */ });
 });
-page.setDefaultTimeout(cfg.default_timeout_ms ?? 30000);
+page.setDefaultTimeout(Number(process.env.PULL_TIMEOUT_MS ?? cfg.default_timeout_ms ?? 90000));
 
 async function openRow(cur: Page, gridId: string): Promise<Page | null> {
   const waitNew = context.waitForEvent("page", { timeout: 20000 }).catch(() => null);
@@ -316,7 +321,11 @@ try {
   log(`   เลขที่ให้มา: "${INVOICE}" → ค้นในคอลัมน์ "${col.label}"`);
 
   await page.goto(cfg.url, { waitUntil: "commit", timeout: 60000 });
-  await waitForPageReady(page, "หน้า DCTK", 120000);
+  await waitForPageReady(page, "หน้า DCTK", 240000);
+  // DCTK บางช่วงเสิร์ฟหน้า login ช้ามาก — รอให้ช่องผู้ใช้โผล่จริงก่อนค่อยพิมพ์
+  //   (เดิมล้มทันทีที่ #UserId ไม่โผล่ใน 30s แล้วงานดึง Master ล้มทั้งงาน)
+  await page.waitForSelector("#UserId", { timeout: 300000 })
+    .catch(() => log("  ⚠ ยังไม่เห็นช่องผู้ใช้หลังรอ 5 นาที — ลอง login ต่อ"));
   await login(page, cfg.username, cfg.password);
   if (VIA_COPY) {
     copyRef = await copyThenOpen(page, INVOICE);
