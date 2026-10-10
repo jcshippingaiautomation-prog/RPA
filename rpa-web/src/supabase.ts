@@ -1754,7 +1754,10 @@ export type FieldMode = "master" | "ai" | "off";
 
 export interface DeclarationTemplate {
   id?: string;
+  /** ชื่ออัตโนมัติจากผู้รับ+สินค้า (ใช้อ้างอิง/ค้นหา) */
   name: string;
+  /** ชื่อที่ผู้ใช้ตั้งเอง — ใช้แสดงแทน name ถ้ามี (sql/13) */
+  label?: string | null;
   customer_name: string;
   description?: string | null;
   /** ระดับ 2 — consignee ที่ Master นี้ใช้ได้ (ว่าง = ทุกราย) */
@@ -1850,6 +1853,8 @@ export async function saveTemplate(
     payload.priority = Number(t.priority ?? 0);
     if (t.source) payload.source = t.source;
   }
+  // ชื่อที่ผู้ใช้ตั้งเอง — ใส่เฉพาะเมื่อ DB มีคอลัมน์แล้ว (กันพังถ้ายังไม่ได้รัน sql/13)
+  if (await templateLabelEnabled()) payload.label = (t.label ?? "").toString().trim() || null;
   try {
     // 1 ลูกค้ามี default ได้อันเดียว → ปลด default เดิมก่อน (unique index จะไม่ให้ insert ซ้อน)
     if (payload.is_default && payload.customer_name) {
@@ -1878,6 +1883,18 @@ export async function saveTemplate(
 
 let _tplLevels: boolean | null = null;
 /** ตาราง Master มีคอลัมน์ 3 ระดับแล้วไหม (รัน sql/12 หรือยัง) */
+let _tplLabel: boolean | null = null;
+/** DB มีคอลัมน์ชื่อที่ผู้ใช้ตั้งเองแล้วหรือยัง (sql/13) */
+export async function templateLabelEnabled(): Promise<boolean> {
+  if (_tplLabel !== null) return _tplLabel;
+  const sb = getClient();
+  if (!sb) { _tplLabel = false; return false; }
+  const { error } = await sb.from("declaration_templates").select("label").limit(1);
+  _tplLabel = !error;
+  if (error) console.warn("[supabase] Master ยังไม่มีคอลัมน์ชื่อที่ตั้งเอง — โปรดรัน sql/13_master_label.sql");
+  return _tplLabel;
+}
+
 export async function templateLevelsEnabled(): Promise<boolean> {
   if (_tplLevels !== null) return _tplLevels;
   const sb = getClient();

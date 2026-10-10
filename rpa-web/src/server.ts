@@ -39,6 +39,7 @@ import {
   replaceItems,
   getDeclaration,
   createDeclaration,
+  prepareDeclarationRecord,
   deleteDeclaration,
   setDeclarationStatus,
   declarationStatusEnabled,
@@ -75,6 +76,7 @@ import {
   type ScheduleConfig,
 } from "./scheduler.js";
 import { requireUser, requireAdmin, authEnabled, serviceClient } from "./auth.js";
+import { draftTemplateFromRecord } from "./master-draft.js";
 import { processInbox, extractFromAttachments, type InboxSummary } from "./getemail/pipeline.js";
 import { draftCustomerLogic } from "./getemail/setup-agent.js";
 
@@ -856,6 +858,7 @@ app.post("/api/templates", requireUser, async (req, res) => {
   const saved = await saveTemplate({
     id: b.id ? String(b.id) : undefined,
     name,
+    label: b.label ? String(b.label).trim() : null,
     customer_name: String(b.customer_name ?? "").trim(),
     description: b.description ? String(b.description) : null,
     consignee_names: Array.isArray(b.consignee_names) ? (b.consignee_names as string[]) : [],
@@ -875,6 +878,37 @@ app.post("/api/templates", requireUser, async (req, res) => {
     if (full) check = await validateMaster(full);
   } catch { /* ตรวจไม่ได้ ไม่ใช่เหตุให้บันทึกล้ม */ }
   res.json({ ...saved, check });
+});
+
+/**
+ * ให้ AI อ่านเอกสารแล้วร่าง Master ให้ — ยังไม่บันทึก ผู้ใช้ตรวจก่อนกดบันทึกเอง
+ *   ใช้ขั้นตอนเดียวกับตอนอัปโหลดใบขนจริง (AI → ปรับรหัสกรมฯ → ผสม Master เดิมถ้ามี)
+ *   แล้วตัดค่าที่เป็นของชิปเมนต์นั้นออก เหลือเฉพาะค่าที่ใช้ซ้ำได้
+ */
+app.post("/api/templates/ai-draft", requireUser, async (req, res) => {
+  if (!supabaseEnabled()) { res.status(400).json({ error: "ยังไม่ได้ตั้งค่า Supabase" }); return; }
+  if (!config.gemini.enabled) { res.status(400).json({ error: "ยังไม่ได้ตั้งค่า Gemini (AI)" }); return; }
+  const body = (req.body || {}) as { files?: { filename: string; mimeType?: string; dataBase64: string }[]; customer?: string };
+  const files = Array.isArray(body.files) ? body.files : [];
+  if (!files.length) { res.status(400).json({ error: "ยังไม่ได้แนบเอกสาร" }); return; }
+  try {
+    const attachments = files.map((f) => ({
+      filename: f.filename || "upload",
+      mimeType: f.mimeType || "application/octet-stream",
+      bytes: Buffer.from(f.dataBase64, "base64"),
+    }));
+    broadcast("log", { line: `[MASTER] 🤖 ให้ AI อ่าน ${attachments.length} ไฟล์เพื่อร่าง Master…` });
+    const { record, customer } = await extractFromAttachments(
+      attachments, (line) => broadcast("log", { line: "[MASTER] " + line }), (body.customer || "").trim());
+    const prepared = await prepareDeclarationRecord(record);
+    const draft = await draftTemplateFromRecord(prepared.record, customer || (body.customer || "").trim());
+    broadcast("log", { line: `[MASTER] ✓ ร่าง Master จากใบกำกับ ${String(record.invoice_number ?? "-")} แล้ว — รอผู้ใช้ตรวจ` });
+    res.json({ ok: true, draft });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    broadcast("log", { line: "[MASTER] ✗ " + msg });
+    res.status(500).json({ error: msg });
+  }
 });
 
 app.delete("/api/templates/:id", requireUser, async (req, res) => {

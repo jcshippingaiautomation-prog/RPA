@@ -116,7 +116,9 @@
           <div class="card-head">
             <h2><i data-icon="copy"></i> คลัง Master ข้อมูล</h2>
             <div class="head-actions">
-              <button class="btn btn-primary" id="btnNewMaster"><i data-icon="plus"></i> สร้าง Master ใหม่</button>
+              <button class="btn btn-primary" id="btnAiMaster" title="อัปโหลดใบกำกับ/ใบขน แล้วให้ AI ร่าง Master ให้"><i data-icon="sparkles"></i> ให้ AI ช่วยสร้าง</button>
+              <button class="btn btn-ghost" id="btnNewMaster"><i data-icon="plus"></i> สร้างเอง</button>
+              <input type="file" id="aiMasterFiles" multiple accept=".pdf,.xls,.xlsx,.doc,.docx,.png,.jpg,.jpeg" style="display:none" />
               <button class="btn btn-ghost" id="btnCheckMasters"><i data-icon="check"></i> ตรวจ Master ทั้งหมด</button>
               <button class="btn btn-ghost" id="btnReloadMasters"><i data-icon="refresh"></i> โหลดใหม่</button>
             </div>

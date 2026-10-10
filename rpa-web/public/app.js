@@ -2242,7 +2242,10 @@ function renderMasters() {
       }
       const nVals = Object.keys(t.header || {}).length;
       // ชื่อขึ้นต้นด้วยชื่อลูกค้าอยู่แล้ว — ตัดออกเพราะอยู่ในหัวกลุ่มแล้ว
-      const shortName = String(t.name || "").replace(new RegExp(`^${cust}\\s*—\\s*`, "i"), "") || t.name;
+      const autoName = String(t.name || "").replace(new RegExp(`^${cust}\\s*—\\s*`, "i"), "") || t.name;
+      // ผู้ใช้ตั้งชื่อเองได้ (sql/13) — ถ้ามี ให้ชื่อนั้นเป็นตัวหลัก ส่วนชื่ออัตโนมัติไปอยู่บรรทัดรอง
+      const userLabel = String(t.label || "").trim();
+      const shortName = userLabel || autoName;
       const consignees = t.consignee_names || [];
       const products = t.product_codes || [];
       // ชื่อ Master ที่ระบบตั้งให้ = "ผู้รับสินค้า · สินค้า" อยู่แล้ว
@@ -2260,6 +2263,7 @@ function renderMasters() {
       return `<tr>
         <td>
           <div class="ms-name">${escapeHtml(shortName)}${t.is_default ? ' <span class="st st-done" title="ใช้เมื่อไม่มี Master อื่นที่ตรงกว่า">★ ค่าเริ่มต้น</span>' : ""}</div>
+          ${userLabel ? `<div class="muted-cell ms-desc">${escapeHtml(autoName)}</div>` : ""}
           <div class="ms-scope">${scope}</div>
           ${t.description ? `<div class="muted-cell ms-desc">${escapeHtml(String(t.description).replace(/^ดึงจาก DCTK ด้วย ?เลขที่ใบกำกับสินค้า/, "ที่มา: ใบกำกับ"))}</div>` : ""}
         </td>
@@ -2312,7 +2316,8 @@ function openMaster(tpl) {
   msEditing = tpl ? JSON.parse(JSON.stringify(tpl)) : { name: "", customer_name: "", description: "", header: {}, items: [], field_modes: {}, is_default: false };
   msItems = Array.isArray(msEditing.items) ? msEditing.items.map((it) => ({ ...it })) : [];
   msPage = 1;
-  $("msTitle").textContent = msEditing.id ? `แก้ไข Master — ${msEditing.name}` : "สร้าง Master ใหม่";
+  $("msTitle").textContent = msEditing.id
+    ? `แก้ไข Master — ${String(msEditing.label || "").trim() || msEditing.name}` : "สร้าง Master ใหม่";
   renderMasterForm();
   $("modalMaster").style.display = "flex";
 }
@@ -2337,7 +2342,10 @@ function renderMasterForm() {
   $("msBody").innerHTML = `
     ${srcLine}
     <div class="md-grid" style="margin-bottom:12px">
-      <div class="fld"><label>ชื่อ Master *</label><input class="inp" id="msName" value="${escapeHtml(t.name || "")}" placeholder="เช่น THANAKORN — ตู้ 40ft ไปเวียดนาม" /></div>
+      <div class="fld"><label>ชื่อที่ใช้เรียก (ตั้งเอง)</label>
+        <input class="inp" id="msLabel" value="${escapeHtml(t.label || "")}" placeholder="ชื่อสั้น ๆ ที่ทีมเรียกกัน เช่น ALF ตู้น้ำมันเวียดนาม" /></div>
+      <div class="fld"><label>ชื่อเต็ม * <span class="muted">(ระบบตั้งจากผู้รับ+สินค้า ใช้อ้างอิง)</span></label>
+        <input class="inp" id="msName" value="${escapeHtml(t.name || "")}" placeholder="เช่น THANAKORN — AN LONG FOOD · REFINED SOYBEAN OIL" /></div>
       <div class="fld"><label>ลูกค้า (ว่าง = ใช้ได้ทุกลูกค้า)</label>
         <input class="inp" id="msCustomer" list="msCustList" value="${escapeHtml(t.customer_name || "")}" placeholder="เช่น THANAKORN" />
         <datalist id="msCustList">${custOpts.map((c) => `<option value="${escapeHtml(c)}">`).join("")}</datalist></div>
@@ -2514,6 +2522,7 @@ async function saveMaster() {
   const splitList = (v) => String(v || "").split(",").map((x) => x.trim()).filter(Boolean);
   const payload = {
     id: msEditing.id, name,
+    label: ($("msLabel")?.value ?? "").trim(),
     customer_name: $("msCustomer").value.trim(),
     description: $("msDesc").value.trim(),
     consignee_names: splitList($("msConsignees")?.value),
@@ -2544,6 +2553,36 @@ async function saveMaster() {
 }
 
 $("btnNewMaster").onclick = () => openMaster(null);
+
+/**
+ * ให้ AI ช่วยสร้าง Master — อัปเอกสารของชิปเมนต์หนึ่ง แล้วให้ AI ร่างให้
+ *   ร่างที่ได้ยัง "ไม่บันทึก" — เปิดฟอร์มให้ตรวจก่อน แล้วผู้ใช้กดบันทึกเอง
+ *   ค่าที่เปลี่ยนทุกชิปเมนต์ (ยอดเงิน น้ำหนัก วันที่ เรือ) ถูกตัดออกให้แล้ว
+ */
+$("btnAiMaster").onclick = () => $("aiMasterFiles").click();
+$("aiMasterFiles").onchange = async (ev) => {
+  const files = [...(ev.target.files || [])];
+  ev.target.value = "";
+  if (!files.length) return;
+  const cust = (prompt("Master นี้ของลูกค้ารายไหน? (ใส่คำค้นบริษัทใน DCTK เช่น THANAKORN)", "") || "").trim();
+  if (!cust) { toast("ยกเลิก — ต้องระบุลูกค้าก่อน", "warn"); return; }
+  const btn = $("btnAiMaster"); btn.disabled = true;
+  toast(`กำลังให้ AI อ่าน ${files.length} ไฟล์…`, "info");
+  try {
+    const payload = { customer: cust, files: [] };
+    for (const f of files) {
+      payload.files.push({ filename: f.name, mimeType: f.type || "application/octet-stream", dataBase64: await fileToBase64(f) });
+    }
+    const r = await api("/api/templates/ai-draft", "POST", payload);
+    const d = r.draft;
+    openMaster(d);
+    const miss = (d._guessed || []);
+    toast(miss.length
+      ? `ร่าง Master ให้แล้ว — ยังขาด: ${miss.join(" · ")} กรุณาเติมก่อนบันทึก`
+      : "ร่าง Master ให้แล้ว — ตรวจแล้วกดบันทึกได้เลย", miss.length ? "warn" : "success");
+  } catch (e) { toast("ให้ AI ร่างไม่สำเร็จ: " + e.message, "error"); }
+  finally { btn.disabled = false; }
+};
 $("btnReloadMasters").onclick = loadMasters;
 
 /** ตรวจ Master ทุกอันด้วยกฎของกรมฯ แล้วสรุปให้ดูทีเดียว */
