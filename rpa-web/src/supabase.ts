@@ -1032,7 +1032,7 @@ export async function prepareDeclarationRecord(
     reconcileTotalQuantity(record);
 
 
-  return { record, fieldModes, codeFixes };
+  return { record, fieldModes, codeFixes, templateName: mastered.templateName };
 }
 
 export async function createDeclaration(

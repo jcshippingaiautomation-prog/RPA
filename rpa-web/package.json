@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
-    "golden": "node dist/golden-cli.js"
+    "golden": "node dist/golden-cli.js",
+    "compare": "node dist/compare-cli.js"
   },
   "engines": {
     "node": "22.x"
