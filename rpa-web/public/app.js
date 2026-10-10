@@ -2420,7 +2420,9 @@ function renderMasterPage(pageNo, row) {
         return `<div class="fld reg-fld" data-key="${f.key}" data-group="${escapeHtml(f.group)}" data-label="${escapeHtml(f.label)}">
           <label>${escapeHtml(f.label)}</label>
           <div class="ms-row">
-            <input class="inp ms-edit" data-key="${f.key}" value="${val}" />
+            ${regIsMultiline(f)
+              ? `<textarea class="inp ms-edit" data-key="${f.key}" rows="2">${val}</textarea>`
+              : `<input class="inp ms-edit" data-key="${f.key}" value="${val}" />`}
             <select class="sel sel-sm ms-mode m-${mode}" data-key="${f.key}">
               <option value="master" ${mode === "master" ? "selected" : ""}>ใช้ค่า Master</option>
               <option value="ai" ${mode === "ai" ? "selected" : ""}>อ่านจากเอกสาร</option>
@@ -2447,7 +2449,9 @@ function renderMasterItems(formPage = 3) {
           const mode = msMode(msEditing, f.key);
           return `<div class="fld"><label>${escapeHtml(f.label)}</label>
              <div class="ms-row">
-               <input class="inp msi-edit" data-i="${i}" data-key="${f.key}" value="${escapeHtml(it[f.key] != null ? String(it[f.key]) : "")}" />
+               ${regIsMultiline(f)
+                 ? `<textarea class="inp msi-edit" data-i="${i}" data-key="${f.key}" rows="2">${escapeHtml(it[f.key] != null ? String(it[f.key]) : "")}</textarea>`
+                 : `<input class="inp msi-edit" data-i="${i}" data-key="${f.key}" value="${escapeHtml(it[f.key] != null ? String(it[f.key]) : "")}" />`}
                <select class="sel sel-sm ms-mode m-${mode}" data-key="${f.key}">
                  <option value="master" ${mode === "master" ? "selected" : ""}>ใช้ค่า Master</option>
                  <option value="ai" ${mode === "ai" ? "selected" : ""}>อ่านจากเอกสาร</option>
@@ -2488,10 +2492,15 @@ function refreshMasterItems() {
 async function saveMaster() {
   const name = $("msName").value.trim();
   if (!name) { toast("กรุณาตั้งชื่อ Master ก่อนบันทึก", "error"); return; }
-  const header = {};
+  // ⚠ เริ่มจากค่าเดิมของ Master เสมอ แล้วค่อยทับด้วยสิ่งที่ฟอร์มแสดง
+  //   ของเดิมสร้าง header ใหม่จากศูนย์ → ช่องที่ฟอร์มไม่ได้แสดง (เช่นช่องที่ DCTK เติมเอง
+  //   หรือช่องที่ไม่ได้อยู่ในหน้า 1-4) ถูกลบทิ้งทุกครั้งที่กดบันทึก โดยไม่มีใครรู้
+  //   (เจอจริง 10 ต.ค. 2569: กดบันทึกเฉย ๆ แล้วช่องหัวใบหายไป 2 ช่อง)
+  const header = { ...(msEditing.header || {}) };
   $("msBody").querySelectorAll(".ms-edit").forEach((el) => {
     const v = String(el.value ?? "").trim();
     if (v) header[el.dataset.key] = v;
+    else delete header[el.dataset.key];      // ผู้ใช้ล้างช่องเอง = ตั้งใจให้ว่าง
   });
   const field_modes = {};
   // ⚠ เก็บโหมด "ทุกช่อง" ห้ามตัดช่องที่คิดว่าเป็นค่าปริยายออก
