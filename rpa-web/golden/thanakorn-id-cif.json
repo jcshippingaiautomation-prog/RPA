@@ -1,0 +1,28 @@
+{
+  "name": "thanakorn-id-cif",
+  "customer": "THANAKORN",
+  "note": "SPS 07/2026 · PT. SETIA (อินโดนีเซีย) · ใบกำกับขาย CIF แล้วหักค่าระวาง/ประกันลงเป็น FOB ท้ายใบ — ต้องยื่น CIF ตามแบบที่ชิปปิ้งยื่นใบ THANAKORN ทุกใบ (MEK 18(C), KPV 09(F), DKN 29) · Master ของผู้ซื้อรายนี้สร้างจากใบ FOB (SPS 05) จึงห้ามล็อกเงื่อนไขไว้ที่ Master · เฉลยยังไม่ได้มาจากใบที่ยื่นจริง",
+  "sources": [
+    "source/2026-10/1792400189948_FOB_SPS 07.2026.pdf"
+  ],
+  "aiAnswer": "```json\n{\n  \"buyer_country_code\": \"ID\",\n  \"destination_country_code\": \"ID\",\n  \"customer_name\": \"THANAKORN\",\n  \"vessel_name\": \"STARSHIP JUPITER\",\n  \"voyage_number\": \"2608S\",\n  \"release_port_code\": \"\",\n  \"loading_port_code\": \"\",\n  \"shipping_mark\": \"REFINED SOYBEAN OIL\\nPACKING IN JERRY CAN\",\n  \"tax_payment_method_code\": \"A\",\n  \"etd\": \"2026-10-25\",\n  \"invoice_number\": \"SPS 07/2026\",\n  \"invoice_date\": \"2026-10-21\",\n  \"consignee_name\": \"PT. SETIA PRIMATAMA SEMESTA\",\n  \"incoterms\": \"CIF\",\n  \"currency\": \"USD\",\n  \"total_goods_amount\": 27300.00,\n  \"freight_charge\": 250.00,\n  \"insurance_charge\": 26.28,\n  \"net_weight_kg\": 17256.00,\n  \"gross_weight_kg\": 18360.00,\n  \"description_eng\": \"REFINED SOYBEAN OIL\",\n  \"net_weight_ton\": 17.256,\n  \"net_weight_unit_code\": \"TO\",\n  \"container_or_volume_qty\": \"1050\",\n  \"container_unit_code\": \"PX\",\n  \"export_tariff\": \"15079020\",\n  \"customs_unit_code\": \"TNE\",\n  \"items\": [\n    {\n      \"description_eng\": \"REFINED SOYBEAN OIL\",\n      \"description_eng_field\": \"REFINED SOYBEAN OIL PACKING: IN JERRY CAN\",\n      \"product_description_thai\": \"น้ำมันถั่วเหลืองบริสุทธิ์\",\n      \"brand_name\": \"NO BRAND\",\n      \"container_or_volume_qty\": \"1050\",\n      \"container_unit_code\": \"PX\",\n      \"net_weight_kg\": 17256.00,\n      \"gross_weight_kg\": 18360.00,\n      \"net_weight_ton\": 17.256,\n      \"net_weight_unit_code\": \"TO\",\n      \"amount\": 27300.00,\n      \"insurance\": 26.28,\n      \"export_tariff\": \"15079020\",\n      \"customs_unit_code\": \"TNE\",\n      \"quantity\": \"\",\n      \"customs_product_code\": \"\",\n      \"tariff_code\": \"15079020\",\n      \"origin_country_code\": \"TH\",\n      \"is_foc\": false\n    }\n  ]\n}\n```",
+  "expectHeader": {
+    "customer_name": "THANAKORN",
+    "invoice_number": "SPS 07/2026",
+    "consignee_name": "PT. SETIA PRIMATAMA SEMESTA",
+    "currency": "USD",
+    "incoterms": "CIF",
+    "total_goods_amount": 27300,
+    "freight_charge": 250,
+    "insurance_charge": 26.28,
+    "buyer_country_code": "ID",
+    "destination_country_code": "ID"
+  },
+  "expectItems": [
+    {
+      "amount": 27300,
+      "insurance": 26.28,
+      "customs_unit_code": "TNE"
+    }
+  ]
+}
