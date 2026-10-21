@@ -79,6 +79,7 @@ import { requireUser, requireAdmin, authEnabled, serviceClient } from "./auth.js
 import { draftTemplateFromRecord } from "./master-draft.js";
 import { processInbox, extractFromAttachments, type InboxSummary } from "./getemail/pipeline.js";
 import { draftCustomerLogic } from "./getemail/setup-agent.js";
+import { useThaiLlm } from "./getemail/thaillm.js";
 
 // Get Email (Node) พร้อมใช้เมื่อมี Gmail OAuth + Gemini key
 function getEmailReady(): boolean {
@@ -153,15 +154,19 @@ app.use(express.static(PUBLIC_DIR, {
 // health check (สำหรับ uptime monitor / load balancer ตอน deploy)
 const STARTED_AT = new Date().toISOString();
 
-app.get("/api/health", (_req, res) => {
+app.get("/api/health", async (_req, res) => {
   // บอกเลข commit ที่กำลังรันอยู่ด้วย — ไม่งั้นหลัง deploy แล้วดูไม่ออกว่าโค้ดใหม่ขึ้นหรือยัง
   //   Render ใส่ RENDER_GIT_COMMIT ให้เองตอน build
+  // ai = เจ้าที่ใช้อ่านเอกสารอยู่ตอนนี้ · aiKey = มีคีย์ของเจ้านั้นตั้งไว้ไหม (ไม่แสดงตัวคีย์)
+  const thai = await useThaiLlm().catch(() => false);
   res.json({
     ok: true,
     status: "healthy",
     auth: authEnabled(),
     commit: (process.env.RENDER_GIT_COMMIT ?? "").slice(0, 7) || "local",
     startedAt: STARTED_AT,
+    ai: thai ? "thaillm" : "gemini",
+    aiKey: thai ? Boolean(process.env.THAILLM_API_KEY) : config.gemini.enabled,
   });
 });
 
