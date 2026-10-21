@@ -5,6 +5,7 @@
 import { config } from "../config.js";
 import { getAppSetting } from "../supabase.js";
 import { sleep } from "./utils.js";
+import { useThaiLlm, thaiLlmGenerate } from "./thaillm.js";
 
 export interface InlineFile {
   mimeType: string;
@@ -64,6 +65,10 @@ export async function geminiGenerate(
   contents?: GeminiContent[] | null,
   tools?: unknown[] | null,
 ): Promise<GeminiResponse> {
+  // AI สำรอง (ThaiLLM) — สลับด้วย AI_PROVIDER / app_settings(ai_provider) ไม่ต้องแก้โค้ดส่วนอื่น
+  if (await useThaiLlm()) {
+    return thaiLlmGenerate(systemPrompt, contents || [{ role: "user", parts: parts || [] }]);
+  }
   if (!config.gemini.enabled) {
     throw new Error("ไม่พบ GEMINI_API_KEY — ตั้งใน .env ก่อน");
   }
