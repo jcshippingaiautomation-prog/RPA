@@ -78,6 +78,22 @@ async function readFields(p: Page, page: 1 | 2 | 3, scope: "header" | "item") {
 }
 
 
+/** PULL_DUMP=1: พิมพ์ทุกช่องราคา/เงื่อนไขที่มีค่า รวมช่องที่กรมฯ คำนวณ — ใช้ไล่ว่าค่าไหนอยู่ช่องไหน */
+async function dumpMoneyInputs(p: Page, where: string): Promise<void> {
+  if (process.env.PULL_DUMP !== "1") return;
+  const rows = await p.evaluate(() => {
+    const out: string[] = [];
+    document.querySelectorAll("input,select").forEach((e) => {
+      const el = e as HTMLInputElement;
+      const id = el.id || el.name;
+      const v = String(el.value ?? "").trim();
+      if (id && v && v !== "0" && v !== "0.00" && /Fob|Increas|Term|Factor|Forward|Freight|Insurance|Pack|Inland|Landing|Extra|Amount|UnitPrice/i.test(id)) out.push(`${id}=${v}`);
+    });
+    return out;
+  }).catch(() => [] as string[]);
+  log(`  [dump ${where}] ${rows.join(" · ")}`);
+}
+
 /**
  * DCTK แสดงวันที่เป็น dd/mm/yyyy แต่ระบบเราเก็บ yyyy-mm-dd
  * ถ้าไม่แปลง ตัวเลือกวันที่ของ RPA จะได้ NaN แล้วกรอกไม่ผ่าน (เจอจริงตอน dry run)
@@ -124,6 +140,12 @@ async function copyThenOpen(page: Page, invoice: string): Promise<string | null>
     /* eslint-disable @typescript-eslint/no-explicit-any */
     const ds = (window as any).$("#grid").data("kendoGrid")?.dataSource;
     if (!ds) return false;
+    // หน้ารายการโหลดแค่ใบที่สร้างใน 30 วันล่าสุด (ฝั่ง server กรองวันที่สร้าง) → ใบเก่าค้นไม่เจอ
+    //   ขยายวันเริ่มต้นย้อนไปถึงปี 2020 ก่อนค้น
+    const read = ds.transport?.options?.read;
+    if (read && typeof read === "object" && typeof read.url === "string") {
+      read.url = read.url.replace(/(CREATE_DATE%2B%253e%253d%2B%2527)\d{4}-\d{2}-\d{2}/, "$12020-01-01");
+    }
     ds.filter({ field: f, operator: "contains", value: v });
     return true;
   }, { f: col.field, v: invoice });
@@ -345,6 +367,7 @@ try {
   const inv = await openRow(page, "gridExInvoice");
   if (inv) {
     header2 = normalizeDates(await readFields(inv, 2, "header"), "header");
+    await dumpMoneyInputs(inv, "หน้า 2");
     log(`  ✓ หน้า 2 อ่านได้ ${Object.keys(header2).length} ช่อง`);
     if (inv !== page) await inv.close();
   } else {
@@ -355,6 +378,16 @@ try {
   const items: { [k: string]: string }[] = [];
   // ⚠ Kendo grid ที่มีคอลัมน์ตรึง จะ render 2 ตาราง (ล็อก + เลื่อนได้) แถวเดียวกันจึงนับได้ 2
   //   → ต้องนับ "data-uid ที่ไม่ซ้ำ" ถึงจะได้จำนวนรายการจริง
+  // ตารางแสดงหน้าละ 10 แถว — ใบที่มีเกิน 10 รายการ (เช่น ZECK 12 รายการ) ต้องขยายให้แสดงทั้งหมดก่อน
+  //   ไม่งั้นได้แค่ 10 รายการแรก แล้ว Master/ใบเทียบขาดรายการเงียบ ๆ
+  const grew = await page.evaluate(() => {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const ds = (window as any).$("#gridExDecDtl").data("kendoGrid")?.dataSource;
+    if (!ds || !ds.total || ds.total() <= (ds.pageSize?.() ?? 0)) return false;
+    ds.pageSize(1000);
+    return true;
+  }).catch(() => false);
+  if (grew) await sleep(5000);
   const uids = await page.evaluate(() => {
     const set = new Set<string>();
     document.querySelectorAll("#gridExDecDtl tbody tr[data-uid]").forEach((tr) => {
@@ -375,6 +408,7 @@ try {
     await itemPage.waitForLoadState("domcontentloaded").catch(() => { /* */ });
     await sleep(5000);
     const it = normalizeDates(await readFields(itemPage, 3, "item"), "item");
+    await dumpMoneyInputs(itemPage, `รายการ ${i + 1}`);
     it.line_no = String(i + 1);
     items.push(it);
     log(`    ✓ รายการที่ ${i + 1}: ${Object.keys(it).length} ช่อง`);
@@ -385,11 +419,13 @@ try {
   // ── กันรายการซ้ำ ──────────────────────────────────────────────────
   //   ตารางของ DCTK บางใบให้แถวที่เนื้อหาเหมือนกันเป๊ะ (ใบที่ถูกสำเนามา)
   //   ถ้าเก็บทั้งคู่ไว้ใน Master ยอดรวมจะเป็น 2 เท่า → กระทบยอดไม่ตรงตอนส่งกรมฯ
+  //   PULL_KEEP_DUP=1 = เก็บทุกแถว (ใช้ตอนดึงใบจริงมาเทียบ — บางลูกค้ามีรายการเหมือนกันจริง เช่น ZECK ม้วนลวด 3 ม้วน)
+  const keepDup = process.env.PULL_KEEP_DUP === "1";
   const seenItems = new Set<string>();
   const uniqueItems: typeof items = [];
   for (const it of items) {
     const { line_no: _ln, ...rest } = it;
-    const sig = JSON.stringify(rest);
+    const sig = keepDup ? `${uniqueItems.length}` : JSON.stringify(rest);
     if (seenItems.has(sig)) continue;
     seenItems.add(sig);
     uniqueItems.push({ ...rest, line_no: String(uniqueItems.length + 1) });

@@ -15,6 +15,9 @@
 //    npm run compare -- <ลูกค้า> <เลขใบกำกับ> [<เลขใบกำกับ> …]
 //    npm run compare -- THANAKORN "NKD 04/2026" --file "/path/FOB-NKD 04.2026.pdf"
 //    --refresh   ดึงใบขนจริงจาก DCTK ใหม่ แม้เคยดึงไว้แล้ว
+//    --no-ai     ไม่ให้ AI อ่าน — ทำ "แผนที่ที่มาของข้อมูล" ของ Master แทน:
+//                ช่องไหน Master ใส่ค่าคงที่ (เทียบกับใบจริงว่าตรงไหม) ช่องไหนอ่านจากเอกสาร ตามกฎข้อไหน
+//                ไม่ต้องมีเอกสารต้นทาง ใช้ตอนเตรียมให้ลูกค้าตรวจ Master หรือเมื่อ AI ใช้ไม่ได้
 // ============================================================
 import "dotenv/config";
 import fs from "node:fs";
@@ -23,7 +26,7 @@ import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { createClient } from "@supabase/supabase-js";
 import { extractFromAttachments } from "./getemail/pipeline.js";
-import { prepareDeclarationRecord, listTemplates, type DeclarationTemplate } from "./supabase.js";
+import { prepareDeclarationRecord, listTemplates, scoreTemplate, type DeclarationTemplate } from "./supabase.js";
 import { rowToFields, loadRegistry } from "./field-registry.js";
 
 const require = createRequire(import.meta.url);
@@ -41,14 +44,16 @@ const argv = process.argv.slice(2);
 const localFiles: string[] = [];
 const positional: string[] = [];
 let refresh = false;
+let noAi = false;
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--file") localFiles.push(argv[++i]);
   else if (argv[i] === "--refresh") refresh = true;
+  else if (argv[i] === "--no-ai") noAi = true;
   else positional.push(argv[i]);
 }
 const [customer, ...invoices] = positional;
 if (!customer || !invoices.length) {
-  console.error('ใช้งาน: npm run compare -- <ลูกค้า> <เลขใบกำกับ> [<เลขใบกำกับ> …] [--file <ไฟล์>] [--refresh]');
+  console.error('ใช้งาน: npm run compare -- <ลูกค้า> <เลขใบกำกับ> [<เลขใบกำกับ> …] [--file <ไฟล์>] [--refresh] [--no-ai]');
   process.exit(1);
 }
 if (localFiles.length && invoices.length > 1) {
@@ -176,12 +181,80 @@ function loadTruth(inv: string): { header: Row; items: Row[] } | null {
     console.log(`   📥 ดึงใบขนจริงของ ${inv} จาก DCTK (อ่านผ่านใบสำเนาแล้วลบทิ้ง ไม่แตะใบจริง)…`);
     spawnSync("node", ["dist/pull-master-cli.js"], {
       cwd: RPA_DIR, stdio: "ignore",
-      env: { ...process.env, PULL_INVOICE: inv, PULL_CUSTOMER: customer, PULL_DRY: "1", PULL_VIA_COPY: "1", RPA_HEADLESS: "1" },
+      env: { ...process.env, PULL_INVOICE: inv, PULL_CUSTOMER: customer, PULL_DRY: "1", PULL_VIA_COPY: "1", PULL_KEEP_DUP: "1", RPA_HEADLESS: "1" },
     });
   }
   if (!fs.existsSync(f)) return null;
   const d = JSON.parse(fs.readFileSync(f, "utf-8"));
   return { header: d.header ?? {}, items: d.items ?? [] };
+}
+
+/** โหมด --no-ai: เลือก Master ด้วยเกณฑ์เดียวกับตอนอัปโหลดจริง แต่ใช้ชื่อผู้รับ/สินค้า/ปลายทางจากใบจริง */
+function pickTemplateByTruth(tpls: DeclarationTemplate[], truth: { header: Row; items: Row[] }): DeclarationTemplate | null {
+  let best: DeclarationTemplate | null = null;
+  let bestScore = -Infinity;
+  for (const t of tpls) {
+    const sc = scoreTemplate(t, str(truth.header.consignee_name), truth.items.map((i) => str(i.product_code)), str(truth.header.dest_country_code));
+    if (sc != null && sc > bestScore) { bestScore = sc; best = t; }
+  }
+  return best;
+}
+
+// ── โหมด --no-ai: แผนที่ที่มาของข้อมูลต่อ Master ─────────────────────
+function explainOne(inv: string): void {
+  const truth = loadTruth(inv);
+  if (!truth) {
+    console.log("   ✗ ไม่พบใบขนจริงใน DCTK — ยังทำแผนที่ไม่ได้");
+    summary.push([inv, "", 0, 0, 0, 0, 0, 0, "ไม่พบใบขนจริงใน DCTK"]);
+    return;
+  }
+  const tpl = pickTemplateByTruth(templates, truth);
+  const fm = (tpl?.field_modes ?? {}) as Record<string, string>;
+  const lines: Line[] = [];
+  const explain = (part: string, scope: "header" | "item", truthRow: Row, master: Row | null) => {
+    for (const key of Object.keys(truthRow)) {
+      const t = str(truthRow[key]);
+      const zero = t !== "" && /^[\d,.\s]*$/.test(t) && num(t) === 0;
+      if (!t || zero) continue;
+      const m = master ? str(master[key]) : "";
+      const mode = fm[key];
+      const label = labelOf.get(`${scope}|${key}`) ?? key;
+      const rule = ruleFor(brief, key, columnOf.get(`${scope}|${key}`) ?? null, label);
+      let result: string, source: string, ours = "";
+      if (DCTK_AUTO.test(key) || computed.has(`${scope}|${key}`)) {
+        result = "— กรมฯ/ระบบเติมเองตอนรัน"; source = "DCTK คำนวณ";
+      } else if (COPY_ARTIFACT.has(key)) {
+        result = "— เทียบไม่ได้ (ค่าจากใบสำเนา)"; source = "";
+      } else if (mode === "off") {
+        result = "❌ ระบบไม่ได้กรอก"; source = "ตั้งไว้ว่า \"ไม่กรอก\"";
+      } else if (mode === "ai" || !m) {
+        // อ่านจากเอกสารทุกครั้ง — ค่าใน Master (ถ้ามี) ใช้เติมเมื่อเอกสารไม่มีเท่านั้น
+        ours = m ? `(อ่านจากเอกสาร · ถ้าไม่มีใช้ ${m})` : "(อ่านจากเอกสาร)";
+        result = "📄 อ่านจากเอกสาร"; source = "AI อ่านจากเอกสาร";
+      } else {
+        ours = m;
+        const s = sameValue(m, t);
+        result = s === "same" ? "✅ ตรง" : s === "format" ? "⚠ ต่างแค่รูปแบบ" : "❌ ต่าง";
+        source = "Master (ค่าคงที่ทุกใบ)";
+      }
+      // กฎในบรีฟเกี่ยวกับช่องที่อ่านจากเอกสารเท่านั้น — ช่องค่าคงที่ไม่ได้ใช้บรีฟ
+      lines.push({ part, key, label, truth: t, ours, result, source, rule: result.startsWith("📄") ? rule : "" });
+    }
+  };
+  explain("หัวใบ", "header", truth.header, (tpl?.header ?? null) as Row | null);
+  truth.items.forEach((it, i) => explain(`รายการ ${i + 1}`, "item", it, (tpl?.items?.[Math.min(i, (tpl?.items?.length ?? 1) - 1)] ?? null) as Row | null));
+  const order = ["❌", "⚠", "📄", "✅", "—"];
+  lines.sort((a, b) => order.findIndex((p) => a.result.startsWith(p)) - order.findIndex((p) => b.result.startsWith(p)) || a.part.localeCompare(b.part, "th"));
+  const c = (p: string) => lines.filter((l) => l.result.startsWith(p)).length;
+  summary.push([inv, tpl?.name ?? "(ไม่พบ Master ที่เข้ากับใบนี้)", c("✅"), c("⚠"),
+    lines.filter((l) => l.result === "❌ ต่าง").length, lines.filter((l) => l.result === "❌ ระบบไม่ได้กรอก").length,
+    c("📄"), c("—"), "โหมดแผนที่ (ไม่ได้ให้ AI อ่าน)"]);
+  console.log(`   Master: ${tpl?.name ?? "— ไม่พบ"}`);
+  console.log(`   Master ตรงใบจริง ${c("✅")} · ⚠ ${c("⚠")} · ❌ ${c("❌")} · 📄 อ่านจากเอกสาร ${c("📄")} · — ${c("—")}`);
+  for (const l of lines.filter((x) => x.result.startsWith("❌")).slice(0, 12)) {
+    console.log(`     ${l.result.padEnd(16)} ${l.part} · ${l.label}: Master "${l.ours.slice(0, 40)}" · ใบจริง "${l.truth.slice(0, 40)}"`);
+  }
+  sheets.push({ name: inv, lines });
 }
 
 // ── ทำทีละใบกำกับ ───────────────────────────────────────────────
@@ -193,11 +266,13 @@ const { data: cs } = await sb.from("customer_settings").select("extraction_rules
 const brief = String(cs?.extraction_rules ?? "").split("\n");
 const templates = await listTemplates(customer);
 
-const summary: (string | number)[][] = [["เลขใบกำกับ", "Master ที่ระบบเลือก", "✅ ตรง", "⚠ ต่างแค่รูปแบบ", "❌ ต่าง", "❌ ระบบไม่ได้กรอก", "ℹ เรากรอก ใบจริงว่าง", "— เทียบไม่ได้", "หมายเหตุ"]];
+const summary: (string | number)[][] = [["เลขใบกำกับ", "Master ที่ระบบเลือก", "✅ ตรง", "⚠ ต่างแค่รูปแบบ", "❌ ต่าง", "❌ ระบบไม่ได้กรอก",
+  noAi ? "📄 อ่านจากเอกสาร" : "ℹ เรากรอก ใบจริงว่าง", "— เทียบไม่ได้", "หมายเหตุ"]];
 const sheets: { name: string; lines: Line[] }[] = [];
 
 for (const inv of invoices) {
   console.log(`\n▶ ${customer} / ${inv}`);
+  if (noAi) { explainOne(inv); continue; }
   const files = await sourceFiles(inv);
   if (!files.length) {
     console.log("   ✗ ไม่พบเอกสารต้นทางในคลัง — ใส่ไฟล์เองด้วย --file");
@@ -298,12 +373,14 @@ const sumWs = XLSX.utils.aoa_to_sheet([
   ["❌ ระบบไม่ได้กรอก", "ใบจริงมีค่า แต่ระบบไม่ได้ใส่"],
   ["ℹ เรากรอก ใบจริงว่าง", "ระบบใส่ค่า แต่เจ้าหน้าที่ไม่ได้ใส่ — ตรวจว่าควรใส่ไหม"],
   ["— เทียบไม่ได้", "ช่องที่กรมฯ เติม/คำนวณเอง หรือค่าที่เกิดจากการทำสำเนาเพื่ออ่าน"],
+  ...(noAi ? [["📄 อ่านจากเอกสาร", "ช่องนี้ AI อ่านจากเอกสารทุกใบ (ดูคอลัมน์ \"กฎในบรีฟ\" ว่าอ่านจากตรงไหน)"],
+    ["(โหมดแผนที่)", "✅/❌ ในโหมดนี้ = ค่าคงที่ใน Master ตรง/ไม่ตรงกับใบจริง ไม่ได้ให้ AI อ่านเอกสาร"]] : []),
 ]);
 sumWs["!cols"] = [{ wch: 20 }, { wch: 64 }, { wch: 8 }, { wch: 14 }, { wch: 8 }, { wch: 16 }, { wch: 18 }, { wch: 14 }, { wch: 28 }];
 XLSX.utils.book_append_sheet(wb, sumWs, "สรุป");
 for (const s of sheets) {
   const ws = XLSX.utils.aoa_to_sheet([
-    ["ส่วน", "ช่อง", "ใบจริง (เจ้าหน้าที่ยื่น)", "ของระบบ", "ผล", "ค่าของระบบมาจากไหน", "กฎในบรีฟที่เกี่ยวข้อง", "รหัสช่อง"],
+    ["ส่วน", "ช่อง", "ใบจริง (เจ้าหน้าที่ยื่น)", noAi ? "ค่าใน Master" : "ของระบบ", "ผล", "ค่าของระบบมาจากไหน", "กฎในบรีฟที่เกี่ยวข้อง", "รหัสช่อง"],
     ...s.lines.map((l) => [l.part, l.label, l.truth, l.ours, l.result, l.source, l.rule, l.key]),
   ]);
   ws["!cols"] = [{ wch: 11 }, { wch: 30 }, { wch: 34 }, { wch: 34 }, { wch: 18 }, { wch: 30 }, { wch: 70 }, { wch: 24 }];
@@ -311,6 +388,6 @@ for (const s of sheets) {
   XLSX.utils.book_append_sheet(wb, ws, s.name.replace(/[\\/?*[\]:]/g, "-").slice(0, 31));
 }
 const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
-const out = path.join(OUT_DIR, `${customer}-${stamp}.xlsx`);
+const out = path.join(OUT_DIR, `${customer}${noAi ? "-แผนที่Master" : ""}-${stamp}.xlsx`);
 XLSX.writeFile(wb, out);
 console.log(`\n📊 รายงาน: ${out}`);
