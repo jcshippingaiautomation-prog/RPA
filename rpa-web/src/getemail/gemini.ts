@@ -28,6 +28,8 @@ interface GeminiResponse {
 
 /** model: Supabase app_settings(gemini_model) > env GEMINI_MODEL > default */
 async function geminiModel(): Promise<string> {
+  // GEMINI_MODEL_FORCE — ใช้ตอนวัดผลเทียบรุ่น (npm run golden -- live) โดยไม่ต้องเปลี่ยนค่าในระบบจริง
+  if (process.env.GEMINI_MODEL_FORCE) return process.env.GEMINI_MODEL_FORCE;
   const fromSupabase = await getAppSetting<string>("gemini_model");
   if (fromSupabase && String(fromSupabase).trim()) return String(fromSupabase).trim();
   return config.gemini.defaultModel;
@@ -84,6 +86,7 @@ export async function geminiGenerate(
   let lastText = "";
   let lastCode = 0;
   const endpoint = await geminiEndpoint();
+  const t0 = Date.now();
   for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
     const res = await fetch(endpoint, {
       method: "POST",
@@ -93,7 +96,17 @@ export async function geminiGenerate(
     lastCode = res.status;
     lastText = await res.text();
     if (lastCode >= 200 && lastCode < 300) {
-      return JSON.parse(lastText) as GeminiResponse;
+      const parsed = JSON.parse(lastText) as GeminiResponse & { usageMetadata?: Record<string, number> };
+      // GEMINI_USAGE_LOG — เก็บจำนวน token + เวลาต่อครั้ง ไว้เทียบราคา/ความเร็วระหว่างรุ่น
+      if (process.env.GEMINI_USAGE_LOG) {
+        const u = parsed.usageMetadata ?? {};
+        const { appendFile } = await import("node:fs/promises");
+        await appendFile(process.env.GEMINI_USAGE_LOG, JSON.stringify({
+          model: await geminiModel(), ms: Date.now() - t0,
+          input: u.promptTokenCount ?? 0, output: u.candidatesTokenCount ?? 0, thinking: u.thoughtsTokenCount ?? 0,
+        }) + "\n").catch(() => {});
+      }
+      return parsed;
     }
     if ((lastCode === 429 || lastCode >= 500) && attempt < MAX_TRIES) {
       const waitMs = retryDelayMs(lastText, attempt);
