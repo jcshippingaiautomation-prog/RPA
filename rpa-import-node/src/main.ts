@@ -20,6 +20,8 @@ const opts = {
   dryRun: truthy(process.env.RPA_DRY_RUN),
   noFinalize: truthy(process.env.RPA_NO_FINALIZE),
   ...(onlyRows.length ? { onlyRows } : {}),
+  // ทดสอบบนเครื่อง: ทำเฉพาะใบที่เลขใบกำกับตรงนี้ (กันหยิบใบจริงที่ค้างอยู่ของ User ไปสร้างด้วย)
+  ...(process.env.RPA_ONLY_INVOICE ? { onlyInvoice: process.env.RPA_ONLY_INVOICE.trim() } : {}),
 };
 if (opts.dryRun) console.log("[RPA] 🧪 DRY RUN — กรอกจริงแต่ไม่บันทึก/ไม่พิมพ์");
 else if (opts.noFinalize) console.log("[RPA] 🧪 NO-FINALIZE — บันทึกครบทุกหน้าจริง แต่ไม่ finalize/พิมพ์ (เหลือใบร่างค้างใน DCTK)");

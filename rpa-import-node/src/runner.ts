@@ -100,6 +100,8 @@ export interface RunOptions {
   editDeclarationId?: string;
   /** รันเฉพาะแถวเหล่านี้ (1-based). ว่าง = ทุกแถว */
   onlyRows?: number[];
+  /** ทำเฉพาะใบที่เลขใบกำกับตรงกัน (ใช้ทดสอบบนเครื่อง) */
+  onlyInvoice?: string;
   /** ตัวรับ log สด */
   onLog?: LogSink;
   /** แจ้งรายการแถวทั้งหมดตอนเริ่ม (หลังโหลด sheet) */
@@ -428,9 +430,12 @@ export async function runImport(opts: RunOptions = {}): Promise<RunResult> {
     });
     opts.onRows?.(rows);
 
-    const onlySet = opts.onlyRows && opts.onlyRows.length
-      ? new Set(opts.onlyRows)
-      : null;
+    const onlySet = opts.onlyInvoice
+      ? new Set(rows.filter((x) => x.invoice === opts.onlyInvoice).map((x) => x.index))
+      : opts.onlyRows && opts.onlyRows.length
+        ? new Set(opts.onlyRows)
+        : null;
+    if (opts.onlyInvoice && !onlySet?.size) throw new Error(`ไม่พบใบกำกับ "${opts.onlyInvoice}" ในรายการที่รอทำ`);
 
     const setStatus = (i: number, status: RowStatus, error?: string) => {
       rows[i].status = status;
@@ -1092,8 +1097,8 @@ async function runBrowser(
     log(`⏸ พบ error — ค้างเบราว์เซอร์ไว้ ${holdSec}s ให้ตรวจหน้าจอ (RPA_PAUSE_ON_ERROR=1)`);
     await sleep(holdSec * 1000);
   } else {
-    log("done — closing in 2s");
-    await sleep(2000);
+    log("done — closing");
+    await sleep(300);
   }
   await context.close(); await browser.close();
 }

@@ -395,11 +395,20 @@ async function searchCompanyInPopup(page: Page, name: string): Promise<void> {
   await page.fill(S.SEL_SEARCHED_WORDS, "");
   await page.fill(S.SEL_SEARCHED_WORDS, name);
 
-  await page.press(S.SEL_SEARCHED_WORDS, "Enter");
-  await sleep(2500);
-
   // selector แถวผลลัพธ์ที่ยืดหยุ่น (structure DCTK อาจไม่ตรง hardcode เดิม)
   const rowFlexible = `${S.SEL_GRID_COMPANY_ROW}, #gridCompany .k-grid-content tbody tr:first-child, #gridCompany tbody tr:first-child`;
+  const firstRow = () => page.locator(rowFlexible).first().innerText({ timeout: 300 }).catch(() => "");
+  const before = await firstRow();
+  await page.press(S.SEL_SEARCHED_WORDS, "Enter");
+
+  // รอจนตารางแสดงผลของคำค้นนี้ (เดิมรอ 2.5 วินาทีตายตัว — กันกดแถวของรายการก่อนค้น)
+  //   ถือว่าเสร็จเมื่อแถวแรกมีชื่อที่ค้น หรือเปลี่ยนไปจากก่อนกดค้น · ไม่เปลี่ยนเลยภายใน 2.5 วินาทีก็เดินต่อ (= เท่าเดิม)
+  const wantName = name.trim().toUpperCase();
+  for (let w = 0; w < 10; w++) {
+    const now = await firstRow();
+    if (now && ((wantName && now.toUpperCase().includes(wantName)) || now !== before)) break;
+    await sleep(250);
+  }
   try {
     await page.waitForSelector(rowFlexible, { timeout: 6000 });
   } catch {
@@ -416,7 +425,13 @@ async function searchCompanyInPopup(page: Page, name: string): Promise<void> {
   } catch {
     await page.dblclick("#gridCompany tbody tr:first-child", { timeout: 8000 });
   }
-  await sleep(1500);
+  await waitPopupClosed(page);
+}
+
+/** รอหน้าต่างค้นบริษัทปิด (= DCTK เติมค่าให้แล้ว) แทนการรอ 1.5 วินาทีตายตัว */
+async function waitPopupClosed(page: Page): Promise<void> {
+  await page.locator("#gridCompany").first().waitFor({ state: "hidden", timeout: 4000 }).catch(() => { /* */ });
+  await sleep(300);
 }
 
 export async function login(
@@ -722,7 +737,10 @@ async function putCountryCode(
     await page.keyboard.press("Backspace").catch(() => { /* */ });
     await page.waitForTimeout(200);
 
-    const method = ((attempt - 1) % 4) + 1;
+    // ลำดับวิธี 3 → 1 → 2 → 4 — จาก log ย้อนหลัง 30 ใบ วิธี 3 สำเร็จ 76/76 ครั้ง วิธี 1–2 ไม่เคยได้
+    //   (เดิมเริ่มวิธี 1 ทุกครั้ง = เสียเวลาราว 2.5 วินาทีต่อช่องโดยเปล่าประโยชน์)
+    //   ช่องแรกของหน้า รายการรหัสประเทศอาจยังโหลดไม่เสร็จ → วิธี 3 ซ้ำ 3 รอบก่อน แล้วค่อยลองวิธีอื่น
+    const method = [3, 3, 3, 1, 2, 4][attempt - 1];
     if (method === 1) {
       // วิธี 1: พิมพ์ทีละตัว + Escape หลังแต่ละตัว (กัน autocomplete ดักตัวที่ 2)
       for (const ch of want) {
@@ -778,7 +796,6 @@ export async function fillPage1(page: Page, r: Record): Promise<void> {
   // ---- consignee popup (ใช้ search popup เดียวกับ buyer — robust ด้วย fallback)
   if (allowed(r, "consignee_name")) {
     await page.click(S.SEL_BTN_CONSIGNEE_SEARCH);
-    await sleep(2000);
     try {
       await page.waitForSelector(S.SEL_GRID_COMPANY_ROW, { timeout: 6000 });
       await page.dblclick(S.SEL_GRID_COMPANY_ROW, { timeout: 4000 });
@@ -786,7 +803,7 @@ export async function fillPage1(page: Page, r: Record): Promise<void> {
       await page.waitForSelector("#gridCompany tbody tr:first-child", { timeout: 10000 });
       await page.dblclick("#gridCompany tbody tr:first-child", { timeout: 8000 });
     }
-    await sleep(1500);
+    await waitPopupClosed(page);
   }
 
   // ---- vessel / voyage / locations
@@ -866,7 +883,7 @@ export async function fillPage1(page: Page, r: Record): Promise<void> {
     if (!busy) break;
     await sleep(2000);
   }
-  await sleep(4000);
+  await sleep(2000);
   // ⚠ ของเดิมแค่ log แล้วเดินต่อ — พอหน้า 1 ไม่ผ่าน หน้า 2 จะเปิดไม่ได้
   //   แล้วไปพังด้วยข้อความ "waiting for #InvoiceNo" ซึ่งไม่บอกสาเหตุอะไรเลย
   //   (เจอจริง THANAKORN MEK 18(C)/2026 ที่ user กดรันแล้วล้ม 3 รอบติด)
@@ -981,7 +998,7 @@ export async function fillPage2Open(page: Page): Promise<Page> {
   // รอ Page 1 save เสร็จ (network นิ่ง) ก่อนสลับ tab
   try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch { /* */ }
   await page.click(S.SEL_TAB2);
-  await sleep(3000); // รอ tab transition + grid โหลด
+  await sleep(1000); // รอ tab transition — ปุ่ม "เพิ่มข้อมูล" รอต่อด้านล่างอีกจนกว่าจะโผล่
 
   const context = page.context();
   const addBtn = page.locator(S.SEL_BTN_INVOICE_ADD);
@@ -1005,7 +1022,7 @@ export async function fillPage2Open(page: Page): Promise<Page> {
     const why = empty.length ? ` · ช่องบังคับที่ว่าง: ${empty.slice(0, 3).join(" | ")}` : "";
     throw new Error(`หน้า 1 ยังไม่ถูกบันทึก — ปุ่ม "เพิ่มข้อมูล" ของใบกำกับยังกดไม่ได้${why}`.slice(0, 350));
   }
-  await sleep(1500);
+  await sleep(500);
 
   // retry คลิก "เพิ่มข้อมูล" จนกว่า tab ใหม่จะเปิด (สูงสุด 3 ครั้ง)
   let newPage: Page | null = null;
@@ -1139,7 +1156,7 @@ export async function fillPage2Fill(page: Page, r: Record): Promise<Page> {
   await sleep(2000);
   // modal "Invoice No ซ้ำ..." (หรือแจ้งเตือนอื่น) เด้ง → กด YES เพื่อบันทึกต่อ
   await dismissAlertIfPresent(page);
-  await sleep(2000);
+  await sleep(1000);
   const p2errs = await captureFormErrors(page);
   if (p2errs.length) {
     log("  ⚠ Page 2 Save&Close — DCTK แสดง error:");
@@ -1166,7 +1183,7 @@ export async function fillPage2Fill(page: Page, r: Record): Promise<Page> {
     });
     log(`  🔬🔬 หลัง Save&Close Page 2: ${JSON.stringify(st)}`);
   } catch (e) { log(`  🔬🔬 diag หลัง save ล้ม: ${e instanceof Error ? e.message : String(e)}`); }
-  await sleep(2000);
+  await sleep(1000);
   return page;
 }
 
@@ -1239,6 +1256,16 @@ async function dismissAlertIfPresent(page: Page): Promise<void> {
   } catch {
     return; // ไม่มี modal — ปกติ
   }
+  // กล่อง "แจ้งเตือน" ที่ไม่มีข้อความอะไรเลย (มีแค่ × / YES / NO) = แม่แบบที่ DCTK ฝังไว้ในหน้า ไม่ใช่คำถามจริง
+  //   ปุ่มของมันกดไม่ได้ เดิมเสียเวลาลองกด ~6 วินาทีทุกครั้ง (log ย้อนหลัง: 49 ครั้งใน 30 ใบ แล้วใบก็บันทึกผ่านทุกครั้ง)
+  //   ดูเฉพาะกล่องที่ "มีปุ่ม YES และมองเห็นอยู่" — หน้าเดียวกันมีกล่อง "กำลังประมวลผล" ซ่อนอยู่ด้วย
+  const bodyText = await page.evaluate(() => {
+    const boxes = Array.from(document.querySelectorAll<HTMLElement>(".modal, #myModalAlert"))
+      .filter((m) => m.offsetParent !== null || getComputedStyle(m).display === "block")
+      .filter((m) => Array.from(m.querySelectorAll("button")).some((b) => /YES|ตกลง|ใช่|OK/i.test(b.innerText || "")));
+    return boxes.map((m) => (m.innerText || "").replace(/×|แจ้งเตือน|YES|NO|OK|ตกลง|ยกเลิก/gi, "").replace(/\s+/g, "")).join("");
+  }).catch(() => "x");
+  if (!bodyText) { log("  ⏭ กล่องแจ้งเตือนว่าง (ไม่มีข้อความ) — ข้าม"); return; }
   // กดปุ่ม YES/ตกลง — ลอง selector เดิมก่อน, ไม่ได้ค่อยหาปุ่มด้วย text
   try {
     await page.click(S.SEL_MODAL_ALERT_YES, { timeout: 3000 });

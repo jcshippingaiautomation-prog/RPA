@@ -210,13 +210,24 @@ export async function selectCurrencyRealClick(
   // 3) คลิก <li> ทั้งแถว ที่ cell แรก == want (real mouse click → Kendo select dataItem)
   const rows = page.locator(rowSel);
   const n = await rows.count();
+  // หาแถวที่ตรงในครั้งเดียว — ถ้ารายการยังไม่ถูกกรอง (มีทุกสกุลเงิน ~90 แถว) การอ่านทีละแถวกิน ~35 วินาที (เจอจริง Test012)
+  const hit = await page.evaluate(({ sel, w }: { sel: string; w: string }) => {
+    const lis = Array.from(document.querySelectorAll(sel));
+    return lis.findIndex((li) => ((li.querySelector("span.k-cell") as HTMLElement | null)?.innerText || "").trim().toUpperCase() === w);
+  }, { sel: rowSel, w: want }).catch(() => -1);
   let clicked = false;
-  for (let i = 0; i < n; i++) {
+  for (let i = Math.max(0, hit); i < n; i++) {
     const li = rows.nth(i);
-    const code = ((await li.locator("span.k-cell").first().innerText().catch(() => "")) || "").trim().toUpperCase();
+    const code = hit >= 0 && i === hit ? want
+      : ((await li.locator("span.k-cell").first().innerText({ timeout: 1000 }).catch(() => "")) || "").trim().toUpperCase();
     if (code === want || (n === 1)) {
       await li.scrollIntoViewIfNeeded().catch(() => {});
-      await li.click();          // ← คลิกทั้งแถว (ตัว li) ไม่ใช่ span
+      // ← คลิกทั้งแถว (ตัว li) ไม่ใช่ span · จำกัดเวลา: ถ้ารายการยังไม่กรอง/ถูกบังจะค้าง 30 วินาทีแล้วล้มทั้งใบ
+      //   (เจอจริง Test011: _Insurance คลิกแถวที่ 87 ไม่ติด) → ไม่ติดใน 5 วินาที ให้คลิกผ่าน DOM แทน
+      await li.click({ timeout: 2500 }).catch(async () => {
+        log(`  ⚠ [${inputName}] คลิกแถวไม่ติดใน 2.5s — คลิกผ่าน DOM แทน`);
+        await li.evaluate((el: HTMLElement) => el.click()).catch(() => { /* */ });
+      });
       await sleep(500);
       clicked = true;
       break;
@@ -303,9 +314,11 @@ export async function comboPick(
 
   // 📝 ACTION LOG + เช็คค่าเดิม
   let wasVal = "";
+  let fieldName = "";
   try {
     const before = await page.locator(inputSelector).first().evaluate((el: HTMLInputElement) => ({ name: el.name || el.id || "", was: el.value ?? "" }));
     wasVal = (before.was || "").trim();
+    fieldName = before.name || "";
     log(`  📝 comboPick → [${before.name || inputSelector.slice(-40)}] เดิม="${before.was}" → ล้าง("") แล้วพิมพ์="${value}"`);
   } catch { log(`  📝 comboPick → [${inputSelector.slice(-40)}] ล้าง+พิมพ์="${value}"`); }
 
@@ -324,7 +337,13 @@ export async function comboPick(
   //   ⏱ ช่องอย่างชื่อเรือ/ชื่อผู้รับมักไม่มีรายการให้เลือกอยู่แล้ว (เป็นข้อความอิสระ)
   //      การรอจนครบจึงเป็นเวลาที่เสียฟรีทุกใบ — ลดเหลือ 7 วินาที (เดิม 12)
   //      ถ้า VM ช้ากว่านี้จนเลือกคอมโบไม่ติด ปรับขึ้นได้ด้วย RPA_COMBO_WAIT_MS
-  const comboWaitMs = Number(process.env.RPA_COMBO_WAIT_MS ?? 7000);
+  //   จาก log ย้อนหลัง 30 ใบ (23 ต.ค. 2569): ชื่อผู้รับไม่เคยมีรายการโผล่เลย (35/35)
+  //   ชื่อเรือโผล่ 8/38 ครั้ง และถ้าโผล่จะโผล่ภายใน ~1–2 วินาที → 2 ช่องนี้รอสั้น
+  //   (selector ของบางช่องเป็นตำแหน่งในหน้า ไม่มีชื่อช่อง → ดูจากชื่อจริงของ input)
+  const freeText = /ConsigneeName|VesselName/i.test(`${fieldName} ${inputSelector}`);
+  const comboWaitMs = freeText
+    ? Number(process.env.RPA_FREE_TEXT_COMBO_WAIT_MS ?? 2500)
+    : Number(process.env.RPA_COMBO_WAIT_MS ?? 7000);
   const rounds = Math.max(4, Math.round(comboWaitMs / 500));
   let dropdownUp = false;
   for (let w = 0; w < rounds; w++) {

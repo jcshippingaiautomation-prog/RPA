@@ -94,11 +94,11 @@ export async function finalizeAndPrint(
   };
 
   await safeClick(S.SEL_BTN_DONE_INVOICE);
-  await sleep(5000);
+  await sleep(1500); // ปุ่ม OK ด้านล่างรอต่อเองจนกว่าจะโผล่ (สูงสุด 20 วินาที)
   await safeClick(S.SEL_DIALOG_OK);
   await safeClick(S.SEL_BTN_SAVE, 30000); // ปุ่มบันทึก — DCTK submit ช้า ให้รอนานเป็นพิเศษ
   await safeClick(S.SEL_BTN_SAVE_CLOSE, 30000);
-  await sleep(3000);
+  await sleep(1500);
 
   // หลัง Save&Close tab อาจปิด → re-acquire page ที่ยังเปิด ก่อนรอ grid
   page = livePage();
@@ -339,8 +339,9 @@ async function savePdfFromReportPage(reportPage: Page, downloadDir: string): Pro
     "tr > td:nth-child(1) > table > tbody > tr > td:nth-child(2) > div > " +
     "table > tbody > tr > td:nth-child(2)";
 
-  // ⏱ รอ report สร้างเสร็จ (รอ canvas/หน้า report โผล่) — direct-URL/headless ใช้เวลาเรนเดอร์
-  await sleep(5000);
+  // ⏱ รอ report สร้างเสร็จ = ปุ่ม Save ของ viewer โผล่ (เดิมรอ 5 วินาทีตายตัว)
+  await reportPage.locator(SEL_SAVE_DROPDOWN).first().waitFor({ state: "visible", timeout: 20000 }).catch(() => { /* */ });
+  await sleep(500);
   // 🔑 overlay <div.stiJsViewerDisabledPanel> มี opacity:0 แต่ pointer-events:auto z=40 → บังคลิก Save
   //   (Playwright เห็นเป็น "visible" เพราะไม่ใช่ display:none → คลิกปกติโดน intercept)
   //   ทางแก้: ปิด pointer-events + ซ่อน overlay ด้วย JS ก่อนคลิกทุกครั้ง

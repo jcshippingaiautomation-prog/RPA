@@ -62,7 +62,8 @@ export async function sendEmailWithPdf(
   record: Record,
 ): Promise<void> {
   const e = cfg.email;
-  if (!e || !e.enabled) {
+  // RPA_NO_EMAIL=1 — รันทดสอบบนเครื่อง ไม่ส่งอีเมลแจ้งผล (config.json ในเครื่อง Mac เปิดส่งอีเมลไว้)
+  if (!e || !e.enabled || process.env.RPA_NO_EMAIL === "1") {
     log("email: disabled — ข้ามการส่ง");
     return;
   }
