@@ -623,6 +623,12 @@ export async function openDeclarationForEdit(page: Page, declNo: string): Promis
     const jq = (window as any).$;
     const ds = jq?.("#grid").data("kendoGrid")?.dataSource;
     if (!ds || typeof ds.filter !== "function") return false;
+    // หน้ารายการโหลดแค่ใบที่สร้างใน 30 วันล่าสุด (server กรองวันที่สร้าง) → ใบเก่ากว่านั้นค้นไม่เจอ
+    //   ขยายวันเริ่มต้นย้อนไปถึงปี 2020 ก่อนกรอง (ใช้กับแก้ใบ · พิมพ์ซ้ำ · แคปหน้าจอ)
+    const read = ds.transport?.options?.read;
+    if (read && typeof read === "object" && typeof read.url === "string") {
+      read.url = read.url.replace(/(CREATE_DATE%2B%253e%253d%2B%2527)\d{4}-\d{2}-\d{2}/, "$12020-01-01");
+    }
     ds.filter({ field: f, operator: "contains", value: v });
     return true;
   }, { f: col.field, v: declNo }).catch(() => false);

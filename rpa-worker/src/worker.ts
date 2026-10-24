@@ -2,7 +2,7 @@
 //  RPA Worker — poll Supabase job_queue → claim → run → stream logs
 //  รันบน VM ที่มีเบราว์เซอร์จริง (Playwright)
 // ============================================================
-import { runImport, type AppConfig, type RowInfo } from "rpa-import-node";
+import { runImport, captureExistingDeclaration, setLogSink, type AppConfig, type RowInfo } from "rpa-import-node";
 import { config, assertConfig } from "./config.js";
 import {
   claimNextJob,
@@ -18,6 +18,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** รันงาน rpa_import 1 งาน (เทียบเท่า startRun ใน server.ts แต่ log → job_logs) */
 async function runRpaImport(job: JobRow): Promise<void> {
+  // งานแคปหน้าจอที่ฝากมากับคิวสร้างใบ (ตอนฐานข้อมูลยังไม่รับชนิดงาน rpa_capture — ก่อนรัน sql/14)
+  if ((job.payload as { capture?: boolean })?.capture) { await runRpaCapture(job); return; }
   const payload = job.payload as { onlyRows?: number[]; headless?: boolean; declId?: string };
   const dryRun = !!job.dry_run;
   const onlyRows = Array.isArray(payload.onlyRows) ? payload.onlyRows : undefined;
@@ -216,6 +218,36 @@ async function runRpaPrint(job: JobRow): Promise<void> {
   await markDone(job.id, result as unknown as Record<string, unknown>);
 }
 
+/**
+ * แคปหน้าจอใบขนที่มีอยู่แล้วใน DCTK ทุกหน้า → PDF รวม (kind=capture)
+ *   payload.ref = เลขอ้างอิง DCTK / เลขใบขน / เลขใบกำกับ
+ *   payload.captureDeclId = ใบในระบบเรา (ถ้ามี) — ใช้ชื่อนี้แทน declId
+ *     เพื่อไม่ให้ตัวติดตามงานบนเว็บไปเปลี่ยนสถานะใบ (แคปหน้าจอไม่ได้แก้อะไรในใบ)
+ */
+async function runRpaCapture(job: JobRow): Promise<void> {
+  const payload = job.payload as { ref?: string; headless?: boolean; captureDeclId?: string | null; customer?: string | null };
+  const ref = String(payload.ref ?? "").trim();
+  await appendLog(job.id, "lifecycle", { event: "run-start", startedAt: Date.now(), mode: "capture" });
+  await appendLog(job.id, "log", { line: `[WORKER] 📸 แคปหน้าจอใบขน ${ref}` });
+  setLogSink((line) => void appendLog(job.id, "log", { line }));
+  let result: Record<string, unknown>;
+  try {
+    const r = await captureExistingDeclaration({ ref, headless: payload.headless ?? true });
+    if (r.pdf) {
+      const rec = await uploadDocument(r.pdf, {
+        customer: payload.customer ?? null, invoice: r.invoice || ref, kind: "capture",
+        declarationId: payload.captureDeclId ?? null,
+      });
+      if (rec) await appendLog(job.id, "document", rec);
+    }
+    result = { total: 1, done: r.pdf ? 1 : 0, errors: r.pdf ? 0 : 1, skipped: 0, stopped: false, shots: r.shots, notes: r.notes };
+  } finally {
+    setLogSink(null);
+  }
+  await appendLog(job.id, "lifecycle", { event: "run-done", result, mode: "capture" });
+  await markDone(job.id, result);
+}
+
 // flag cancel ต่อ-งาน (poll ขนานกันระหว่างรัน)
 let cancelFlag = false;
 
@@ -240,6 +272,8 @@ async function handleJob(job: JobRow): Promise<void> {
       await runRpaEdit(job);
     } else if (job.type === "rpa_print") {
       await runRpaPrint(job);
+    } else if (job.type === "rpa_capture") {
+      await runRpaCapture(job);
     } else if (job.type === "get_email") {
       // get_email รันผ่านเว็บ (in-process processInbox) ไม่ผ่าน worker queue
       //   ถ้ามี job ชนิดนี้หลุดเข้าคิว → จบแบบ done (emit lifecycle กัน state ค้าง)

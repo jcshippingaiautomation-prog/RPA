@@ -45,6 +45,8 @@ import {
   declarationStatusEnabled,
   uploadBytes,
   enqueueJob,
+  findDeclarationByRef,
+  listCaptures,
   cancelActiveJobs,
   listJobs,
   getJob,
@@ -412,6 +414,46 @@ app.post("/api/declarations/:id/run", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
+});
+
+// 📸 แคปหน้าจอใบขนที่มีอยู่แล้วใน DCTK ทุกหน้า → PDF รวม (อ่านอย่างเดียว ไม่แก้อะไรในใบ)
+//   body: { declarationId } (ปุ่มในใบขน) หรือ { ref } (เมนูแคปหน้าจอ — เลขอ้างอิง DCTK / เลขใบขน / เลขใบกำกับ)
+app.post("/api/captures", async (req, res) => {
+  if (!supabaseEnabled()) { res.status(400).json({ error: "ยังไม่ได้ตั้งค่า Supabase" }); return; }
+  try {
+    const body = (req.body ?? {}) as { declarationId?: string; ref?: string };
+    let ref = String(body.ref ?? "").trim();
+    let declId: string | null = null;
+    let customer: string | null = null;
+    if (body.declarationId) {
+      const d = await getDeclaration(body.declarationId);
+      if (!d) { res.status(404).json({ error: "ไม่พบรายการ" }); return; }
+      ref = String(d.declaration_no ?? "").trim();
+      if (!ref) { res.status(400).json({ error: "ใบนี้ยังไม่มีเลขอ้างอิง DCTK — ต้องส่งเข้า DCTK ก่อนถึงแคปหน้าจอได้" }); return; }
+      declId = body.declarationId;
+      customer = (d.customer_name as string) ?? null;
+    } else {
+      if (!ref) { res.status(400).json({ error: "กรุณาใส่เลขอ้างอิง DCTK / เลขใบขน / เลขใบกำกับ" }); return; }
+      const hit = await findDeclarationByRef(ref);
+      if (hit) { declId = hit.id; customer = hit.customer_name; }
+    }
+    // ⚠ ใช้ captureDeclId ไม่ใช่ declId — ตัวติดตามงานจะได้ไม่ไปเปลี่ยนสถานะใบ (แคปหน้าจอไม่ได้แก้อะไรในใบ)
+    const payload = { ref, captureDeclId: declId, customer, headless: true };
+    const meta = { dryRun: false, triggeredBy: req.user?.id ?? null, triggerSource: "manual" };
+    let jobId = await enqueueJob("rpa_capture", payload, meta);
+    // ฐานข้อมูลยังไม่รับชนิดงานนี้ (ยังไม่ได้รัน sql/14) → ฝากไปกับคิวสร้างใบ (worker แยกให้เอง)
+    //   ⚠ กันพลาด: ถ้า worker ยังเป็นโค้ดเก่า (ยังไม่รู้จัก capture) จะเห็นเป็นงานสร้างใบธรรมดา
+    //     onlyRows:[0] = ไม่มีแถวไหนตรง (แถวเริ่มที่ 1) + dry run → ไม่มีทางไปสร้างใบที่ค้างอยู่ของ User
+    if (!jobId) jobId = await enqueueJob("rpa_import", { ...payload, capture: true, onlyRows: [0] }, { ...meta, dryRun: true });
+    if (!jobId) { res.status(409).json({ error: "คิวไม่พร้อม" }); return; }
+    res.json({ ok: true, jobId, ref, declarationId: declId });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+app.get("/api/captures", async (_req, res) => {
+  if (!supabaseEnabled()) { res.json({ documents: [], jobs: [] }); return; }
+  res.json(await listCaptures());
 });
 
 // พิมพ์ใบขนซ้ำ: RPA ไปค้นใบเดิมใน DCTK (ด้วย declaration_no) → พิมพ์ PDF (ไม่กรอก/ไม่สร้างใหม่)

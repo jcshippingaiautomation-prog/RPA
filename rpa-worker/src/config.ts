@@ -17,7 +17,8 @@ export const config = {
   worker: {
     pollMs: Number(opt("WORKER_POLL_MS", "3000")),
     // worker นี้รับงาน type ไหนบ้าง (คั่นด้วย comma) — default ทั้งคู่
-    types: opt("WORKER_TYPES", "rpa_import,get_email,rpa_edit")
+    //   rpa_print / rpa_capture ต้องรัน sql/14 ก่อน ฐานข้อมูลถึงจะรับงานชนิดนี้
+    types: opt("WORKER_TYPES", "rpa_import,get_email,rpa_edit,rpa_print,rpa_capture")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean),

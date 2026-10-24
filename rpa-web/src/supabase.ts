@@ -1402,6 +1402,13 @@ export async function applyMasterToRecord(
     ...split.columns,
     extra_fields: { ...((record.extra_fields ?? {}) as object), ...split.extra },
   };
+  // 📸 Master ตั้งแคปหน้าจอไว้เอง ("1" แคป / "0" ไม่แคป) → ส่งต่อให้ RPA ผ่าน extra_fields
+  //   ไม่ได้ตั้ง = RPA ใช้ค่าที่ตั้งไว้ของลูกค้าเหมือนเดิม
+  {
+    const ef = out.extra_fields as Record<string, unknown>;
+    const cap = String((tpl.header ?? {}).__capture ?? "").trim();
+    if (cap === "1" || cap === "0") ef.__capture = cap; else delete ef.__capture;
+  }
   // ── รายการสินค้า ────────────────────────────────────────────────────
   //   เดิมเป็นแบบ "ทั้งหมดหรือไม่เอาเลย": ถ้า AI อ่านรายการได้ ค่าของ Master จะไม่ถูกใช้เลย
   //   ซึ่งทำให้ พิกัดศุลกากร / หน่วย / รหัสสินค้า ที่ตั้งไว้ใน Master ไม่มีผลกับใบที่มาจากเอกสาร
@@ -1586,7 +1593,7 @@ export async function getAllowlistSenders(): Promise<string[]> {
 // ============================================================
 //  Job queue (Phase C) — web enqueue งาน, worker (VM) มาหยิบทำ
 // ============================================================
-export type JobType = "rpa_import" | "get_email" | "rpa_edit" | "rpa_print";
+export type JobType = "rpa_import" | "get_email" | "rpa_edit" | "rpa_print" | "rpa_capture";
 export type JobStatus = "pending" | "processing" | "done" | "error" | "cancel";
 
 export interface JobRow {
@@ -2021,4 +2028,32 @@ export async function deleteTemplate(id: string): Promise<boolean> {
     console.error("[supabase] deleteTemplate error:", errMsg(err));
     return false;
   }
+}
+
+// ── แคปหน้าจอใบขน ─────────────────────────────────────────────────
+
+/** หาใบในระบบเราจากเลขที่ผู้ใช้พิมพ์ (เลขอ้างอิง DCTK หรือเลขใบกำกับ) — ไว้ผูกไฟล์แคปกับใบ */
+export async function findDeclarationByRef(ref: string): Promise<{ id: string; customer_name: string | null; invoice_number: string | null; declaration_no: string | null } | null> {
+  const sb = getClient();
+  const r = ref.trim();
+  if (!sb || !r) return null;
+  for (const col of ["declaration_no", "invoice_number"]) {
+    const { data } = await sb.from("declarations").select("id,customer_name,invoice_number,declaration_no")
+      .eq(col, r).order("created_at", { ascending: false }).limit(1);
+    if (data && data.length) return data[0] as never;
+  }
+  return null;
+}
+
+/** ไฟล์แคปหน้าจอล่าสุด + งานแคปที่ยังไม่เสร็จ (สำหรับเมนู "แคปหน้าจอใบขน") */
+export async function listCaptures(limit = 60): Promise<{ documents: DocumentRecord[]; jobs: Record<string, unknown>[] }> {
+  const sb = getClient();
+  if (!sb) return { documents: [], jobs: [] };
+  const [docs, jobs] = await Promise.all([
+    sb.from("documents").select("*").eq("kind", "capture").order("created_at", { ascending: false }).limit(limit),
+    sb.from("job_queue").select("id,type,status,payload,result,error,created_at,started_at,finished_at")
+      .in("type", ["rpa_capture", "rpa_import"]).order("created_at", { ascending: false }).limit(40),
+  ]);
+  const capJobs = (jobs.data ?? []).filter((j) => j.type === "rpa_capture" || (j.payload as { capture?: boolean })?.capture);
+  return { documents: (docs.data ?? []) as DocumentRecord[], jobs: capJobs.slice(0, 20) };
 }

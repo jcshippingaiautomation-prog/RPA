@@ -1161,7 +1161,19 @@ async function openFiles(id) {
   try {
     const res = await api(`/api/declaration-documents?customer=${encodeURIComponent(d.customer_name || "")}&invoice=${encodeURIComponent(d.invoice_number || "")}&declId=${encodeURIComponent(id || "")}`);
     const docs = res.documents || [];
-    if (!docs.length) { body.innerHTML = '<p class="muted">ยังไม่มีไฟล์เอกสารสำหรับใบนี้</p>'; return; }
+    // 📸 ใบที่มีเลขอ้างอิง DCTK แล้ว → แคปหน้าจอทุกหน้าได้เสมอ (อ่านอย่างเดียว)
+    const capBox = String(d.declaration_no ?? "").trim()
+      ? `<div class="files-section"><button class="btn btn-ghost btn-xs actCapture" data-id="${d.id}">📸 แคปหน้าจอใบนี้ใน DCTK (ทุกหน้า)</button>
+           <span class="muted" style="font-size:12px"> อ่านอย่างเดียว ไม่แก้ไขใบ · ใช้เวลา 1–3 นาที</span></div>`
+      : "";
+    const wireCapture = () => {
+      const b = body.querySelector(".actCapture");
+      if (b) b.onclick = async () => {
+        try { await requestCapture({ declarationId: b.dataset.id }); closeFiles(); }
+        catch (e) { toast("ส่งคำสั่งแคปหน้าจอไม่สำเร็จ: " + e.message, "error"); }
+      };
+    };
+    if (!docs.length) { body.innerHTML = capBox + '<p class="muted">ยังไม่มีไฟล์เอกสารสำหรับใบนี้</p>'; wireCapture(); return; }
     // แยก 2 กลุ่ม: ใบขน PDF (declaration) · แคปหน้าจอ PDF รวม (capture)
     //   (ไม่แสดง screenshot PNG แยกอีกแล้ว — รวมเป็น PDF เดียวพอ)
     const pdfs = docs.filter((x) => x.kind === "declaration");
@@ -1192,10 +1204,12 @@ async function openFiles(id) {
          </div>`
       : "";
     body.innerHTML = `
+      ${capBox}
       ${reprintBox}
       ${pdfs.length ? `<div class="files-section"><div class="files-section-title">📄 ใบขนสินค้า (PDF)</div><div class="files-grid">${pdfs.map(fileRow).join("")}</div></div>` : ""}
       ${captures.length ? `<div class="files-section"><div class="files-section-title">📸 แคปหน้าจอ (PDF รวมทุกหน้า)</div><div class="files-grid">${captures.map(fileRow).join("")}</div></div>` : ""}
     ` || '<p class="muted">ยังไม่มีไฟล์</p>';
+    wireCapture();
     const reBtn = body.querySelector(".actReprint");
     if (reBtn) reBtn.onclick = () => reprintDeclaration(reBtn.dataset.id);
   } catch (e) {
@@ -1204,6 +1218,51 @@ async function openFiles(id) {
 }
 
 // พิมพ์ใบขนซ้ำ — ส่ง RPA ไปค้นใบเดิมใน DCTK แล้วพิมพ์ PDF จริง (ไม่สร้างใบใหม่)
+// ============================================================
+//  📸 แคปหน้าจอใบขน (อ่านอย่างเดียว) — ปุ่มในหน้าไฟล์ของใบ + เมนูแคปหน้าจอ
+// ============================================================
+async function requestCapture(body) {
+  const r = await api("/api/captures", "POST", body);
+  toast(`ส่งคำสั่งแคปหน้าจอ ${r.ref} แล้ว — ใช้เวลาประมาณ 1–3 นาที ไฟล์จะขึ้นที่เมนู "แคปหน้าจอใบขน"${r.declarationId ? " และในหน้าไฟล์ของใบนี้" : ""}`, "success");
+  return r;
+}
+let capTimer = null;
+async function loadCaptures() {
+  clearTimeout(capTimer);
+  let d;
+  try { d = await api("/api/captures"); } catch (e) { $("capJobs").textContent = "โหลดไม่ได้: " + e.message; return; }
+  const st = { pending: "รอคิว", claimed: "กำลังเริ่ม", running: "กำลังแคป…", done: "เสร็จ", error: "ไม่สำเร็จ", failed: "ไม่สำเร็จ" };
+  const jobs = d.jobs || [];
+  $("capJobs").innerHTML = jobs.length
+    ? `<table class="dt"><thead><tr><th>เวลา</th><th>เลขที่สั่ง</th><th>สถานะ</th><th>หมายเหตุ</th></tr></thead><tbody>${jobs.map((j) => {
+        const p = j.payload || {}; const r = j.result || {};
+        const note = [r.shots ? `${r.shots} ภาพ` : "", ...(r.notes || []), j.error || ""].filter(Boolean).join(" · ");
+        return `<tr><td>${new Date(j.created_at).toLocaleString("th-TH")}</td><td>${escapeHtml(p.ref || "")}</td>
+          <td>${escapeHtml(st[j.status] || j.status)}${j.status === "done" && r.done === 0 ? " (ไม่ได้ไฟล์)" : ""}</td><td class="muted">${escapeHtml(note)}</td></tr>`;
+      }).join("")}</tbody></table>`
+    : '<p class="muted">ยังไม่มีงานแคปหน้าจอ</p>';
+  const docs = d.documents || [];
+  $("capFiles").innerHTML = docs.length ? docs.map((doc) => {
+    const url = dlUrl(doc.storage_path, doc.public_url);
+    return `<div class="file-card"><div class="file-pdf">${svgIcon("file", 32)}</div><div class="file-meta">
+      <div class="file-name" title="${escapeHtml(doc.filename)}">${escapeHtml([doc.customer, doc.invoice].filter(Boolean).join(" · ") || doc.filename)}</div>
+      <div class="muted" style="font-size:11px">${new Date(doc.created_at).toLocaleString("th-TH")}</div>
+      <div class="file-actions"><a class="btn btn-ghost btn-xs" href="${url}" target="_blank" rel="noopener">${svgIcon("file", 13)} ดู</a>
+        <a class="btn btn-dark btn-xs" href="${url}" download>${svgIcon("download", 13)} ดาวน์โหลด</a></div></div></div>`;
+  }).join("") : '<p class="muted">ยังไม่มีไฟล์</p>';
+  // มีงานค้าง → รีเฟรชเองทุก 10 วินาทีตอนอยู่หน้านี้
+  if (jobs.some((j) => ["pending", "claimed", "running"].includes(j.status)) && $("page-captures").style.display !== "none") {
+    capTimer = setTimeout(loadCaptures, 10000);
+  }
+}
+$("btnCapture").onclick = async () => {
+  const ref = $("capRef").value.trim();
+  if (!ref) { toast("กรุณาใส่เลขอ้างอิง DCTK / เลขใบขน / เลขใบกำกับ", "error"); return; }
+  try { await requestCapture({ ref }); $("capRef").value = ""; loadCaptures(); }
+  catch (e) { toast("ส่งคำสั่งแคปหน้าจอไม่สำเร็จ: " + e.message, "error"); }
+};
+$("btnRefreshCaptures").onclick = loadCaptures;
+
 async function reprintDeclaration(id) {
   const d = DECLS.find((x) => x.id === id);
   if (!d) return;
@@ -1619,6 +1678,7 @@ $("btnClearSel").onclick = () => { selected.clear(); renderList(); };
 const PAGE_META = {
   list: { title: "รายการใบขน", sub: "จัดการใบขนสินค้าทั้งหมดในที่เดียว" },
   masters: { title: "คลัง Master", sub: "ชุดค่าที่ใช้ซ้ำได้ของลูกค้าแต่ละราย แยกตาม Consignee และรหัสสินค้า" },
+  captures: { title: "แคปหน้าจอใบขน", sub: "แคปทุกหน้าของใบขนใน DCTK เป็น PDF (อ่านอย่างเดียว)" },
   history: { title: "ประวัติงาน", sub: "ประวัติการนำเข้าและเอกสารที่ระบบสร้าง" },
   settings: { title: "ตั้งค่า", sub: "Allowlist · AI · ตารางเวลา · RPA · ลูกค้า" },
 };
@@ -1633,6 +1693,7 @@ function showPage(page) {
   $("pageTitle").textContent = meta.title; $("pageSubtitle").textContent = meta.sub;
   if (page === "list") loadDecls();
   if (page === "history") { loadJobs(); }
+  if (page === "captures") loadCaptures();
   if (page === "masters") loadMasters();
   if (page === "settings") { loadRules(); loadEmailSchedule(); loadModel(); loadEmailRules(); loadConfig(); loadLoadingRules(); }
 }
@@ -2255,6 +2316,7 @@ function renderMasters() {
         ...consignees.filter((c) => !inName(c)).map((c) => `<span class="chip-tag chip-consignee">${escapeHtml(c)}</span>`),
         ...products.filter((c) => !inName(c)).map((c) => `<span class="chip-tag chip-product">${escapeHtml(c)}</span>`),
       ];
+      if (String((t.header || {}).__capture ?? "") === "1") chips.unshift(`<span class="chip-tag chip-capture">📸 แคปหน้าจอ</span>`);
       const scope = chips.length
         ? chips.join("")
         : (consignees.length || products.length
@@ -2339,8 +2401,16 @@ function renderMasterForm() {
     ? `<div class="ms-src">ถอดมาจากใบขนของใบกำกับ <b>${escapeHtml(srcInv)}</b> — ค่าที่ตั้งไว้ทั้งหมดมาจากใบนั้น</div>`
     : `<div class="ms-src muted">ไม่ได้บันทึกว่าถอดมาจากใบกำกับใด (สร้างเอง หรือทำสำเนามา)</div>`;
 
+  // 📸 แคปหน้าจอ — ตั้งราย Master (ไม่ตั้ง = ใช้ค่าที่ตั้งไว้ของลูกค้า) · เก็บใน header.__capture = "1" / "0"
+  const cap = String((t.header || {}).__capture ?? "");
+  const capOpt = (v, txt) => `<label class="cap-opt${cap === v ? " on" : ""}"><input type="radio" name="msCapture" value="${v}" ${cap === v ? "checked" : ""}/> ${txt}</label>`;
   $("msBody").innerHTML = `
     ${srcLine}
+    <div class="cap-box">
+      <div class="cap-title">📸 แคปหน้าจอทุกหน้าตอนสร้างใบขน</div>
+      <div class="cap-opts">${capOpt("1", "แคปทุกครั้ง")}${capOpt("0", "ไม่แคป")}${capOpt("", "ตามที่ตั้งไว้ของลูกค้า")}</div>
+      <div class="muted cap-help">ได้ไฟล์ PDF รวมภาพหน้า 1, หน้า 2 และทุกรายการในหน้า 3 แนบไว้ที่ใบขนนั้น</div>
+    </div>
     <div class="md-grid" style="margin-bottom:12px">
       <div class="fld"><label>ชื่อที่ใช้เรียก (ตั้งเอง)</label>
         <input class="inp" id="msLabel" value="${escapeHtml(t.label || "")}" placeholder="ชื่อสั้น ๆ ที่ทีมเรียกกัน เช่น ALF ตู้น้ำมันเวียดนาม" /></div>
@@ -2505,6 +2575,9 @@ async function saveMaster() {
   //   หรือช่องที่ไม่ได้อยู่ในหน้า 1-4) ถูกลบทิ้งทุกครั้งที่กดบันทึก โดยไม่มีใครรู้
   //   (เจอจริง 10 ต.ค. 2569: กดบันทึกเฉย ๆ แล้วช่องหัวใบหายไป 2 ช่อง)
   const header = { ...(msEditing.header || {}) };
+  const capPick = $("msBody").querySelector('input[name="msCapture"]:checked');
+  if (capPick && capPick.value) header.__capture = capPick.value;
+  else delete header.__capture;
   $("msBody").querySelectorAll(".ms-edit").forEach((el) => {
     const v = String(el.value ?? "").trim();
     if (v) header[el.dataset.key] = v;

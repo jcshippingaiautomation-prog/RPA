@@ -643,3 +643,12 @@ tr.ms-group > td {
   .dt th, .dt td { padding: 10px 10px; }
   .main { padding: 20px 18px; }
 }
+
+/* 📸 แคปหน้าจอ ในฟอร์ม Master — ต้องเห็นชัด ไม่ซ่อนอยู่ในช่องอื่น */
+.cap-box { border: 2px solid #f59e0b; background: #fffbeb; border-radius: 10px; padding: 10px 14px; margin: 8px 0 14px; }
+.cap-title { font-weight: 700; margin-bottom: 6px; }
+.cap-opts { display: flex; gap: 8px; flex-wrap: wrap; }
+.cap-opt { border: 1px solid #e5e7eb; background: #fff; border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+.cap-opt.on, .cap-opt:has(input:checked) { border-color: #f59e0b; background: #fef3c7; font-weight: 600; }
+.cap-help { margin-top: 6px; font-size: 12px; }
+.chip-capture { background: #fef3c7; color: #92400e; }

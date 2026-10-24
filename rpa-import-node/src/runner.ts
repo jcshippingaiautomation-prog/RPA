@@ -246,6 +246,10 @@ async function attachRules(
         ck ? customerRules[ck]["ร้องขอภาพหน้าจอ"] ?? "" : "",
       );
     }
+    // 📸 Master ตั้งไว้เอง ("1"/"0" ใน extra_fields.__capture) ชนะค่าของลูกค้า
+    const masterCap = String((r.__extra_fields__ as { [k: string]: unknown } | undefined)?.__capture ?? "").trim();
+    if (masterCap === "1") r.__capture_screenshots__ = true;
+    else if (masterCap === "0") r.__capture_screenshots__ = false;
 
     // presets: กรณีที่ match ชนะ default (Supabase) — "กำหนดเอง" override ค่า AI เสมอ
     let presetCount = 0;
