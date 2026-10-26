@@ -1231,7 +1231,7 @@ async function loadCaptures() {
   clearTimeout(capTimer);
   let d;
   try { d = await api("/api/captures"); } catch (e) { $("capJobs").textContent = "โหลดไม่ได้: " + e.message; return; }
-  const st = { pending: "รอคิว", claimed: "กำลังเริ่ม", running: "กำลังแคป…", done: "เสร็จ", error: "ไม่สำเร็จ", failed: "ไม่สำเร็จ" };
+  const st = { pending: "รอคิว", claimed: "กำลังเริ่ม", processing: "กำลังแคป…", running: "กำลังแคป…", done: "เสร็จ", error: "ไม่สำเร็จ", failed: "ไม่สำเร็จ" };
   const jobs = d.jobs || [];
   $("capJobs").innerHTML = jobs.length
     ? `<table class="dt"><thead><tr><th>เวลา</th><th>เลขที่สั่ง</th><th>สถานะ</th><th>หมายเหตุ</th></tr></thead><tbody>${jobs.map((j) => {
@@ -1251,7 +1251,7 @@ async function loadCaptures() {
         <a class="btn btn-dark btn-xs" href="${url}" download>${svgIcon("download", 13)} ดาวน์โหลด</a></div></div></div>`;
   }).join("") : '<p class="muted">ยังไม่มีไฟล์</p>';
   // มีงานค้าง → รีเฟรชเองทุก 10 วินาทีตอนอยู่หน้านี้
-  if (jobs.some((j) => ["pending", "claimed", "running"].includes(j.status)) && $("page-captures").style.display !== "none") {
+  if (jobs.some((j) => ["pending", "claimed", "processing", "running"].includes(j.status)) && $("page-captures").style.display !== "none") {
     capTimer = setTimeout(loadCaptures, 10000);
   }
 }
