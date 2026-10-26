@@ -67,6 +67,8 @@
       '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
     clock:
       '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+    camera:
+      '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
     copy:
       '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
     trash:

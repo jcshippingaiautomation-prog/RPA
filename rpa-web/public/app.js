@@ -1163,7 +1163,7 @@ async function openFiles(id) {
     const docs = res.documents || [];
     // 📸 ใบที่มีเลขอ้างอิง DCTK แล้ว → แคปหน้าจอทุกหน้าได้เสมอ (อ่านอย่างเดียว)
     const capBox = String(d.declaration_no ?? "").trim()
-      ? `<div class="files-section"><button class="btn btn-ghost btn-xs actCapture" data-id="${d.id}">📸 แคปหน้าจอใบนี้ใน DCTK (ทุกหน้า)</button>
+      ? `<div class="files-section"><button class="btn btn-ghost btn-xs actCapture" data-id="${d.id}">${svgIcon("camera", 13)} แคปหน้าจอใบนี้ใน DCTK (ทุกหน้า)</button>
            <span class="muted" style="font-size:12px"> อ่านอย่างเดียว ไม่แก้ไขใบ · ใช้เวลา 1–3 นาที</span></div>`
       : "";
     const wireCapture = () => {
