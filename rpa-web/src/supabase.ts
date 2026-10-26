@@ -1635,7 +1635,8 @@ export async function enqueueJob(
         type,
         payload,
         dry_run: !!opts.dryRun,
-        triggered_by: opts.triggeredBy ?? null,
+        // ต้องเป็น uuid ของผู้ใช้จริง — โหมดทดสอบที่ปิดล็อกอินใช้ "dev" ซึ่งฐานข้อมูลไม่รับ ทั้งงานจะเข้าคิวไม่ได้
+        triggered_by: /^[0-9a-f-]{36}$/i.test(String(opts.triggeredBy ?? "")) ? opts.triggeredBy : null,
         trigger_source: opts.triggerSource ?? "manual",
       })
       .select("id")
