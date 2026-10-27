@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { chromium, type BrowserContext, type Page } from "playwright";
 
-import { log, sleep, setLogSink, waitForPageReady, type LogSink } from "./helpers.js";
+import { log, sleep, setLogSink, waitForPageReady, setRunHooks, stepProgress, checkStop, StopRequested, type LogSink, type RunProgress } from "./helpers.js";
 import {
   loadRecordsFromSheet,
   loadRecords,
@@ -108,8 +108,10 @@ export interface RunOptions {
   onRows?: (rows: RowInfo[]) => void;
   /** แจ้งเมื่อสถานะแถวเปลี่ยน */
   onRowStatus?: (row: RowInfo) => void;
-  /** สัญญาณหยุด — คืน true เพื่อหยุดก่อนแถวถัดไป */
+  /** สัญญาณหยุด — คืน true เพื่อหยุด (เช็คที่จุดหยุดได้ปลอดภัยระหว่างขั้นตอน ไม่ใช่แค่ก่อนแถวถัดไป) */
   shouldStop?: () => boolean;
+  /** แจ้งความคืบหน้า (ขั้นที่ / ทั้งหมด / ชื่อขั้น) ให้เว็บแสดงผล */
+  onProgress?: (p: RunProgress) => void;
   /** เรียกเมื่อมี PDF ถูกสร้าง (ให้ caller อัปขึ้น Supabase ฯลฯ) */
   onDocument?: (doc: {
     filePath: string;
@@ -130,6 +132,8 @@ export interface RunResult {
   errors: number;
   skipped: number;
   stopped: boolean;
+  /** ถูกยกเลิกหลังบันทึกหน้าแรกแล้ว → มีใบร่างค้างใน DCTK เลขนี้ (ผู้ใช้ลบเองได้) */
+  draftNo?: string;
   /** true ถ้ามี record ที่สร้างใบใน DCTK สำเร็จแล้ว (ได้ declaration_no) — worker ใช้กันการ retry ที่จะสร้างใบซ้ำ */
   declarationCreated?: boolean;
 }
@@ -400,6 +404,7 @@ const PREVIEW_FIELDS: { dbKey: string; label: string }[] = [
  */
 export async function runImport(opts: RunOptions = {}): Promise<RunResult> {
   if (opts.onLog) setLogSink(opts.onLog);
+  setRunHooks({ stop: opts.shouldStop, progress: opts.onProgress });
 
   const result: RunResult = { total: 0, done: 0, errors: 0, skipped: 0, stopped: false };
 
@@ -450,6 +455,7 @@ export async function runImport(opts: RunOptions = {}): Promise<RunResult> {
     await runBrowser(records, rows, cfg, opts, onlySet, setStatus, result);
   } finally {
     if (opts.onLog) setLogSink(null);
+    setRunHooks(null);
   }
 
   return result;
@@ -754,9 +760,19 @@ async function runBrowser(
   //   + เผื่อ timeout 45s กันหน้าโหลดช้า — กัน error "Timeout 15000ms ... waiting until load"
   // ⚠ อย่ารอ domcontentloaded — DCTK เสิร์ฟ bundle 14MB บางช่วงกินเวลา >45s
   //   รอแค่ "ได้ response แล้ว" (commit) จากนั้นค่อยรอให้ Kendo พร้อมจริง
+  // จำนวนขั้นของงานแต่ละแบบ (ให้เว็บแสดง "ขั้น 2/6")
+  const totalSteps = opts.mode === "edit" ? 6 : opts.mode === "reprint" ? 2 : 6;
+  stepProgress(1, totalSteps, "เปิดระบบ DCTK และเข้าสู่ระบบ");
   await page.goto(cfg.url, { waitUntil: "commit", timeout: 60000 });
   await waitForPageReady(page, "หน้า login");
   await login(page, cfg.username, cfg.password);
+  if (opts.shouldStop?.()) {
+    log("⏹ ผู้ใช้กดยกเลิก — หยุดก่อนเริ่มกรอก (ยังไม่ได้แตะอะไรใน DCTK)");
+    result.stopped = true;
+    for (let k = 0; k < records.length; k++) if (!onlySet || onlySet.has(k + 1)) setStatus(k, "skipped", "ยกเลิกโดยผู้ใช้");
+    await context.close().catch(() => {}); await browser.close().catch(() => {});
+    return;
+  }
 
   // ---- INSPECT-COMBO-CURRENCY: เปิดถึง Page 2 → คลิก currency → dump row + input value ----
   if (process.env.RPA_INSPECT_CURRENCY) {
@@ -851,6 +867,8 @@ async function runBrowser(
       try {
         const declNo = String(opts.editDeclarationNo ?? record.declaration_no ?? "");
         if (!declNo) throw new Error("ไม่มีเลขใบขน DCTK สำหรับพิมพ์ซ้ำ");
+        stepProgress(2, totalSteps, `ค้นใบ ${declNo} และพิมพ์ใบขน`);
+        checkStop();
         const { pdf, declarationNo } = await reprintDeclaration(page, context, downloadDir, declNo);
         if (!pdf) throw new Error("พิมพ์ใบขนซ้ำไม่สำเร็จ (ดู log — DCTK อาจค้าง/หาใบไม่เจอ)");
         // อัปเอกสารใบขนจริง (declaration) → caller เก็บลง Supabase
@@ -875,6 +893,12 @@ async function runBrowser(
         result.done++;
       } catch (ex) {
         const msg = ex instanceof Error ? ex.message : String(ex);
+        if (ex instanceof StopRequested) {
+          log("  ⏹ ผู้ใช้กดยกเลิก — ไม่ได้พิมพ์ใบขน");
+          setStatus(idx, "skipped", "ยกเลิกโดยผู้ใช้");
+          result.stopped = true;
+          break;
+        }
         log(`  ✗ พิมพ์ซ้ำ Record ${i} error: ${msg}`);
         setStatus(idx, "error", msg);
         result.errors++;
@@ -888,10 +912,19 @@ async function runBrowser(
         const declNo = String(opts.editDeclarationNo ?? record.declaration_no ?? "");
         if (!declNo) throw new Error("ไม่มีเลขใบขน DCTK สำหรับค้นเพื่อแก้");
         log(`  ✏️ แก้ไขใบเลข ${declNo}`);
+        stepProgress(2, totalSteps, `เปิดใบเดิม ${declNo}`);
+        checkStop();
         const editPage = await openDeclarationForEdit(page, declNo);
+        stepProgress(3, totalSteps, "แก้หน้า 1 · หัวใบขน");
+        checkStop();
         await fillPage1(editPage, record);
+        stepProgress(4, totalSteps, "แก้หน้า 2 · ใบกำกับสินค้า");
+        checkStop();
         const page2 = await fillPage2(editPage, record);
+        stepProgress(5, totalSteps, "แก้หน้า 3 · รายการสินค้า");
+        checkStop();
         await fillPage3(page2, record);
+        stepProgress(6, totalSteps, "บันทึกการแก้ไข", false);
         await saveDeclarationEdit(page2);
         if (record.__supabase_id__ != null) {
           await markDeclarationDone(record.__supabase_id__);
@@ -900,6 +933,12 @@ async function runBrowser(
         result.done++;
       } catch (ex) {
         const msg = ex instanceof Error ? ex.message : String(ex);
+        if (ex instanceof StopRequested) {
+          log("  ⏹ ผู้ใช้กดยกเลิก — หยุดแก้ใบ (หน้าที่บันทึกไปก่อนหน้านี้ยังอยู่ในใบ)");
+          setStatus(idx, "skipped", "ยกเลิกโดยผู้ใช้");
+          result.stopped = true;
+          break;
+        }
         log(`  ✗ แก้ไข Record ${i} error: ${msg}`);
         const shot = path.join(PROJECT_ROOT, `error_edit_${i}.png`);
         try {
@@ -925,10 +964,18 @@ async function runBrowser(
       // ใบก่อนหน้าอาจทิ้งหน้าจอไว้กลางฟอร์ม (โหมดทดสอบที่ไม่ finalize ค้างที่หน้า 2 เสมอ)
       //   → พากลับหน้าแรกก่อน และ login ใหม่ให้ถ้าเซสชันหลุด
       await goHome(page, { url: cfg.url!, username: cfg.username, password: cfg.password });
+      stepProgress(2, totalSteps, "กรอกหน้า 1 · หัวใบขน");
+      checkStop();
       await openPortfolioAndAdd(page);
       await fillPage1(page, record);
+      if (!opts.dryRun) record.__page1_saved__ = true;   // บันทึกหน้า 1 แล้ว = มีใบร่างใน DCTK
+      stepProgress(3, totalSteps, "กรอกหน้า 2 · ใบกำกับสินค้า");
+      checkStop();
       const page2 = await fillPage2(page, record);
+      stepProgress(4, totalSteps, "กรอกหน้า 3 · รายการสินค้า");
+      checkStop();
       await fillPage3(page2, record);
+      checkStop();   // จุดสุดท้ายที่หยุดได้ — หลังจากนี้คือยืนยันใบกับกรมฯ ห้ามหยุดกลางทาง
       // ประกาศไว้นอก block เพื่อให้ status logic ด้านล่างใช้ได้ (pdf=ไฟล์ใบขนจริง, declarationNo=เลขใบ)
       let pdf: string | null = null;
       let declarationNo: string | null = null;
@@ -940,6 +987,7 @@ async function runBrowser(
         log(`     → เหลือ "ใบร่าง" ค้างใน DCTK${declarationNo ? ` เลข ${declarationNo}` : ""} — เข้าไปลบเองได้`);
       } else {
         // เรียก finalize ครั้งเดียว (สร้างใบ + พยายามพิมพ์) — เก็บผลไว้ใช้ต่อ
+        stepProgress(5, totalSteps, "ยืนยันใบกับกรมฯ (ยกเลิกไม่ได้แล้ว)", false);
         const finalizeRes = await finalizeAndPrint(page2, context, downloadDir);
         pdf = finalizeRes.pdf;
         // declarationNo: ใช้จาก finalize ก่อน ไม่งั้น fallback เลขที่จับไว้ตั้งแต่ Page 2 (เผื่อ save ค้าง)
@@ -966,6 +1014,7 @@ async function runBrowser(
         // ⏱ AUTO-REPRINT: ถ้า finalize ได้เลขใบขนแล้ว (ใบสร้างใน DCTK สำเร็จ) แต่ PDF=null
         //    (DCTK ค้างตอนพิมพ์ → ได้แต่ capture) → ลองพิมพ์ซ้ำเองทันที (login อยู่แล้ว ไม่ต้องเริ่มใหม่)
         //    ทำให้ได้ใบขนจริงโดย user ไม่ต้องกดพิมพ์ซ้ำเอง
+        stepProgress(6, totalSteps, "พิมพ์ใบขนและเก็บไฟล์", false);
         if (!pdf && declarationNo) {
           for (let rp = 1; rp <= 2 && !pdf; rp++) {
             log(`  ↻ finalize ได้แต่ capture (ใบ ${declarationNo} สร้างแล้ว) — auto-reprint พิมพ์ใบขนจริง (รอบ ${rp}/2)`);
@@ -1017,6 +1066,19 @@ async function runBrowser(
       }
     } catch (ex) {
       const msg = ex instanceof Error ? ex.message : String(ex);
+      if (ex instanceof StopRequested) {
+        // หยุดตามที่ผู้ใช้สั่ง — ไม่ใช่ error · ถ้าบันทึกหน้า 1 ไปแล้วจะมีใบร่างค้างใน DCTK
+        const draft = typeof record.__declaration_no__ === "string" ? record.__declaration_no__
+          : record.__page1_saved__ ? "(ไม่ทราบเลข — ดูในรายการใบขนของ DCTK)" : "";
+        if (draft) result.draftNo = draft;
+        log(draft
+          ? `  ⏹ ผู้ใช้กดยกเลิก — หยุดแล้ว · มีใบร่างค้างใน DCTK เลข ${draft} (ยังไม่ได้ยื่นกรมฯ ลบเองได้)`
+          : "  ⏹ ผู้ใช้กดยกเลิก — หยุดแล้ว · ยังไม่ได้สร้างอะไรใน DCTK");
+        setStatus(idx, "skipped", "ยกเลิกโดยผู้ใช้");
+        result.stopped = true;
+        for (const extra of context.pages()) if (extra !== page) await extra.close().catch(() => { /* */ });
+        break;
+      }
       log(`  ✗ Record ${i} error: ${msg}`);
       const shot = path.join(PROJECT_ROOT, `error_record_${i}.png`);
       try {

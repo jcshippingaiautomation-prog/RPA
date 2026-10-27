@@ -10,6 +10,7 @@ export type { AppConfig } from "./types.js";
 export { captureExistingDeclaration } from "./capture.js";
 export type { CaptureResult } from "./capture.js";
 export { setLogSink } from "./helpers.js";
+export type { RunProgress } from "./helpers.js";
 export { loadFieldRegistry, fieldRegistryPath, resolveSelector, fillableFields } from "./field-registry.js";
 export type { FieldDef } from "./field-registry.js";
 export { loadDctkRules, ruleFor, dependenciesFor } from "./dctk-rules.js";

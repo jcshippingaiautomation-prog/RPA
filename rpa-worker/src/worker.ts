@@ -2,7 +2,7 @@
 //  RPA Worker — poll Supabase job_queue → claim → run → stream logs
 //  รันบน VM ที่มีเบราว์เซอร์จริง (Playwright)
 // ============================================================
-import { runImport, captureExistingDeclaration, setLogSink, type AppConfig, type RowInfo } from "rpa-import-node";
+import { runImport, captureExistingDeclaration, setLogSink, type AppConfig, type RowInfo, type RunProgress } from "rpa-import-node";
 import { config, assertConfig } from "./config.js";
 import {
   claimNextJob,
@@ -15,6 +15,27 @@ import {
 import { listCustomerSettings, uploadDocument, setDeclarationStatus, type CustomerCase } from "./supa.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** ข้อความความคืบหน้าแบบอ่านง่าย เช่น "ขั้น 4/6 · กรอกหน้า 3 · รายการสินค้า (รายการ 2/8)" */
+function progressText(p: RunProgress): string {
+  return `ขั้น ${p.step}/${p.total} · ${p.label}${p.detail ? ` (${p.detail})` : ""}`;
+}
+/**
+ * ตัวแจ้งความคืบหน้าของงาน → job_logs (เว็บเห็นสด) + สถานะใบขน (เผื่อเว็บหลับ เปิดมาก็ยังเห็นขั้นล่าสุด)
+ *   ถ้าผู้ใช้กดยกเลิกแล้ว ไม่ทับข้อความ "กำลังยกเลิก…" ที่เว็บตั้งไว้
+ */
+function progressReporter(job: JobRow, declId?: string | null) {
+  return (p: RunProgress) => {
+    void appendLog(job.id, "progress", { ...p, text: progressText(p) });
+    if (declId && !cancelFlag) void setDeclarationStatus(declId, { status: "running", status_message: progressText(p) });
+  };
+}
+/** ข้อความสถานะหลังผู้ใช้กดยกเลิก */
+function cancelledMessage(draftNo?: string): string {
+  return draftNo
+    ? `ยกเลิกแล้ว — มีใบร่างค้างใน DCTK เลข ${draftNo} (ยังไม่ได้ยื่นกรมฯ ลบเองได้)`
+    : "ยกเลิกแล้ว — ยังไม่ได้สร้างอะไรใน DCTK";
+}
 
 /** รันงาน rpa_import 1 งาน (เทียบเท่า startRun ใน server.ts แต่ log → job_logs) */
 async function runRpaImport(job: JobRow): Promise<void> {
@@ -97,6 +118,7 @@ async function runRpaImport(job: JobRow): Promise<void> {
       if (declId && meta.declarationNo) await setDeclarationStatus(declId, { declaration_no: meta.declarationNo });
     },
     shouldStop: () => cancelFlag,
+    onProgress: progressReporter(job, declId),
   });
 
   // ⏱ AUTO-RETRY: DCTK ช้า/ล่มชั่วคราว → รันใหม่อัตโนมัติ สูงสุด 3 รอบ
@@ -117,7 +139,9 @@ async function runRpaImport(job: JobRow): Promise<void> {
   await appendLog(job.id, "lifecycle", { event: "run-done", result });
   // อัปเดตสถานะ declaration ตรง ๆ จาก worker (ไม่พึ่งเว็บ bridge ที่หลับ):
   //   ได้ใบขนจริง → done · สร้างใบแล้วแต่ไม่ได้ไฟล์จริง → partial · ไม่ได้เลย → error
-  if (declId && !dryRun) {
+  if (declId && !dryRun && result.stopped && !result.declarationCreated) {
+    await setDeclarationStatus(declId, { status: "cancelled", status_message: cancelledMessage(result.draftNo) });
+  } else if (declId && !dryRun) {
     const st = declDocUploaded ? "done" : (result.declarationCreated ? "partial" : "error");
     const msg = declDocUploaded ? "กรอก + พิมพ์ใบขนเสร็จ"
       : result.declarationCreated ? "สร้างใบใน DCTK แล้ว แต่ยังไม่ได้ไฟล์ใบขนจริง — กดพิมพ์ใบขนซ้ำในเว็บ"
@@ -130,7 +154,7 @@ async function runRpaImport(job: JobRow): Promise<void> {
 /** รันงาน rpa_edit 1 งาน — ค้นใบเดิมใน DCTK (declaration_no) → แก้ → save */
 async function runRpaEdit(job: JobRow): Promise<void> {
   const payload = job.payload as {
-    onlyRows?: number[]; headless?: boolean; declId?: string; declaration_no?: string;
+    onlyRows?: number[]; headless?: boolean; declId?: string; declaration_no?: string; prevStatus?: string;
   };
   const onlyRows = Array.isArray(payload.onlyRows) ? payload.onlyRows : undefined;
   const declarationNo = String(payload.declaration_no ?? "");
@@ -177,16 +201,20 @@ async function runRpaEdit(job: JobRow): Promise<void> {
       if (rec) await appendLog(job.id, "document", rec);
     },
     shouldStop: () => cancelFlag,
+    onProgress: progressReporter(job, payload.declId),
   });
 
   await appendLog(job.id, "lifecycle", { event: "run-done", result, mode: "edit" });
+  if (payload.declId && result.stopped) {
+    await setDeclarationStatus(payload.declId, { status: payload.prevStatus || "cancelled", status_message: "ยกเลิกการแก้ไขแล้ว — หน้าที่บันทึกไปก่อนกดยกเลิกยังอยู่ในใบ" });
+  }
   await markDone(job.id, result as unknown as Record<string, unknown>);
 }
 
 /** รันงาน rpa_print 1 งาน — พิมพ์ใบเดิมซ้ำ (ค้นใบใน DCTK ด้วย declaration_no → พิมพ์ PDF, ไม่กรอก/ไม่สร้างใหม่) */
 async function runRpaPrint(job: JobRow): Promise<void> {
   const payload = job.payload as {
-    onlyRows?: number[]; headless?: boolean; declId?: string; declaration_no?: string;
+    onlyRows?: number[]; headless?: boolean; declId?: string; declaration_no?: string; prevStatus?: string;
   };
   const onlyRows = Array.isArray(payload.onlyRows) ? payload.onlyRows : undefined;
   const declarationNo = String(payload.declaration_no ?? "");
@@ -212,9 +240,13 @@ async function runRpaPrint(job: JobRow): Promise<void> {
     },
     onCaptureMeta: async (meta) => void appendLog(job.id, "capture-meta", meta),
     shouldStop: () => cancelFlag,
+    onProgress: progressReporter(job, payload.declId),
   });
 
   await appendLog(job.id, "lifecycle", { event: "run-done", result, mode: "reprint" });
+  if (payload.declId && result.stopped) {
+    await setDeclarationStatus(payload.declId, { status: payload.prevStatus || "cancelled", status_message: "ยกเลิกการพิมพ์ใบขนซ้ำแล้ว" });
+  }
   await markDone(job.id, result as unknown as Record<string, unknown>);
 }
 
@@ -232,7 +264,12 @@ async function runRpaCapture(job: JobRow): Promise<void> {
   setLogSink((line) => void appendLog(job.id, "log", { line }));
   let result: Record<string, unknown>;
   try {
-    const r = await captureExistingDeclaration({ ref, headless: payload.headless ?? true });
+    // ไม่ส่ง declId ให้ตัวแจ้งความคืบหน้า — แคปหน้าจอต้องไม่เปลี่ยนสถานะใบ
+    const r = await captureExistingDeclaration({
+      ref, headless: payload.headless ?? true,
+      shouldStop: () => cancelFlag,
+      onProgress: progressReporter(job, null),
+    });
     if (r.pdf) {
       const rec = await uploadDocument(r.pdf, {
         customer: payload.customer ?? null, invoice: r.invoice || ref, kind: "capture",
@@ -240,7 +277,7 @@ async function runRpaCapture(job: JobRow): Promise<void> {
       });
       if (rec) await appendLog(job.id, "document", rec);
     }
-    result = { total: 1, done: r.pdf ? 1 : 0, errors: r.pdf ? 0 : 1, skipped: 0, stopped: false, shots: r.shots, notes: r.notes };
+    result = { total: 1, done: r.pdf ? 1 : 0, errors: r.pdf || r.stopped ? 0 : 1, skipped: r.stopped ? 1 : 0, stopped: !!r.stopped, shots: r.shots, notes: r.notes };
   } finally {
     setLogSink(null);
   }

@@ -17,7 +17,7 @@ import { PDFDocument } from "pdf-lib";
 import { loadConfig, PROJECT_ROOT } from "./runner.js";
 import type { AppConfig } from "./types.js";
 import { login, openDeclarationForEdit } from "./pages.js";
-import { log, sleep, waitForPageReady } from "./helpers.js";
+import { log, sleep, waitForPageReady, setRunHooks, stepProgress, detailProgress, checkStop, StopRequested, type RunProgress } from "./helpers.js";
 import * as S from "./selectors.js";
 
 const SEL_TAB3 = "#TabStrip > ul > li:nth-child(3) > span.k-link";
@@ -27,12 +27,16 @@ export interface CaptureResult {
   shots: number;
   invoice: string;
   notes: string[];
+  /** ผู้ใช้กดยกเลิกระหว่างแคป (ไม่สร้าง PDF) */
+  stopped?: boolean;
 }
 
 export async function captureExistingDeclaration(opts: {
   ref: string;
   headless?: boolean;
   configOverrides?: Partial<AppConfig>;
+  shouldStop?: () => boolean;
+  onProgress?: (p: RunProgress) => void;
 }): Promise<CaptureResult> {
   const ref = opts.ref.trim();
   if (!ref) throw new Error("ต้องระบุเลขอ้างอิง DCTK / เลขใบขน / เลขใบกำกับ");
@@ -45,6 +49,8 @@ export async function captureExistingDeclaration(opts: {
   const shots: string[] = [];
   const notes: string[] = [];
   let invoice = "";
+  let stopped = false;
+  setRunHooks({ stop: opts.shouldStop, progress: opts.onProgress });
 
   const browser = await chromium.launch({ headless });
   const context: BrowserContext = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
@@ -63,14 +69,19 @@ export async function captureExistingDeclaration(opts: {
 
   try {
     log(`📸 แคปหน้าจอใบขน ${ref}`);
+    stepProgress(1, 4, "เปิดระบบ DCTK และเข้าสู่ระบบ");
     await page.goto(cfg.url, { waitUntil: "commit", timeout: 60000 });
     await waitForPageReady(page, "หน้า DCTK", 240000);
     await page.waitForSelector(S.SEL_USER_ID, { timeout: 300000 });
     await login(page, cfg.username, cfg.password);
+    stepProgress(2, 4, `ค้นใบ ${ref}`);
+    checkStop();
     await openDeclarationForEdit(page, ref);
     await sleep(1500);
 
     // ── หน้า 1 ──
+    stepProgress(3, 4, "แคปหน้าจอทีละหน้า");
+    checkStop();
     await shot(page, "หน้า1_หัวใบขน");
 
     // ── หน้า 2 "ใบกำกับสินค้า & ส่วนรายละเอียด": ตารางใบกำกับ + ตารางรายการสินค้า อยู่หน้าเดียวกัน ──
@@ -113,6 +124,8 @@ export async function captureExistingDeclaration(opts: {
     log(`  รายการสินค้า ${uids.length} รายการ`);
     let itemFail = 0;
     for (let i = 0; i < uids.length; i++) {
+      detailProgress(`รายการสินค้า ${i + 1}/${uids.length}`);
+      checkStop();
       const itemPage = await openInNewTab(context, page, `#gridExDecDtl tbody tr[data-uid="${uids[i]}"]`);
       if (!itemPage) { itemFail++; continue; }
       await shot(itemPage, `รายการสินค้า${i + 1}`);
@@ -121,19 +134,26 @@ export async function captureExistingDeclaration(opts: {
     }
     if (itemFail) notes.push(`เปิดรายละเอียดรายการสินค้าไม่ได้ ${itemFail} จาก ${uids.length} รายการ — มีภาพตารางรายการแทน`);
 
+    checkStop();
     // ── หน้า 3 "การแลกเปลี่ยนข้อมูล" (ประวัติส่งข้อมูล/คำตอบจากกรมฯ) ──
     await page.click(SEL_TAB3).catch(() => { notes.push("เปิดแท็บการแลกเปลี่ยนข้อมูลไม่ได้"); });
     await sleep(2500);
     await shot(page, "หน้า3_การแลกเปลี่ยนข้อมูล");
   } catch (e) {
-    notes.push(`หยุดกลางทาง: ${e instanceof Error ? e.message.slice(0, 160) : String(e)}`);
-    log(`  ✗ ${notes[notes.length - 1]}`);
+    if (e instanceof StopRequested) {
+      stopped = true;
+      log("  ⏹ ผู้ใช้กดยกเลิก — หยุดแคปหน้าจอ (ไม่ได้แตะอะไรในใบ)");
+    } else notes.push(`หยุดกลางทาง: ${e instanceof Error ? e.message.slice(0, 160) : String(e)}`);
+    if (!stopped) log(`  ✗ ${notes[notes.length - 1]}`);
   } finally {
     await context.close().catch(() => {});
     await browser.close().catch(() => {});
+    setRunHooks(null);
   }
 
+  if (stopped) return { pdf: null, shots: shots.length, invoice, notes, stopped: true };
   if (!shots.length) return { pdf: null, shots: 0, invoice, notes };
+  stepProgress(4, 4, "รวมภาพเป็น PDF", false);
   // รวมภาพเป็น PDF ไฟล์เดียว (หน้าละ 1 ภาพ ขนาดตามภาพจริง)
   const pdf = await PDFDocument.create();
   for (const f of shots) {

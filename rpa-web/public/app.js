@@ -7,7 +7,7 @@ const $ = (id) => document.getElementById(id);
 function authToken() { return localStorage.getItem("sb_access_token") || ""; }
 function goLogin() { location.href = "/login.html"; }
 
-async function api(path, method = "GET", body) {
+async function api(path, method = "GET", body, opts) {
   const headers = body ? { "Content-Type": "application/json" } : {};
   const tok = authToken();
   if (tok) headers["Authorization"] = "Bearer " + tok;
@@ -15,6 +15,7 @@ async function api(path, method = "GET", body) {
     method,
     headers: Object.keys(headers).length ? headers : undefined,
     body: body ? JSON.stringify(body) : undefined,
+    signal: opts && opts.signal,
   });
   if (res.status === 401) { goLogin(); throw new Error("ต้องเข้าสู่ระบบก่อน"); }
   const data = await res.json().catch(() => ({}));
@@ -52,12 +53,70 @@ function toast(msg, kind = "info") {
   toastTimer = setTimeout(() => (t.style.display = "none"), 3500);
 }
 
+// ============================================================
+//  การ์ดความคืบหน้า + ปุ่มยกเลิก (ใช้กับทุกงานที่ใช้เวลานานบนหน้าเว็บ)
+//    const t = startTask("ตรวจ Master ทั้งหมด", { total: 35 });
+//    t.update({ done: 3, detail: "ชื่อ Master" });   // ไม่ส่ง total = แถบวิ่งไม่รู้จบ + นับเวลา
+//    await api(..., { signal: t.signal, ... taskId: t.id })   // กดยกเลิก → ตัด fetch + บอกเซิร์ฟเวอร์ให้หยุด
+//    t.finish();
+// ============================================================
+function startTask(title, opts = {}) {
+  let host = document.getElementById("taskHost");
+  if (!host) { host = document.createElement("div"); host.id = "taskHost"; host.className = "task-host"; document.body.appendChild(host); }
+  const id = "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const ctrl = new AbortController();
+  const el = document.createElement("div");
+  el.className = "task-card";
+  el.innerHTML = `
+    <div class="task-head"><span class="task-spin"></span><b class="task-title"></b><span class="task-time"></span></div>
+    <div class="task-bar ${opts.total ? "" : "indet"}"><i></i></div>
+    <div class="task-detail"></div>
+    <div class="task-foot"><button class="btn btn-ghost btn-xs task-cancel">${svgIcon("x", 13)} ยกเลิก</button></div>`;
+  el.querySelector(".task-title").textContent = title;
+  host.appendChild(el);
+  const t0 = Date.now();
+  let total = opts.total || 0;
+  let cancelled = false;
+  const tick = () => { const s = Math.round((Date.now() - t0) / 1000); el.querySelector(".task-time").textContent = s >= 60 ? `${Math.floor(s / 60)} นาที ${s % 60} วินาที` : `${s} วินาที`; };
+  tick();
+  const timer = setInterval(tick, 1000);
+  const task = {
+    id,
+    signal: ctrl.signal,
+    get cancelled() { return cancelled; },
+    update({ done, total: tot, detail } = {}) {
+      if (tot) { total = tot; el.querySelector(".task-bar").classList.remove("indet"); }
+      if (done != null && total) el.querySelector(".task-bar i").style.width = `${Math.min(100, Math.round((done / total) * 100))}%`;
+      if (detail != null) el.querySelector(".task-detail").textContent = (done != null && total ? `${done}/${total} · ` : "") + detail;
+    },
+    finish() { clearInterval(timer); el.remove(); },
+    cancel() {
+      if (cancelled) return;
+      cancelled = true;
+      el.classList.add("is-cancelling");
+      el.querySelector(".task-cancel").disabled = true;
+      el.querySelector(".task-detail").textContent = "กำลังยกเลิก…";
+      try { ctrl.abort(); } catch { /* */ }
+      api(`/api/tasks/${id}/cancel`, "POST", {}).catch(() => {});
+      if (opts.onCancel) { try { opts.onCancel(); } catch { /* */ } }
+    },
+  };
+  el.querySelector(".task-cancel").onclick = () => task.cancel();
+  return task;
+}
+/** taskId → ตัวรับข้อความความคืบหน้าจากเซิร์ฟเวอร์ (SSE task-progress) */
+const TASK_LISTENERS = {};
+/** error จากการกดยกเลิก (fetch ถูกตัด หรือเซิร์ฟเวอร์ตอบว่ายกเลิกแล้ว) */
+function isCancelError(e, task) {
+  return (task && task.cancelled) || (e && (e.name === "AbortError" || /ยกเลิกแล้ว/.test(e.message || "")));
+}
+
 // ---- Confirm dialog (Promise) — แทน confirm() ของ browser ----
 let _confirmResolve = null;
-function confirmDialog(message, title = "ยืนยันการลบ", okLabel = "ลบ") {
+function confirmDialog(message, title = "ยืนยันการลบ", okLabel = "ลบ", icon = "trash") {
   $("cfTitle").textContent = title;
   $("cfMsg").innerHTML = message; // อนุญาต <b> ในข้อความ
-  $("cfOk").innerHTML = svgIcon("trash", 16) + " " + escapeHtml(okLabel);
+  $("cfOk").innerHTML = svgIcon(icon, 16) + " " + escapeHtml(okLabel);
   $("modalConfirm").style.display = "flex";
   return new Promise((resolve) => { _confirmResolve = resolve; });
 }
@@ -80,6 +139,7 @@ const STATUS_META = {
   partial: ["สร้างใบแล้ว · รอพิมพ์", "st-partial"],
   edited: ["แก้แล้ว", "st-edited"],
   error: ["ผิดพลาด", "st-error"],
+  cancelled: ["ยกเลิกแล้ว", "st-cancelled"],
 };
 function statusBadge(status, message, docStatus, opts) {
   // ไม่ใช้ "new" (ใหม่·ต้องตรวจ) — แปลงเป็น "ready" (พร้อมรัน)
@@ -372,7 +432,8 @@ let selected = new Set();
 
 // สถานะที่ใช้จริง: new→ready (ไม่มีใหม่·ต้องตรวจ), doc_status=true → done
 function effStatus(d) {
-  const s = (d.status === "new" || !d.status) ? "ready" : d.status;
+  // ยกเลิกแล้ว = กลับมารันใหม่ได้ → นับรวมกับ "พร้อมรัน" (ป้ายยังขึ้น "ยกเลิกแล้ว")
+  const s = (d.status === "new" || !d.status || d.status === "cancelled") ? "ready" : d.status;
   if (d.doc_status && s !== "running" && s !== "queued" && s !== "edited") return "done";
   return s;
 }
@@ -435,14 +496,16 @@ function renderList() {
       <td class="muted-cell">${escapeHtml(d.etd || "—")}</td>
       <td class="muted-cell">${escapeHtml(fmtMoney(d.total_goods_amount, d.currency))}</td>
       <td>${sourceBadge(d.source)}</td>
-      <td>${statusBadge(d.status, d.status_message, d.doc_status, { clickable: effStatus(d) === "error" || effStatus(d) === "partial", id: d.id })}</td>
+      <td>${statusBadge(d.status, d.status_message, d.doc_status, { clickable: effStatus(d) === "error" || effStatus(d) === "partial", id: d.id })}${runProgressHtml(d)}</td>
       <td class="ta-right">
         <div class="row-actions">
           <button class="btn btn-ghost btn-xs actDetail" data-id="${d.id}" title="ดู/แก้ไขรายละเอียด">${svgIcon("list", 13)} รายละเอียด</button>
           <button class="btn btn-ghost btn-xs icon-only actCopy" data-id="${d.id}" title="สร้างสำเนา">${svgIcon("copy", 14)}</button>
           <button class="btn btn-ghost btn-xs icon-only actDelete" data-id="${d.id}" title="ลบรายการ">${svgIcon("trash", 14)}</button>
           <span class="row-actions-sep"></span>
-          <button class="btn btn-dark btn-xs actRun" data-id="${d.id}" ${running ? "disabled" : ""}>${svgIcon("play", 13)} รัน</button>
+          ${running
+            ? `<button class="btn btn-ghost btn-xs actCancelRun" data-id="${d.id}" title="หยุดงานนี้ — ถ้ายังรอคิวจะยกเลิกทันที ถ้ากำลังกรอกจะหยุดที่ขั้นถัดไป">${svgIcon("stop", 13)} ยกเลิก</button>`
+            : `<button class="btn btn-dark btn-xs actRun" data-id="${d.id}">${svgIcon("play", 13)} รัน</button>`}
           ${(() => {
             // เปิดดูไฟล์ได้เมื่อ: มีไฟล์ (doc_status) หรือ รันเสร็จแล้ว/มีเลขใบขน (กันเคส doc_status ยังไม่ sync)
             const canView = d.doc_status || effStatus(d) === "done" || effStatus(d) === "partial" || !!String(d.declaration_no ?? "").trim();
@@ -463,6 +526,7 @@ function renderList() {
   body.querySelectorAll(".partialBadge").forEach((b) => (b.onclick = () => openFiles(b.dataset.id)));
   body.querySelectorAll(".actFiles").forEach((b) => (b.onclick = () => openFiles(b.dataset.id)));
   body.querySelectorAll(".actRun").forEach((b) => (b.onclick = () => runDeclaration(b.dataset.id)));
+  body.querySelectorAll(".actCancelRun").forEach((b) => (b.onclick = () => cancelDeclarationRun(b.dataset.id)));
   body.querySelectorAll(".actCopy").forEach((b) => (b.onclick = () => copyDeclaration(b.dataset.id)));
   body.querySelectorAll(".actDelete").forEach((b) => (b.onclick = () => deleteDeclarationRow(b.dataset.id)));
   body.querySelectorAll(".rowChk").forEach((c) => (c.onchange = () => {
@@ -510,6 +574,36 @@ function prodCodes(d) {
   const head = String(d.description_eng ?? "").trim();     // ใบรายการเดียวที่เก็บไว้บนหัวใบ
   if (!out.length && head) out.push(head);
   return out;
+}
+
+// ---- ความคืบหน้าของงาน RPA ใต้ป้ายสถานะ (ขั้นที่ x/y) + ข้อความหลังยกเลิก ----
+function runProgressHtml(d) {
+  const msg = String(d.status_message || "");
+  if (d.status === "cancelled") return msg ? `<div class="st-progress" style="color:var(--muted2)">${escapeHtml(msg)}</div>` : "";
+  if (d.status !== "running" && d.status !== "queued") return "";
+  if (!msg) return "";
+  const m = msg.match(/^ขั้น (\d+)\/(\d+)/);
+  const bar = m ? `<div class="st-mini-bar"><i style="width:${Math.round(((+m[1] - 0.5) / +m[2]) * 100)}%"></i></div>` : "";
+  return `<div class="st-progress${/กำลังยกเลิก/.test(msg) ? " is-cancelling" : ""}">${escapeHtml(msg)}</div>${bar}`;
+}
+
+/** ยกเลิกงาน RPA ของใบนี้ — รอคิว: ยกเลิกทันที · กำลังทำ: หยุดที่ขั้นถัดไป (ห้ามหยุดตอนยืนยันใบกับกรมฯ) */
+async function cancelDeclarationRun(id) {
+  const d = DECLS.find((x) => x.id === id);
+  const name = d ? `${escapeHtml(d.customer_name || "")} / ${escapeHtml(d.invoice_number || "")}` : "";
+  const isRunning = d && d.status === "running";
+  const ok = await confirmDialog(
+    `ยกเลิกงานของใบนี้?<br><b>${name}</b><br><br>` + (isRunning
+      ? "ระบบจะหยุดที่ขั้นถัดไปที่หยุดได้ปลอดภัย ถ้าบันทึกหน้าแรกใน DCTK ไปแล้ว จะมี <b>ใบร่าง</b> ค้างอยู่ (ยังไม่ได้ยื่นกรมฯ ลบเองได้)<br>ถ้าเข้าขั้น <b>ยืนยันใบกับกรมฯ</b> แล้ว ระบบจะทำต่อจนจบ เพราะหยุดกลางทางใบจะเสีย"
+      : "ใบนี้ยังรอคิวอยู่ ยกเลิกได้ทันที ไม่มีอะไรเกิดขึ้นใน DCTK"),
+    "ยกเลิกงาน", "ยกเลิกงาน", "stop");
+  if (!ok) return;
+  try {
+    const r = await api(`/api/declarations/${encodeURIComponent(id)}/cancel`, "POST", {});
+    toast(r.message || "ส่งคำสั่งยกเลิกแล้ว", "info");
+    if (r.was === "pending" || r.was === "stale") await loadDecls();
+    else setDeclStatusLocal(id, "running", r.message);
+  } catch (e) { toast("ยกเลิกไม่สำเร็จ: " + e.message, "error"); }
 }
 
 // ---- รัน RPA ต่อใบ ----
@@ -1227,20 +1321,36 @@ async function requestCapture(body) {
   return r;
 }
 let capTimer = null;
+const JOB_PROGRESS = {};   // jobId → ข้อความขั้นล่าสุด (มาจาก SSE job-progress)
+async function cancelJobById(jobId) {
+  const ok = await confirmDialog("ยกเลิกงานนี้?<br>ถ้ายังรอคิวจะยกเลิกทันที ถ้ากำลังทำจะหยุดที่ขั้นถัดไป (แคปหน้าจออ่านอย่างเดียว ไม่แตะอะไรในใบ)", "ยกเลิกงาน", "ยกเลิกงาน", "stop");
+  if (!ok) return;
+  try {
+    const r = await api(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, "POST", {});
+    JOB_PROGRESS[jobId] = r.was === "pending" ? "" : r.message;
+    toast(r.message || "ส่งคำสั่งยกเลิกแล้ว", "info");
+  } catch (e) { toast("ยกเลิกไม่สำเร็จ: " + e.message, "error"); }
+  loadCaptures();
+}
 async function loadCaptures() {
   clearTimeout(capTimer);
   let d;
   try { d = await api("/api/captures"); } catch (e) { $("capJobs").textContent = "โหลดไม่ได้: " + e.message; return; }
-  const st = { pending: "รอคิว", claimed: "กำลังเริ่ม", processing: "กำลังแคป…", running: "กำลังแคป…", done: "เสร็จ", error: "ไม่สำเร็จ", failed: "ไม่สำเร็จ" };
+  const st = { pending: "รอคิว", claimed: "กำลังเริ่ม", processing: "กำลังแคป…", running: "กำลังแคป…", done: "เสร็จ", error: "ไม่สำเร็จ", failed: "ไม่สำเร็จ", cancel: "ยกเลิกแล้ว" };
   const jobs = d.jobs || [];
   $("capJobs").innerHTML = jobs.length
-    ? `<table class="dt"><thead><tr><th>เวลา</th><th>เลขที่สั่ง</th><th>สถานะ</th><th>หมายเหตุ</th></tr></thead><tbody>${jobs.map((j) => {
+    ? `<table class="dt"><thead><tr><th>เวลา</th><th>เลขที่สั่ง</th><th>สถานะ</th><th>หมายเหตุ</th><th></th></tr></thead><tbody>${jobs.map((j) => {
         const p = j.payload || {}; const r = j.result || {};
-        const note = [r.shots ? `${r.shots} ภาพ` : "", ...(r.notes || []), j.error || ""].filter(Boolean).join(" · ");
+        const live = ["pending", "claimed", "processing", "running"].includes(j.status);
+        const note = live ? (JOB_PROGRESS[j.id] || "")
+          : [r.stopped ? "ยกเลิกโดยผู้ใช้" : "", r.shots && !r.stopped ? `${r.shots} ภาพ` : "", ...(r.notes || []), j.error || ""].filter(Boolean).join(" · ");
         return `<tr><td>${new Date(j.created_at).toLocaleString("th-TH")}</td><td>${escapeHtml(p.ref || "")}</td>
-          <td>${escapeHtml(st[j.status] || j.status)}${j.status === "done" && r.done === 0 ? " (ไม่ได้ไฟล์)" : ""}</td><td class="muted">${escapeHtml(note)}</td></tr>`;
+          <td>${escapeHtml(st[j.status] || j.status)}${j.status === "done" && r.done === 0 && !r.stopped ? " (ไม่ได้ไฟล์)" : ""}</td>
+          <td class="muted" data-progress="${j.id}">${escapeHtml(note)}</td>
+          <td class="ta-right">${live ? `<button class="btn btn-ghost btn-xs capCancel" data-id="${j.id}">${svgIcon("stop", 13)} ยกเลิก</button>` : ""}</td></tr>`;
       }).join("")}</tbody></table>`
     : '<p class="muted">ยังไม่มีงานแคปหน้าจอ</p>';
+  $("capJobs").querySelectorAll(".capCancel").forEach((b) => (b.onclick = () => cancelJobById(b.dataset.id)));
   const docs = d.documents || [];
   $("capFiles").innerHTML = docs.length ? docs.map((doc) => {
     const url = dlUrl(doc.storage_path, doc.public_url);
@@ -1393,7 +1503,14 @@ function openUpload() {
   uploadFiles = []; renderFileList(); $("upProgress").textContent = "";
   setUploadStep(1); loadCustomerNames(); $("modalUpload").style.display = "flex";
 }
-function closeUpload() { $("modalUpload").style.display = "none"; }
+function closeUpload() {
+  // ปิดหน้าต่างระหว่าง AI กำลังอ่าน = ยกเลิกงาน (ไม่งั้นรายการจะโผล่ขึ้นมาเองทีหลังแบบงง ๆ)
+  if (upTask && !upTask.cancelled) {
+    if (!confirm("AI กำลังอ่านเอกสารอยู่ — ปิดหน้าต่างจะยกเลิกงานนี้ ต้องการยกเลิกไหม?")) return;
+    cancelUploadTask();
+  }
+  $("modalUpload").style.display = "none";
+}
 $("btnUpload").onclick = openUpload;
 $("upClose").onclick = closeUpload;
 $("upCancel").onclick = closeUpload;
@@ -1424,6 +1541,17 @@ function fileToBase64(file) {
     r.readAsDataURL(file);
   });
 }
+// งานอัปโหลดที่กำลังทำ (ให้ปุ่มยกเลิก/ปิดหน้าต่างหยุดงานได้)
+let upTask = null;
+function cancelUploadTask() {
+  if (!upTask || upTask.cancelled) return;
+  upTask.cancelled = true;
+  try { upTask.ctrl.abort(); } catch { /* */ }
+  api(`/api/tasks/${upTask.id}/cancel`, "POST", {}).catch(() => {});
+  $("upProcTitle").textContent = "กำลังยกเลิก…";
+  $("upStop").disabled = true;
+}
+$("upStop").onclick = cancelUploadTask;
 $("upSubmit").onclick = async () => {
   if (!uploadFiles.length) { toast("เลือกไฟล์ก่อน", "error"); return; }
   $("upSubmit").disabled = true;
@@ -1432,15 +1560,24 @@ $("upSubmit").onclick = async () => {
   $("upProcTitle").textContent = "กำลังอ่านไฟล์…";
   $("upProgress").textContent = "";
   $("upErr").textContent = "";
+  $("upStop").disabled = false;
+  const task = upTask = { id: "u" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), ctrl: new AbortController(), cancelled: false };
+  const t0 = Date.now();
+  const tick = () => { const s = Math.round((Date.now() - t0) / 1000); $("upElapsed").textContent = s >= 60 ? `${Math.floor(s / 60)} นาที ${s % 60} วินาที` : `${s} วินาที`; };
+  tick();
+  const timer = setInterval(tick, 1000);
+  // ขั้นตอนที่เซิร์ฟเวอร์ทำอยู่ (ส่งมาทาง SSE) → แสดงบรรทัดล่าสุด
+  TASK_LISTENERS[task.id] = (line) => { if (!task.cancelled) $("upProgress").textContent = line; };
   try {
     const files = [];
     for (const f of uploadFiles) {
+      if (task.cancelled) throw Object.assign(new Error("ยกเลิกแล้ว"), { name: "AbortError" });
       files.push({ filename: f.name, mimeType: f.type, dataBase64: await fileToBase64(f) });
     }
     $("upProcTitle").textContent = "AI กำลังอ่านและสกัดข้อมูลจากเอกสาร…";
     const customer = $("upCustomer").value || "";
     const templateId = ($("upTemplate") || {}).value || "";
-    const r = await api("/api/upload", "POST", { files, customer, templateId });
+    const r = await api("/api/upload", "POST", { files, customer, templateId, taskId: task.id }, { signal: task.ctrl.signal });
     await loadDecls();
     closeUpload();
     // → ขั้นที่ 3: เปิดหน้าตรวจสอบ (detail modal + เอกสารต้นฉบับเป็นภาพ)
@@ -1457,9 +1594,19 @@ $("upSubmit").onclick = async () => {
   } catch (e) {
     // กลับไปขั้นที่ 1 ให้แก้ไฟล์/ลองใหม่ พร้อมข้อความ error
     setUploadStep(1);
-    $("upErr").textContent = "✗ " + e.message;
-    toast("สกัดข้อมูลไม่สำเร็จ: " + e.message, "error");
-  } finally { $("upSubmit").disabled = false; }
+    if (isCancelError(e, task)) {
+      $("upErr").textContent = "ยกเลิกแล้ว — ยังไม่ได้สร้างรายการ เลือกไฟล์แล้วกดใหม่ได้";
+      toast("ยกเลิกการอ่านเอกสารแล้ว", "info");
+    } else {
+      $("upErr").textContent = "✗ " + e.message;
+      toast("สกัดข้อมูลไม่สำเร็จ: " + e.message, "error");
+    }
+  } finally {
+    clearInterval(timer);
+    delete TASK_LISTENERS[task.id];
+    if (upTask === task) upTask = null;
+    $("upSubmit").disabled = false;
+  }
 };
 
 // ============================================================
@@ -1811,10 +1958,13 @@ async function aiDraftRun(isRevise) {
   const btn = isRevise ? $("btnAiRevise") : $("btnAiDraft");
   btn.disabled = true;
   note.textContent = "🤖 AI กำลังดึงอีเมล + วิเคราะห์… (อาจใช้เวลาสักครู่)";
+  const task = startTask(isRevise ? "AI กำลังปรับคู่มือ" : "AI กำลังร่างคู่มือลูกค้า");
+  task.update({ detail: "กำลังดึงอีเมลตัวอย่าง…" });
+  TASK_LISTENERS[task.id] = (line) => { if (!task.cancelled) task.update({ detail: line }); };
   try {
-    const payload = { customer_name: customer, subject };
+    const payload = { customer_name: customer, subject, taskId: task.id };
     if (isRevise) { payload.comment = $("aiComment").value.trim(); payload.previousDraft = $("aiDraftText").value; }
-    const r = await api("/api/customer-settings/ai-draft", "POST", payload);
+    const r = await api("/api/customer-settings/ai-draft", "POST", payload, { signal: task.signal });
     $("aiDraftText").value = r.rules || "";
     $("aiDraftBox").style.display = "block";
     aiLastSampleCount = r.sampleCount || 0;
@@ -1823,9 +1973,13 @@ async function aiDraftRun(isRevise) {
     note.textContent = "";
     toast(isRevise ? "AI ปรับคู่มือแล้ว" : "AI ร่างคู่มือเสร็จ — ตรวจ/แก้ได้", "success");
   } catch (e) {
-    note.textContent = "✗ " + e.message;
-    toast("AI วิเคราะห์ไม่สำเร็จ: " + e.message, "error");
-  } finally { btn.disabled = false; }
+    if (isCancelError(e, task)) { note.textContent = "ยกเลิกแล้ว"; toast("ยกเลิกแล้ว", "info"); }
+    else { note.textContent = "✗ " + e.message; toast("AI วิเคราะห์ไม่สำเร็จ: " + e.message, "error"); }
+  } finally {
+    task.finish();
+    delete TASK_LISTENERS[task.id];
+    btn.disabled = false;
+  }
 }
 
 async function aiSaveCustomer() {
@@ -2185,6 +2339,20 @@ function connectSSE() {
     setDeclStatusLocal(r.id, r.status, r.message);
   });
   es.addEventListener("decl-changed", () => { loadDecls(); });
+  // ขั้นที่ x/y ของงาน RPA ที่ไม่ผูกกับใบ (เช่น แคปหน้าจอ) → อัปเดตช่องหมายเหตุสด ๆ
+  es.addEventListener("job-progress", (e) => {
+    const r = JSON.parse(e.data);
+    if (r.done) { delete JOB_PROGRESS[r.jobId]; if ($("page-captures") && $("page-captures").style.display !== "none") loadCaptures(); return; }
+    if (r.text) JOB_PROGRESS[r.jobId] = r.text;
+    const cell = document.querySelector(`[data-progress="${r.jobId}"]`);
+    if (cell && r.text) cell.textContent = r.text;
+  });
+  // ข้อความความคืบหน้าของงานบนเว็บ (AI อ่านเอกสาร ฯลฯ) → การ์ดความคืบหน้าของงานนั้น
+  es.addEventListener("task-progress", (e) => {
+    const r = JSON.parse(e.data);
+    const fn = TASK_LISTENERS[r.taskId];
+    if (fn) fn(r.line);
+  });
   es.addEventListener("decl-meta", (e) => {
     // RPA capture เลขใบขน DCTK → อัปเดต local
     const r = JSON.parse(e.data);
@@ -2640,57 +2808,95 @@ $("aiMasterFiles").onchange = async (ev) => {
   const cust = (prompt("Master นี้ของลูกค้ารายไหน? (ใส่คำค้นบริษัทใน DCTK เช่น THANAKORN)", "") || "").trim();
   if (!cust) { toast("ยกเลิก — ต้องระบุลูกค้าก่อน", "warn"); return; }
   const btn = $("btnAiMaster"); btn.disabled = true;
-  toast(`กำลังให้ AI อ่าน ${files.length} ไฟล์…`, "info");
+  const task = startTask(`AI ร่าง Master จาก ${files.length} ไฟล์`);
+  task.update({ detail: "กำลังเตรียมไฟล์…" });
+  TASK_LISTENERS[task.id] = (line) => { if (!task.cancelled) task.update({ detail: line }); };
   try {
-    const payload = { customer: cust, files: [] };
+    const payload = { customer: cust, files: [], taskId: task.id };
     for (const f of files) {
       payload.files.push({ filename: f.name, mimeType: f.type || "application/octet-stream", dataBase64: await fileToBase64(f) });
     }
-    const r = await api("/api/templates/ai-draft", "POST", payload);
+    if (task.cancelled) return;
+    task.update({ detail: "AI กำลังอ่านเอกสาร…" });
+    const r = await api("/api/templates/ai-draft", "POST", payload, { signal: task.signal });
     const d = r.draft;
     openMaster(d);
     const miss = (d._guessed || []);
     toast(miss.length
       ? `ร่าง Master ให้แล้ว — ยังขาด: ${miss.join(" · ")} กรุณาเติมก่อนบันทึก`
       : "ร่าง Master ให้แล้ว — ตรวจแล้วกดบันทึกได้เลย", miss.length ? "warn" : "success");
-  } catch (e) { toast("ให้ AI ร่างไม่สำเร็จ: " + e.message, "error"); }
-  finally { btn.disabled = false; }
+  } catch (e) {
+    if (isCancelError(e, task)) toast("ยกเลิกการร่าง Master แล้ว", "info");
+    else toast("ให้ AI ร่างไม่สำเร็จ: " + e.message, "error");
+  } finally {
+    task.finish();
+    delete TASK_LISTENERS[task.id];
+    btn.disabled = false;
+  }
 };
 $("btnReloadMasters").onclick = loadMasters;
 
-/** ตรวจ Master ทุกอันด้วยกฎของกรมฯ แล้วสรุปให้ดูทีเดียว */
+/** ตรวจ Master ทุกอันด้วยกฎของกรมฯ แล้วสรุปให้ดูทีเดียว — ตรวจทีละอัน มีความคืบหน้า กดยกเลิกได้ */
 async function checkAllMasters() {
   const btn = $("btnCheckMasters");
   btn.disabled = true;
+  let task = null;
   try {
-    const r = await api("/api/templates-check");
-    if (!r.enabled) { toast("ยังไม่ได้เปิดใช้คลัง Master", "error"); return; }
-    const bad = r.results.filter((x) => !x.ok);
-    const warn = r.results.filter((x) => x.ok && x.issues.length);
-    const lines = [];
-    for (const x of [...bad, ...warn]) {
-      lines.push(`${x.ok ? "⚠" : "⛔"} ${x.name}`);
-      for (const i of x.issues) {
-        lines.push(`      ${i.level === "error" ? "⛔" : "⚠"} ${i.label}${i.itemLine ? ` (แถว ${i.itemLine})` : ""}: ${i.message}`);
+    const list = await api("/api/templates");
+    if (!list.enabled) { toast("ยังไม่ได้เปิดใช้คลัง Master", "error"); return; }
+    const masters = list.templates || [];
+    if (!masters.length) { toast("ยังไม่มี Master ให้ตรวจ", "info"); return; }
+    task = startTask("ตรวจ Master ทั้งหมด", { total: masters.length });
+    const results = [];
+    for (let i = 0; i < masters.length && !task.cancelled; i++) {
+      const m = masters[i];
+      task.update({ done: i, detail: m.name || "" });
+      try {
+        const r = await api(`/api/templates/${encodeURIComponent(m.id)}/check`, "GET", undefined, { signal: task.signal });
+        results.push({ id: m.id, name: r.name || m.name, customer_name: m.customer_name, ok: r.ok, issues: r.issues || [] });
+      } catch (e) {
+        if (isCancelError(e, task)) break;
+        results.push({ id: m.id, name: m.name, ok: false, issues: [{ level: "error", label: "ตรวจไม่ได้", message: e.message }] });
       }
     }
-    if (!lines.length) {
-      toast(`ตรวจ ${r.total} Master แล้ว — ไม่พบปัญหา`, "success");
-      return;
+    const stopped = task.cancelled;
+    task.finish(); task = null;
+    showMasterCheckResult(results, masters.length, stopped);
+  } catch (e) {
+    if (!isCancelError(e, task)) toast("ตรวจไม่สำเร็จ: " + e.message, "error");
+  } finally {
+    if (task) task.finish();
+    btn.disabled = false;
+  }
+}
+function showMasterCheckResult(results, total, stopped) {
+  const bad = results.filter((x) => !x.ok);
+  const warn = results.filter((x) => x.ok && x.issues.length);
+  const lines = [];
+  for (const x of [...bad, ...warn]) {
+    lines.push(`${x.ok ? "⚠" : "⛔"} ${x.name}`);
+    for (const i of x.issues) {
+      lines.push(`      ${i.level === "error" ? "⛔" : "⚠"} ${i.label}${i.itemLine ? ` (แถว ${i.itemLine})` : ""}: ${i.message}`);
     }
-    // แสดงเป็นบล็อกอ่านง่ายในหน้าเดียวกัน (ไม่ใช้ alert เพราะข้อความยาว)
-    const box = document.createElement("div");
-    box.className = "card";
-    box.style.cssText = "margin:12px 0;white-space:pre-wrap;font-size:13px;line-height:1.7";
-    box.textContent = `ตรวจ ${r.total} Master · มีปัญหาร้ายแรง ${r.failed} อัน · ควรดูเพิ่ม ${warn.length} อัน\n\n` + lines.join("\n");
-    const prev = document.getElementById("msCheckBox");
-    if (prev) prev.remove();
-    box.id = "msCheckBox";
-    const note = $("mastersNote");
-    note.parentNode.insertBefore(box, note.nextSibling);
-    toast(`ตรวจ ${r.total} Master · พบปัญหาร้ายแรง ${r.failed} อัน`, r.failed ? "error" : "warn");
-  } catch (e) { toast("ตรวจไม่สำเร็จ: " + e.message, "error"); }
-  finally { btn.disabled = false; }
+  }
+  const head = stopped
+    ? `ยกเลิกแล้ว — ตรวจไปได้ ${results.length} จาก ${total} Master`
+    : `ตรวจ ${results.length} Master`;
+  const prev = document.getElementById("msCheckBox");
+  if (prev) prev.remove();
+  if (!lines.length) {
+    toast(`${head} — ไม่พบปัญหา`, stopped ? "info" : "success");
+    return;
+  }
+  // แสดงเป็นบล็อกอ่านง่ายในหน้าเดียวกัน (ไม่ใช้ alert เพราะข้อความยาว)
+  const box = document.createElement("div");
+  box.className = "card";
+  box.style.cssText = "margin:12px 0;white-space:pre-wrap;font-size:13px;line-height:1.7";
+  box.textContent = `${head} · มีปัญหาร้ายแรง ${bad.length} อัน · ควรดูเพิ่ม ${warn.length} อัน\n\n` + lines.join("\n");
+  box.id = "msCheckBox";
+  const note = $("mastersNote");
+  note.parentNode.insertBefore(box, note.nextSibling);
+  toast(`${head} · พบปัญหาร้ายแรง ${bad.length} อัน`, bad.length ? "error" : "warn");
 }
 $("btnCheckMasters").onclick = checkAllMasters;
 $("msClose").onclick = closeMaster;

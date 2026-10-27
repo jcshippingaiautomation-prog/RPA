@@ -1668,6 +1668,33 @@ export async function cancelActiveJobs(type?: JobType): Promise<number> {
   }
 }
 
+/**
+ * ยกเลิกงานเดียว (ปุ่ม "ยกเลิก" บนเว็บ)
+ *   pending    → worker จะไม่หยิบไปทำเลย
+ *   processing → worker เห็นภายใน ~2 วินาที แล้วหยุดที่จุดหยุดได้ถัดไป
+ * @return สถานะ "ก่อน" ยกเลิก (null = ไม่พบ / จบไปแล้ว ยกเลิกไม่ได้)
+ */
+export async function cancelJob(jobId: string): Promise<{ was: string; job: JobRow } | null> {
+  const sb = getClient();
+  if (!sb || !jobId) return null;
+  try {
+    const job = await getJob(jobId);
+    if (!job || !["pending", "processing"].includes(job.status)) return null;
+    const { data, error } = await sb
+      .from("job_queue")
+      .update({ status: "cancel" })
+      .eq("id", jobId)
+      .in("status", ["pending", "processing"])
+      .select("id");
+    if (error) throw error;
+    if (!(data ?? []).length) return null;
+    return { was: job.status, job };
+  } catch (err) {
+    console.error("[supabase] cancelJob error:", errMsg(err));
+    return null;
+  }
+}
+
 /** อ่านรายการงานล่าสุด (history) */
 export async function listJobs(limit = 30, type?: JobType): Promise<JobRow[]> {
   const sb = getClient();

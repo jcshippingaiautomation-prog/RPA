@@ -28,6 +28,40 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// ============================================================
+//  ความคืบหน้า + ปุ่มยกเลิก (ใช้ร่วมกันทุกงาน RPA)
+//    runner/capture ตั้ง hook ตอนเริ่มงาน → ขั้นตอนต่าง ๆ เรียก stepProgress()/checkStop()
+//    checkStop() โยน StopRequested เฉพาะ "จุดที่หยุดได้ปลอดภัย" เท่านั้น
+//    (ห้ามเรียกระหว่างยืนยันใบกับกรมฯ — ใบอาจสร้างครึ่ง ๆ กลาง ๆ)
+// ============================================================
+export interface RunProgress { step: number; total: number; label: string; detail?: string; cancellable: boolean }
+export class StopRequested extends Error {
+  constructor() { super("ผู้ใช้กดยกเลิก"); this.name = "StopRequested"; }
+}
+let runHooks: { stop?: () => boolean; progress?: (p: RunProgress) => void } = {};
+let curStep: RunProgress = { step: 0, total: 0, label: "", cancellable: true };
+
+export function setRunHooks(h: { stop?: () => boolean; progress?: (p: RunProgress) => void } | null): void {
+  runHooks = h ?? {};
+  curStep = { step: 0, total: 0, label: "", cancellable: true };
+}
+/** เริ่มขั้นใหม่ — แจ้งเว็บว่าอยู่ขั้นไหน */
+export function stepProgress(step: number, total: number, label: string, cancellable = true): void {
+  curStep = { step, total, label, cancellable };
+  try { runHooks.progress?.({ ...curStep }); } catch { /* ไม่ให้ตัวแจ้งพังแล้วงานล้ม */ }
+}
+/** รายละเอียดย่อยในขั้นเดิม เช่น "รายการ 3/8" */
+export function detailProgress(detail: string): void {
+  try { runHooks.progress?.({ ...curStep, detail }); } catch { /* */ }
+}
+export function stopRequested(): boolean {
+  try { return !!runHooks.stop?.(); } catch { return false; }
+}
+/** จุดหยุดได้: ถ้าผู้ใช้กดยกเลิก → โยน StopRequested */
+export function checkStop(): void {
+  if (stopRequested()) throw new StopRequested();
+}
+
 /** '1500.00' -> '1500'; '1500.50' -> '1500.50' */
 export function stripZeroDecimals(v: unknown): string {
   const s = String(v ?? "").trim();

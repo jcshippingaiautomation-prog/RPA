@@ -48,6 +48,7 @@ import {
   findDeclarationByRef,
   listCaptures,
   cancelActiveJobs,
+  cancelJob,
   listJobs,
   getJob,
   getJobLogs,
@@ -475,7 +476,8 @@ app.post("/api/declarations/:id/reprint", async (req, res) => {
     const headless = (req.body && (req.body as { headless?: boolean }).headless) ?? true;
     const jobId = await enqueueJob(
       "rpa_print",
-      { headless, declId: id, declaration_no: declarationNo },
+      // prevStatus: ถ้าผู้ใช้กดยกเลิก คืนป้ายเดิมให้ (เช่น "สร้างใบแล้ว · รอพิมพ์") ไม่ใช่ "ยกเลิกแล้ว" ที่ชวนกดรันซ้ำ
+      { headless, declId: id, declaration_no: declarationNo, prevStatus: String(decl.status ?? "") },
       { dryRun: false, triggeredBy: req.user?.id ?? null, triggerSource: "manual" },
     );
     if (!jobId) { res.status(409).json({ error: "คิวไม่พร้อม" }); return; }
@@ -515,7 +517,7 @@ app.post("/api/declarations/:id/edit", async (req, res) => {
     // 4) enqueue job แก้ไข
     const jobId = await enqueueJob(
       "rpa_edit",
-      { onlyRows: [row.index], headless, declId: id, declaration_no: declarationNo },
+      { onlyRows: [row.index], headless, declId: id, declaration_no: declarationNo, prevStatus: String(decl.status ?? "") },
       { dryRun: false, triggeredBy: req.user?.id ?? null, triggerSource: "manual" },
     );
     if (!jobId) { res.status(409).json({ error: "คิวไม่พร้อม" }); return; }
@@ -543,14 +545,17 @@ app.post("/api/upload", async (req, res) => {
   const customerHint = (body.customer || "").trim();
   const templateId = (body.templateId || "").trim() || undefined;
   if (!files.length) { res.status(400).json({ error: "ไม่มีไฟล์" }); return; }
+  const task = cancellableTask(req, res, "[UPLOAD]");
   try {
     const attachments = files.map((f) => ({
       filename: f.filename || "upload",
       mimeType: f.mimeType || "application/octet-stream",
       bytes: Buffer.from(f.dataBase64, "base64"),
     }));
-    broadcast("log", { line: `[UPLOAD] 📤 ประมวลผล ${attachments.length} ไฟล์ด้วย AI…` });
-    const { record, customer } = await extractFromAttachments(attachments, (line) => broadcast("log", { line: "[UPLOAD] " + line }), customerHint);
+    task.log(`📤 ประมวลผล ${attachments.length} ไฟล์ด้วย AI…`);
+    const { record, customer } = await extractFromAttachments(attachments, (line) => task.log(line), customerHint);
+    // ⚠ จุดตัดสุดท้าย: ยกเลิกแล้วต้องไม่สร้างรายการ (AI อ่านเสร็จแล้วก็ทิ้งผลไป)
+    task.check();
     const needsReview = record._needs_review === true;
     const created = await createDeclaration(record, {
       source: "upload", status: needsReview ? "new" : "ready", templateId,
@@ -565,10 +570,15 @@ app.post("/api/upload", async (req, res) => {
     broadcast("decl-status", { id: created.id, status: needsReview ? "new" : "ready" });
     res.json({ ok: true, id: created.id, customer, invoice: inv, needsReview, codeFixes: created.codeFixes ?? [] });
   } catch (err) {
+    if (err instanceof TaskCancelled) {
+      broadcast("log", { line: "[UPLOAD] ⏹ ผู้ใช้กดยกเลิก — ไม่ได้สร้างรายการ" });
+      if (!res.headersSent && !res.writableEnded) res.status(409).json({ error: "ยกเลิกแล้ว", cancelled: true });
+      return;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     broadcast("log", { line: "[UPLOAD] ✗ " + msg });
     res.status(500).json({ error: msg });
-  }
+  } finally { task.done(); }
 });
 
 /**
@@ -619,10 +629,24 @@ async function startRun(opts: {
 // ---- Bridge: job_logs (Realtime) → SSE broadcast --------------
 // map kind ใน job_logs → ชื่อ SSE event เดิม (frontend ไม่ต้องแก้)
 function bridgeJobLog(row: JobLogRow): void {
-  // สนใจเฉพาะ log ของงานที่ active อยู่
-  if (state.activeJobId && row.job_id !== state.activeJobId) return;
+  // log สด/แถว: สนใจเฉพาะงานที่ active อยู่ · ความคืบหน้า/สถานะ: ทุกงาน (รันหลายใบพร้อมคิวกัน ใบแรกต้องไม่ค้าง "รอคิว")
+  const isActive = !state.activeJobId || row.job_id === state.activeJobId;
+  if (!isActive && !["progress", "lifecycle", "capture-meta", "document"].includes(row.kind)) return;
   const p = row.payload as Record<string, unknown>;
   switch (row.kind) {
+    case "progress":
+      // ขั้นที่ x/y ของงาน RPA → ป้ายสถานะในรายการใบขน + หน้าแคปหน้าจอ
+      void (async () => {
+        const text = String((p as { text?: string }).text ?? "");
+        broadcast("job-progress", { jobId: row.job_id, ...p });
+        let declId = jobToDeclaration.get(row.job_id);
+        if (!declId) {
+          try { declId = String(((await getJob(row.job_id))?.payload as { declId?: string } | undefined)?.declId ?? "") || undefined; } catch { /* */ }
+          if (declId) jobToDeclaration.set(row.job_id, declId);
+        }
+        if (declId && text) broadcast("decl-status", { id: declId, status: "running", message: text });
+      })();
+      break;
     case "log":
       broadcast("log", p);
       break;
@@ -660,14 +684,17 @@ function bridgeJobLog(row: JobLogRow): void {
         // หา declId: map ในหน่วยความจำก่อน → ถ้าหาย (เช่น server restart) fallback อ่านจาก job payload (persistent)
         let declId = jobToDeclaration.get(row.job_id);
         let isEdit = jobKind.get(row.job_id) === "edit";
+        let isPrint = jobKind.get(row.job_id) === "print";
         if (!declId) {
           try {
             const job = await getJob(row.job_id);
             const jp = (job?.payload ?? {}) as { declId?: string };
             if (jp.declId) declId = jp.declId;
             if (job?.type === "rpa_edit") isEdit = true;
+            if (job?.type === "rpa_print") isPrint = true;
           } catch { /* ignore */ }
         }
+        const mine = row.job_id === state.activeJobId || !state.activeJobId;
         if (ev === "run-start") {
           broadcast("run-start", p);
           if (declId) {
@@ -676,12 +703,27 @@ function bridgeJobLog(row: JobLogRow): void {
             broadcast("decl-status", { id: declId, status: "running", message: m });
           }
         } else if (ev === "run-done") {
-          state.result = (p as { result?: RunResult }).result ?? null;
-          state.running = false;
-          broadcast("run-done", state.result);
-          broadcast("run-end", snapshot());
-          if (declId) {
-            const r = state.result;
+          const r = ((p as { result?: RunResult }).result ?? null) as (RunResult & { draftNo?: string }) | null;
+          if (mine) {
+            state.result = r;
+            state.running = false;
+            broadcast("run-done", state.result);
+            broadcast("run-end", snapshot());
+          }
+          broadcast("job-progress", { jobId: row.job_id, done: true, stopped: !!r?.stopped });
+          if (declId && r?.stopped && !r.declarationCreated) {
+            // ผู้ใช้กดยกเลิก — ไม่ใช่ทั้ง "เสร็จ" และ "ผิดพลาด"
+            let back = "cancelled";
+            try { back = String(((await getJob(row.job_id))?.payload as { prevStatus?: string } | undefined)?.prevStatus || "cancelled"); } catch { /* */ }
+            const msg = isEdit ? "ยกเลิกการแก้ไขแล้ว — หน้าที่บันทึกไปก่อนกดยกเลิกยังอยู่ในใบ"
+              : isPrint ? "ยกเลิกการพิมพ์ใบขนซ้ำแล้ว"
+              : r.draftNo ? `ยกเลิกแล้ว — มีใบร่างค้างใน DCTK เลข ${r.draftNo} (ยังไม่ได้ยื่นกรมฯ ลบเองได้)`
+              : "ยกเลิกแล้ว — ยังไม่ได้สร้างอะไรใน DCTK";
+            void setDeclarationStatus(declId, back, msg, row.job_id);
+            broadcast("decl-status", { id: declId, status: back, message: msg });
+            jobToDeclaration.delete(row.job_id);
+            jobKind.delete(row.job_id);
+          } else if (declId) {
             const ok = r ? (r.errors ?? 0) === 0 : true;
             // status สะท้อนผลจริง:
             //   ok           → edit:"edited" / create:"done" (ได้ใบขนจริง)
@@ -704,19 +746,22 @@ function bridgeJobLog(row: JobLogRow): void {
             jobToDeclaration.delete(row.job_id);
             jobKind.delete(row.job_id);
           }
-          state.activeJobId = null;
+          if (mine) state.activeJobId = null;
         } else if (ev === "run-error") {
-          state.running = false;
           const emsg = (p as { error?: string }).error || "error";
-          broadcast("run-error", { error: emsg });
-          broadcast("run-end", snapshot());
+          broadcast("job-progress", { jobId: row.job_id, done: true, error: emsg });
+          if (mine) {
+            state.running = false;
+            broadcast("run-error", { error: emsg });
+            broadcast("run-end", snapshot());
+          }
           if (declId) {
             void setDeclarationStatus(declId, "error", String(emsg).slice(0, 200), row.job_id);
             broadcast("decl-status", { id: declId, status: "error", message: String(emsg).slice(0, 200) });
             jobToDeclaration.delete(row.job_id);
             jobKind.delete(row.job_id);
           }
-          state.activeJobId = null;
+          if (mine) state.activeJobId = null;
         }
       })();
       break;
@@ -765,6 +810,91 @@ app.post("/api/stop", async (_req, res) => {
   state.stopRequested = true;
   broadcast("log", { line: `[WEB] ส่งคำสั่งยกเลิก ${n} งาน — worker จะหยุดหลังแถวปัจจุบัน` });
   res.json({ ok: true, cancelled: n });
+});
+
+/**
+ * ยกเลิกงาน RPA งานเดียว — ใช้ร่วมกันทั้งปุ่มในรายการใบขนและหน้าแคปหน้าจอ
+ *   ยังรอคิว → ยกเลิกทันที (ไม่มีอะไรเกิดขึ้นใน DCTK)
+ *   กำลังทำ  → worker หยุดที่จุดหยุดได้ถัดไป (ระหว่างหน้า/ระหว่างรายการ)
+ *             ถ้าเข้าขั้นยืนยันใบกับกรมฯ ไปแล้ว จะทำต่อจนจบ — หยุดกลางทางใบจะครึ่ง ๆ กลาง ๆ
+ */
+async function cancelOneJob(jobId: string): Promise<{ ok: boolean; was?: string; message: string }> {
+  const r = await cancelJob(jobId);
+  if (!r) return { ok: false, message: "งานนี้จบไปแล้ว หรือไม่พบงาน — ยกเลิกไม่ได้" };
+  const jp = (r.job.payload ?? {}) as { declId?: string; prevStatus?: string };
+  const declId = String(jp.declId ?? "") || jobToDeclaration.get(jobId) || "";
+  if (r.was === "pending") {
+    const msg = "ยกเลิกแล้ว — ยังไม่ได้เริ่มทำ";
+    const back = jp.prevStatus || "cancelled";   // แก้ไข/พิมพ์ซ้ำ → คืนป้ายเดิม
+    if (declId) {
+      await setDeclarationStatus(declId, back, msg, jobId);
+      broadcast("decl-status", { id: declId, status: back, message: msg });
+      jobToDeclaration.delete(jobId);
+      jobKind.delete(jobId);
+    }
+    if (state.activeJobId === jobId) { state.activeJobId = null; state.running = false; }
+    broadcast("job-progress", { jobId, done: true, stopped: true });
+    return { ok: true, was: r.was, message: msg };
+  }
+  const msg = "กำลังยกเลิก… รอให้ถึงจุดที่หยุดได้ปลอดภัย (ไม่เกิน 1–2 นาที)";
+  if (declId) {
+    await setDeclarationStatus(declId, "running", msg, jobId);
+    broadcast("decl-status", { id: declId, status: "running", message: msg });
+  }
+  broadcast("job-progress", { jobId, cancelling: true, text: msg });
+  return { ok: true, was: r.was, message: msg };
+}
+
+app.post("/api/jobs/:id/cancel", async (req, res) => {
+  const out = await cancelOneJob(String(req.params.id));
+  res.status(out.ok ? 200 : 409).json(out.ok ? out : { error: out.message });
+});
+
+app.post("/api/declarations/:id/cancel", async (req, res) => {
+  const d = await getDeclaration(String(req.params.id));
+  if (!d) { res.status(404).json({ error: "ไม่พบรายการ" }); return; }
+  const jobId = String((d as { last_job_id?: string }).last_job_id ?? "");
+  const out = jobId ? await cancelOneJob(jobId) : { ok: false, message: "ใบนี้ไม่มีงานที่กำลังทำ" };
+  if (!out.ok && ["queued", "running"].includes(String(d.status))) {
+    // งานจบไปแล้วแต่ป้ายยังค้าง (เช่นเว็บหลับตอนงานจบ) → คืนป้ายให้กดรันใหม่ได้
+    await setDeclarationStatus(String(d.id), "cancelled", "ไม่มีงานที่กำลังทำอยู่แล้ว — กดรันใหม่ได้");
+    broadcast("decl-status", { id: d.id, status: "cancelled", message: "ไม่มีงานที่กำลังทำอยู่แล้ว — กดรันใหม่ได้" });
+    res.json({ ok: true, was: "stale", message: "ไม่มีงานที่กำลังทำอยู่แล้ว — กดรันใหม่ได้" });
+    return;
+  }
+  res.status(out.ok ? 200 : 409).json(out.ok ? out : { error: out.message });
+});
+
+// ---- งานที่รันบนเว็บเอง (AI อ่านเอกสาร ฯลฯ) — ยกเลิกได้ด้วย taskId ที่หน้าเว็บสุ่มส่งมา ----
+const cancelledTasks = new Map<string, number>();   // taskId → เวลาที่สั่งยกเลิก (ล้างทิ้งหลัง 1 ชม.)
+class TaskCancelled extends Error { constructor() { super("ผู้ใช้กดยกเลิก"); this.name = "TaskCancelled"; } }
+/**
+ * ตัวช่วยของงานที่ยกเลิกได้
+ *   cancelled() — ผู้ใช้กดยกเลิก หรือปิดหน้าเว็บ/ตัดการเชื่อมต่อไปแล้ว
+ *   log(line)   — ส่งความคืบหน้าให้หน้าเว็บเจ้าของงาน + โยน TaskCancelled ถ้าถูกยกเลิก (หยุดที่ขั้นถัดไป)
+ */
+function cancellableTask(req: Request, res: Response, prefix: string) {
+  const taskId = String((req.body as { taskId?: string } | undefined)?.taskId ?? "").slice(0, 64);
+  let gone = false;
+  res.on("close", () => { if (!res.writableFinished) gone = true; });
+  const cancelled = () => gone || (!!taskId && cancelledTasks.has(taskId));
+  return {
+    taskId,
+    cancelled,
+    check() { if (cancelled()) throw new TaskCancelled(); },
+    log(line: string) {
+      broadcast("log", { line: `${prefix} ${line}` });
+      if (taskId) broadcast("task-progress", { taskId, line });
+      if (cancelled()) throw new TaskCancelled();
+    },
+    done() { if (taskId) cancelledTasks.delete(taskId); },
+  };
+}
+app.post("/api/tasks/:id/cancel", (req, res) => {
+  const now = Date.now();
+  for (const [k, t] of cancelledTasks) if (now - t > 3600_000) cancelledTasks.delete(k);
+  cancelledTasks.set(String(req.params.id).slice(0, 64), now);
+  res.json({ ok: true });
 });
 
 // ---- Jobs (history + replay) -------------------------------
@@ -938,24 +1068,30 @@ app.post("/api/templates/ai-draft", requireUser, async (req, res) => {
   const body = (req.body || {}) as { files?: { filename: string; mimeType?: string; dataBase64: string }[]; customer?: string };
   const files = Array.isArray(body.files) ? body.files : [];
   if (!files.length) { res.status(400).json({ error: "ยังไม่ได้แนบเอกสาร" }); return; }
+  const task = cancellableTask(req, res, "[MASTER]");
   try {
     const attachments = files.map((f) => ({
       filename: f.filename || "upload",
       mimeType: f.mimeType || "application/octet-stream",
       bytes: Buffer.from(f.dataBase64, "base64"),
     }));
-    broadcast("log", { line: `[MASTER] 🤖 ให้ AI อ่าน ${attachments.length} ไฟล์เพื่อร่าง Master…` });
+    task.log(`🤖 ให้ AI อ่าน ${attachments.length} ไฟล์เพื่อร่าง Master…`);
     const { record, customer } = await extractFromAttachments(
-      attachments, (line) => broadcast("log", { line: "[MASTER] " + line }), (body.customer || "").trim());
+      attachments, (line) => task.log(line), (body.customer || "").trim());
+    task.check();
     const prepared = await prepareDeclarationRecord(record);
     const draft = await draftTemplateFromRecord(prepared.record, customer || (body.customer || "").trim());
     broadcast("log", { line: `[MASTER] ✓ ร่าง Master จากใบกำกับ ${String(record.invoice_number ?? "-")} แล้ว — รอผู้ใช้ตรวจ` });
     res.json({ ok: true, draft });
   } catch (err) {
+    if (err instanceof TaskCancelled) {
+      if (!res.headersSent && !res.writableEnded) res.status(409).json({ error: "ยกเลิกแล้ว", cancelled: true });
+      return;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     broadcast("log", { line: "[MASTER] ✗ " + msg });
     res.status(500).json({ error: msg });
-  }
+  } finally { task.done(); }
 });
 
 app.delete("/api/templates/:id", requireUser, async (req, res) => {
@@ -1115,16 +1251,22 @@ app.post("/api/customer-settings/ai-draft", requireAdmin, async (req, res) => {
   const customer = String(body.customer_name ?? "").trim();
   const subject = String(body.subject ?? "").trim();
   if (!subject) { res.status(400).json({ error: "ต้องระบุ Subject ตัวอย่าง" }); return; }
+  const task = cancellableTask(req, res, "[AI-SETUP]");
   try {
     const result = await draftCustomerLogic(
       customer, subject,
       String(body.comment ?? ""), String(body.previousDraft ?? ""),
-      (line) => broadcast("gas-log", { line: "[AI-SETUP] " + line }),
+      (line) => { broadcast("gas-log", { line: "[AI-SETUP] " + line }); task.log(line); },
     );
+    task.check();
     res.json({ ok: true, ...result });
   } catch (err) {
+    if (err instanceof TaskCancelled) {
+      if (!res.headersSent && !res.writableEnded) res.status(409).json({ error: "ยกเลิกแล้ว", cancelled: true });
+      return;
+    }
     res.status(500).json({ error: String((err as Error).message || err) });
-  }
+  } finally { task.done(); }
 });
 
 app.delete("/api/customer-settings", requireAdmin, async (req, res) => {

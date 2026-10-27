@@ -23,6 +23,8 @@ import {
   clearField,
   kendoPickDate,
   waitForPageReady,
+  detailProgress,
+  checkStop,
 } from "./helpers.js";
 import { loadFieldRegistry, resolveSelector } from "./field-registry.js";
 import type { Record } from "./types.js";
@@ -912,6 +914,8 @@ export async function fillPage1(page: Page, r: Record): Promise<void> {
     return { head: head.replace(/\s+/g, " ").trim().slice(0, 80), ref: withNo[0] ?? "" };
   }).catch(() => ({ head: "", ref: "" }));
   log(`  ℹ หลังบันทึกหน้า 1: หัวเรื่อง="${st.head}" · เลขที่ใบขน="${st.ref || "(ยังไม่มี)"}"`);
+  // จำเลขใบร่างไว้ตั้งแต่หน้า 1 — ถ้าผู้ใช้กดยกเลิกก่อนถึงหน้า 2 จะได้บอกได้ว่าใบร่างเลขไหนค้างอยู่
+  if (st.ref && !r.__declaration_no__) r.__declaration_no__ = st.ref.toUpperCase();
   // ดึงข้อความจากกล่องข้อความทุกกล่อง "ไม่ว่าจะมองเห็นหรือไม่" — DCTK ซ่อน/โชว์ด้วย css หลายแบบ
   const boxes = await page.evaluate(() => {
     const out: string[] = [];
@@ -1679,6 +1683,8 @@ export async function fillPage3(page: Page, r: Record): Promise<void> {
     const item = items[i];
     const isLast = i === items.length - 1;
     log(`  • รายการ ${i + 1}/${items.length}: ${String(item.description ?? "").slice(0, 40)}`);
+    if (items.length > 1) detailProgress(`รายการ ${i + 1}/${items.length}`);
+    checkStop();   // หยุดได้ระหว่างรายการ (รายการที่บันทึกแล้วอยู่ในใบร่าง)
 
     await fillOneGoodsItem(page, r, item, i, items.length);
 
