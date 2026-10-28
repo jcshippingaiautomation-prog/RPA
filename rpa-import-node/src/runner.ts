@@ -132,7 +132,7 @@ export interface RunResult {
   errors: number;
   skipped: number;
   stopped: boolean;
-  /** ถูกยกเลิกหลังบันทึกหน้าแรกแล้ว → มีใบร่างค้างใน DCTK เลขนี้ (ผู้ใช้ลบเองได้) */
+  /** ยกเลิก/พังหลังบันทึกหน้าแรกแล้ว → มีใบร่างค้างใน DCTK เลขนี้ (ผู้ใช้ลบเองได้) · worker ใช้กันการรันใหม่อัตโนมัติ */
   draftNo?: string;
   /** true ถ้ามี record ที่สร้างใบใน DCTK สำเร็จแล้ว (ได้ declaration_no) — worker ใช้กันการ retry ที่จะสร้างใบซ้ำ */
   declarationCreated?: boolean;
@@ -1080,6 +1080,15 @@ async function runBrowser(
         break;
       }
       log(`  ✗ Record ${i} error: ${msg}`);
+      // บันทึกหน้า 1 ไปแล้ว = มีใบร่างค้างใน DCTK → worker ต้องไม่รันใหม่ทั้งงาน (ได้ใบร่างเพิ่มทุกรอบ)
+      {
+        const draft = typeof record.__declaration_no__ === "string" ? record.__declaration_no__
+          : record.__page1_saved__ ? "(ไม่ทราบเลข — ดูในรายการใบขนของ DCTK)" : "";
+        if (draft && !opts.dryRun) {
+          result.draftNo = draft;
+          log(`    ℹ มีใบร่างค้างใน DCTK เลข ${draft} (ยังไม่ได้ยื่นกรมฯ) — แก้ข้อมูลแล้วรันใหม่ หรือลบใบร่างนี้ได้`);
+        }
+      }
       const shot = path.join(PROJECT_ROOT, `error_record_${i}.png`);
       try {
         await page.screenshot({ path: shot, fullPage: true });

@@ -126,7 +126,9 @@ async function runRpaImport(job: JobRow): Promise<void> {
   //    ถ้าใบสร้างแล้วแต่พิมพ์พลาด → auto-reprint ใน runner จัดการเอง (ไม่ retry ทั้งงาน)
   let result = await runOnce();
   for (let attempt = 2; attempt <= 3; attempt++) {
-    const failedBeforeCreate = result.errors > 0 && !result.declarationCreated && !result.stopped && !dryRun;
+    // ⚠ มีใบร่างแล้ว (บันทึกหน้า 1 ผ่าน) = DCTK ไม่ได้ล่ม แต่ข้อมูลไม่ผ่าน เช่น พิกัดที่ DCTK ไม่มี
+    //   รันใหม่ก็พังที่เดิม แถมได้ใบร่างเพิ่มทุกรอบ (เจอจริง COCOS CTN2663: 6 ใบร่าง · 14 นาที × 2)
+    const failedBeforeCreate = result.errors > 0 && !result.declarationCreated && !result.stopped && !dryRun && !result.draftNo;
     if (!failedBeforeCreate) break;
     await appendLog(job.id, "log", {
       line: `[WORKER] ↻ รอบ ${attempt - 1} ไม่สำเร็จ (DCTK ช้า/ล่ม ก่อนสร้างใบ) — ลองใหม่อัตโนมัติ (รอบ ${attempt}/3)`,
@@ -145,6 +147,7 @@ async function runRpaImport(job: JobRow): Promise<void> {
     const st = declDocUploaded ? "done" : (result.declarationCreated ? "partial" : "error");
     const msg = declDocUploaded ? "กรอก + พิมพ์ใบขนเสร็จ"
       : result.declarationCreated ? "สร้างใบใน DCTK แล้ว แต่ยังไม่ได้ไฟล์ใบขนจริง — กดพิมพ์ใบขนซ้ำในเว็บ"
+      : result.draftNo ? `RPA มีข้อผิดพลาด — ดูประวัติงาน · มีใบร่างค้างใน DCTK เลข ${result.draftNo} (ยังไม่ได้ยื่นกรมฯ) แก้ข้อมูลแล้วรันใหม่ หรือลบใบร่างนี้ได้`
       : "RPA มีข้อผิดพลาด — ดูประวัติงาน";
     await setDeclarationStatus(declId, { status: st, status_message: msg });
   }
