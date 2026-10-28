@@ -1578,8 +1578,11 @@ $("upSubmit").onclick = async () => {
     const customer = $("upCustomer").value || "";
     const templateId = ($("upTemplate") || {}).value || "";
     const r = await api("/api/upload", "POST", { files, customer, templateId, taskId: task.id }, { signal: task.ctrl.signal });
-    await loadDecls();
+    // งานเสร็จแล้ว → ปลดก่อนปิดหน้าต่าง ไม่งั้น closeUpload() ถามว่า "ยกเลิกไหม" แล้วถ้าตอบไม่ หน้าต่างค้างหมุนทั้งที่สร้างรายการแล้ว
+    if (upTask === task) upTask = null;
+    clearInterval(timer);
     closeUpload();
+    await loadDecls().catch(() => {});   // รายการสร้างแล้ว — โหลดตารางพลาดก็ไม่ใช่ "สกัดไม่สำเร็จ"
     // → ขั้นที่ 3: เปิดหน้าตรวจสอบ (detail modal + เอกสารต้นฉบับเป็นภาพ)
     // ระบบปรับหน่วย/สกุลเงินให้ตรงรหัสกรมฯ → บอกผู้ใช้ด้วย จะได้ตรวจว่าถูกไหม
     if (r && Array.isArray(r.codeFixes) && r.codeFixes.length) {
