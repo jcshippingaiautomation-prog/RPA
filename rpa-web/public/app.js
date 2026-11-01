@@ -44,13 +44,13 @@ function fmtDate(iso) {
   } catch { return iso; }
 }
 let toastTimer = null;
-function toast(msg, kind = "info") {
+function toast(msg, kind = "info", ms = 3500) {
   const t = $("toast");
   t.textContent = msg;
   t.className = "toast t-" + kind;
   t.style.display = "block";
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.style.display = "none"), 3500);
+  toastTimer = setTimeout(() => (t.style.display = "none"), ms);
 }
 
 // ============================================================
@@ -1585,14 +1585,23 @@ $("upSubmit").onclick = async () => {
     await loadDecls().catch(() => {});   // รายการสร้างแล้ว — โหลดตารางพลาดก็ไม่ใช่ "สกัดไม่สำเร็จ"
     // → ขั้นที่ 3: เปิดหน้าตรวจสอบ (detail modal + เอกสารต้นฉบับเป็นภาพ)
     // ระบบปรับหน่วย/สกุลเงินให้ตรงรหัสกรมฯ → บอกผู้ใช้ด้วย จะได้ตรวจว่าถูกไหม
-    if (r && Array.isArray(r.codeFixes) && r.codeFixes.length) {
-      const lines = r.codeFixes.slice(0, 4).map((f) => `${f.label}: ${f.from} → ${f.to}`).join(" · ");
-      toast(`ปรับให้ตรงรหัสกรมฯ ${r.codeFixes.length} ช่อง — ${lines}`, "success");
-    }
     if (r && r.id) {
       openDetail(r.id, { wizard: true });
     } else {
       toast(`สร้างรายการแล้ว: ${r.customer || ""} ${r.invoice ? "/ " + r.invoice : ""}`, "success");
+    }
+    // แจ้งท้ายสุด ไม่ให้ข้อความอื่นทับ
+    const fixes = (r && Array.isArray(r.codeFixes)) ? r.codeFixes : [];
+    const codeOnly = fixes.filter((f) => !f.master);
+    const byMaster = fixes.filter((f) => f.master);
+    if (codeOnly.length) {
+      const lines = codeOnly.slice(0, 4).map((f) => `${f.label}: ${f.from} → ${f.to}`).join(" · ");
+      toast(`ปรับให้ตรงรหัสกรมฯ ${codeOnly.length} ช่อง — ${lines}`, "success");
+    }
+    // เอกสารเขียนไม่ตรง Master (เช่น พิกัด) → ระบบใช้ค่า Master แต่ผู้ใช้ต้องรู้และตรวจ
+    if (byMaster.length) {
+      const lines = [...new Set(byMaster.map((f) => `${f.label}: เอกสารเขียน ${f.from} → ใช้ ${f.to}`))].slice(0, 3).join(" · ");
+      toast(`⚠ ใช้ค่าตาม Master แทนที่เอกสารเขียน ${byMaster.length} รายการ — ${lines} · ตรวจก่อนรัน`, "error", 10000);
     }
   } catch (e) {
     // กลับไปขั้นที่ 1 ให้แก้ไฟล์/ลองใหม่ พร้อมข้อความ error

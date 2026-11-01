@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { config } from "./config.js";
-import { splitRecord, rowToFields } from "./field-registry.js";
+import { splitRecord, rowToFields, loadRegistry } from "./field-registry.js";
 import { applyTemplate } from "./master-template.js";
 import { normalizeToDctkCodes } from "./normalize-codes.js";
 
@@ -995,6 +995,10 @@ export async function prepareDeclarationRecord(
     );
     record = mastered.record;
     const fieldModes = { ...(mastered.fieldModes ?? {}), ...(opts.fieldModes ?? {}) };
+    // เอกสารเขียนไม่ตรง Master → ใช้ค่า Master แต่ต้องบอกผู้ใช้ (ไม่แก้เงียบ ๆ)
+    for (const n of mastered.masterNotes ?? []) {
+      codeFixes.push({ key: n.key, label: n.label, from: n.from, to: n.to, scope: "item", itemLine: n.itemLine, listLabel: "ตาม Master" });
+    }
 
     // ── หัวใบสรุปหน่วยจากรายการสินค้า ────────────────────────────────
     //   DCTK บังคับให้ "ส่วนควบคุม" (หัวใบ) มีหน่วยด้วย ไม่ใช่แค่ในรายการ
@@ -1042,7 +1046,7 @@ export async function createDeclaration(
     /** บังคับใช้ Master ตัวนี้ (ผู้ใช้เลือกเองตอนอัปโหลด) — ไม่ต้องให้ระบบจับคู่เอง */
     templateId?: string;
   } = {},
-): Promise<{ id: string; codeFixes?: { label: string; from: string; to: string }[] } | null> {
+): Promise<{ id: string; codeFixes?: { label: string; from: string; to: string; master?: boolean }[] } | null> {
   const sb = getClient();
   if (!sb) return null;
   try {
@@ -1071,6 +1075,12 @@ export async function createDeclaration(
     }
     payload.source = opts.source ?? "manual";
     payload.doc_status = false;
+    // เอกสารเขียนค่าไม่ตรงกับ Master → ค้างคำเตือนไว้ในใบ (หน้ารายละเอียดโชว์) ให้ผู้ใช้ตรวจก่อนรัน
+    const mNotes = codeFixes.filter((f) => f.listLabel === "ตาม Master");
+    if (mNotes.length && (await declarationStatusEnabled())) {
+      const uniq = [...new Set(mNotes.map((f) => `${f.label}: เอกสารเขียน ${f.from} → ใช้ ${f.to}`))];
+      payload.status_message = `⚠ ใช้ค่าตาม Master แทนที่เอกสารเขียน (${mNotes.length} รายการ) — ${uniq.slice(0, 3).join(" · ")} · ตรวจก่อนรัน`;
+    }
     if (await declarationStatusEnabled()) {
       // ไม่ใช้ "new" — เริ่มที่ "ready" (พร้อมรัน) เสมอ
       const st = opts.status ?? "ready";
@@ -1083,7 +1093,7 @@ export async function createDeclaration(
     const items = record._items ?? [];
     if (declId && items.length) await insertItems(declId, items);
     // คืนรายการที่ระบบปรับค่าให้ด้วย — ผู้ใช้ควรรู้ว่าเราแก้อะไรไป ไม่ใช่แก้เงียบ ๆ
-    return { id: declId, codeFixes: codeFixes.map((f) => ({ label: f.label, from: f.from, to: f.to })) };
+    return { id: declId, codeFixes: codeFixes.map((f) => ({ label: f.label, from: f.from, to: f.to, master: f.listLabel === "ตาม Master" })) };
   } catch (err) {
     console.error("[supabase] createDeclaration error:", errMsg(err));
     return null;
@@ -1362,6 +1372,8 @@ export async function applyMasterToRecord(
   record: Record<string, unknown> & { _items?: Record<string, unknown>[] };
   fieldModes?: { [k: string]: FieldMode };
   templateName?: string;
+  /** ช่องที่เอกสารเขียนค่ามาไม่ตรงกับที่ Master ล็อกไว้ → ใช้ค่า Master (ให้ผู้ใช้ตรวจ) */
+  masterNotes?: { key: string; label: string; from: string; to: string; itemLine: number }[];
 }> {
   const consigneeName = String(record.consignee_name ?? "");
   const destCountry = String(record.destination_country_code ?? record.dest_country_code ?? "");
@@ -1415,10 +1427,12 @@ export async function applyMasterToRecord(
   //   (ตรงข้ามกับที่ตกลงไว้ว่า "ของตายตัวต่อ consignee ให้มาจาก Master")
   //   → ผสมทีละช่องตามโหมด: master = ทับค่า AI · ai = เติมเฉพาะช่องว่าง · off = ไม่กรอก
   const tplItems = tpl.items ?? [];
+  const masterNotes: { key: string; label: string; from: string; to: string; itemLine: number }[] = [];
   if (!(record._items?.length)) {
     if (tplItems.length) out._items = tplItems.map((it) => ({ ...it }));
   } else if (tplItems.length) {
     const aiItems = record._items as Record<string, unknown>[];
+    const labels = new Map((await loadRegistry()).filter((f) => f.scope === "item").map((f) => [f.key, f.label]));
     out._items = await Promise.all(aiItems.map(async (aiIt, i) => {
       // จับคู่แถวใน Master ด้วย "ชื่อสินค้า" ไม่ใช่ "ลำดับที่"
       //   ชิปเมนต์แต่ละครั้งมีสินค้าไม่เหมือนกันและไม่เรียงเหมือนกัน
@@ -1444,11 +1458,29 @@ export async function applyMasterToRecord(
       const cur = await rowToFields(aiIt, "item");
       const merged = applyTemplate({ ...tpl, header: base }, cur, { includeItems: false });
       const sp = await splitRecord(merged.record, "item", ["line_no", "is_foc"]);
-      return {
+      const outIt: Record<string, unknown> = {
         ...aiIt,
         ...sp.columns,
         extra_fields: { ...((aiIt.extra_fields ?? {}) as object), ...sp.extra },
       };
+      // ⚠ AI ส่งช่องเสริม (พิกัด/รหัสสถิติ ฯลฯ) มาที่ระดับบนของรายการ — ตอนบันทึกค่าระดับบนชนะ extra_fields
+      //   ช่องที่ Master ล็อกไว้จึงโดนค่าจากเอกสารทับเงียบ ๆ
+      //   เจอจริง COCOS CTN2663: Master 000020091100 แต่ใบได้ 000020098990 จากใบกำกับ → DCTK หาพิกัดไม่เจอ
+      //   → เอกสารเขียนค่ามา = ใช้ค่า Master + บันทึกคำเตือนให้ผู้ใช้ตรวจ
+      //   → AI ตอบว่าง = คงไว้แบบเดิม (DCTK เติมเองจากคลังสินค้า ซึ่งเป็นค่าที่ยื่นจริงอยู่ทุกวันนี้
+      //     ตรวจกับ PDF ใบขน 55 ใบแล้ว 1 พ.ย.: Master บางราย เช่น THANAKORN KPV/ALF/VSI ไม่ตรงกับที่ยื่นจริง)
+      for (const k of Object.keys(base)) {
+        if (!(k in sp.extra) || !(k in aiIt)) continue;
+        const docVal = String(aiIt[k] ?? "").trim();
+        if (!docVal) continue;
+        delete outIt[k];
+        const mv = String(sp.extra[k] ?? "").trim();
+        const digits = (s: string) => s.replace(/[^0-9A-Z]/gi, "").toUpperCase();
+        if (mv && digits(docVal) !== digits(mv) && !digits(mv).endsWith(digits(docVal))) {
+          masterNotes.push({ key: k, label: labels.get(k) ?? k, from: docVal, to: mv, itemLine: i + 1 });
+        }
+      }
+      return outIt;
     }));
     console.log(`[master] ผสมค่าจาก Master ลงรายการสินค้า ${aiItems.length} รายการ`);
   }
@@ -1456,7 +1488,10 @@ export async function applyMasterToRecord(
   if (changed) {
     console.log(`[master] ใช้ Master "${tpl.name}" กับ ${customer}/${invoice} — ทับ ${applied.overridden.length} · เติม ${applied.filled.length} ช่อง`);
   }
-  return { record: out, fieldModes: applied.fieldModes, templateName: tpl.name };
+  for (const n of masterNotes) {
+    console.log(`[master] ⚠ รายการ ${n.itemLine}: ${n.label} เอกสารเขียน "${n.from}" → ใช้ "${n.to}" ตาม Master`);
+  }
+  return { record: out, fieldModes: applied.fieldModes, templateName: tpl.name, masterNotes };
 }
 
 export async function insertDeclaration(
