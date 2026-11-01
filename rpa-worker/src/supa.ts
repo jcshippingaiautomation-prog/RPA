@@ -53,7 +53,7 @@ export async function listCustomerSettings(): Promise<CustomerSetting[]> {
 export async function uploadDocument(
   filePath: string,
   meta: { customer?: string | null; invoice?: string | null; kind: string; declarationId?: string | null },
-): Promise<{ filename: string } | null> {
+): Promise<{ filename: string; storage_path: string; public_url: string | null } | null> {
   try {
     const sb = workerSupabase();
     const filename = path.basename(filePath);
@@ -89,7 +89,7 @@ export async function uploadDocument(
       ins = await sb.from("documents").insert(legacy).select().single();
       if (ins.error) throw ins.error;
     }
-    return { filename };
+    return { filename, storage_path: storagePath, public_url: (record.public_url as string | null) ?? null };
   } catch (err) {
     console.error("[worker] uploadDocument error:", err);
     return null;

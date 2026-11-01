@@ -1353,7 +1353,7 @@ async function loadCaptures() {
   const used = new Set();
   const rows = jobs.map((j) => {
     const r = j.result || {};
-    let file = r.file || null;
+    let file = r.file && r.file.storage_path ? r.file : null;   // งานรุ่นแรกแนบแค่ชื่อไฟล์ → จับคู่ด้วยเวลาแทน
     if (file) used.add(file.storage_path);
     else if (j.status === "done" && r.done) {
       const end = new Date(j.finished_at || j.created_at).getTime();
