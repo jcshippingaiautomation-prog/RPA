@@ -465,12 +465,19 @@ function updateStats() {
   $("cDone").textContent = rows.filter((d) => effStatus(d) === "done").length;
 }
 
+// ตารางกว้างเกินจอ → ใส่เงาที่คอลัมน์ "จัดการ" (ตรึงขวา) ให้รู้ว่ายังมีข้อมูลซ่อนอยู่ เลื่อนดูได้
+function markTableOverflow() {
+  const wrap = document.querySelector("#page-list .card-table") || $("listBody")?.closest(".card-table");
+  if (wrap) wrap.classList.toggle("is-overflow", wrap.scrollWidth > wrap.clientWidth + 1);
+}
+window.addEventListener("resize", () => markTableOverflow());
+
 function renderList() {
   const rows = filteredDecls();
   const body = $("listBody");
   if (!rows.length) {
     // ชี้ทางต่อให้ชัด — และไม่พูดถึง "ดึงอีเมล" เพราะปิดถาวรแล้ว
-    body.innerHTML = `<tr><td colspan="10" class="empty">
+    body.innerHTML = `<tr><td colspan="9" class="empty">
       <div style="font-weight:600;margin-bottom:6px">ยังไม่มีใบขนในระบบ</div>
       <div class="muted" style="margin-bottom:12px">เริ่มจากอัปโหลดเอกสารของลูกค้า แล้วให้ AI อ่านข้อมูลให้</div>
       <button class="btn btn-primary btn-sm" onclick="document.getElementById('btnUpload').click()">อัปโหลดเอกสาร</button>
@@ -485,21 +492,20 @@ function renderList() {
     return `<tr data-id="${d.id}">
       <td class="w-chk"><input type="checkbox" class="rowChk" data-id="${d.id}" ${checked} /></td>
       <td><div class="cust">${escapeHtml(d.customer_name || "—")}</div></td>
-      <td class="muted-cell">${escapeHtml(d.consignee_name || "—")}</td>
-      <td class="muted-cell">${escapeHtml(d.invoice_number || "—")}</td>
+      <td class="muted-cell cons-cell"><div class="clamp2" title="${escapeHtml(d.consignee_name || "")}">${escapeHtml(d.consignee_name || "—")}</div></td>
+      <td class="muted-cell inv-cell"><div>${escapeHtml(d.invoice_number || "—")}</div>${sourceBadge(d.source)}</td>
       <td class="muted-cell prod-cell" title="${escapeHtml(prodCodes(d).join(" · "))}">${
         prodCodes(d).length
           ? prodCodes(d).slice(0, 2).map((c) => `<span class="chip-tag chip-product">${escapeHtml(c)}</span>`).join("")
             + (prodCodes(d).length > 2 ? `<span class="muted" style="font-size:11px"> +${prodCodes(d).length - 2}</span>` : "")
           : "—"
       }</td>
-      <td class="muted-cell">${escapeHtml(d.etd || "—")}</td>
-      <td class="muted-cell">${escapeHtml(fmtMoney(d.total_goods_amount, d.currency))}</td>
-      <td>${sourceBadge(d.source)}</td>
+      <td class="muted-cell nowrap">${escapeHtml(d.etd || "—")}</td>
+      <td class="muted-cell nowrap">${escapeHtml(fmtMoney(d.total_goods_amount, d.currency))}</td>
       <td>${statusBadge(d.status, d.status_message, d.doc_status, { clickable: effStatus(d) === "error" || effStatus(d) === "partial", id: d.id })}${runProgressHtml(d)}</td>
-      <td class="ta-right">
+      <td class="ta-right col-act">
         <div class="row-actions">
-          <button class="btn btn-ghost btn-xs actDetail" data-id="${d.id}" title="ดู/แก้ไขรายละเอียด">${svgIcon("list", 13)} รายละเอียด</button>
+          <button class="btn btn-ghost btn-xs icon-only actDetail" data-id="${d.id}" title="ดู/แก้ไขรายละเอียด (หรือคลิกที่แถว)">${svgIcon("list", 14)}</button>
           <button class="btn btn-ghost btn-xs icon-only actCopy" data-id="${d.id}" title="สร้างสำเนา">${svgIcon("copy", 14)}</button>
           <button class="btn btn-ghost btn-xs icon-only actDelete" data-id="${d.id}" title="ลบรายการ">${svgIcon("trash", 14)}</button>
           <span class="row-actions-sep"></span>
@@ -509,12 +515,13 @@ function renderList() {
           ${(() => {
             // เปิดดูไฟล์ได้เมื่อ: มีไฟล์ (doc_status) หรือ รันเสร็จแล้ว/มีเลขใบขน (กันเคส doc_status ยังไม่ sync)
             const canView = d.doc_status || effStatus(d) === "done" || effStatus(d) === "partial" || !!String(d.declaration_no ?? "").trim();
-            return `<button class="btn btn-ghost btn-xs actFiles ${canView ? "" : "is-empty"}" data-id="${d.id}" ${canView ? "" : "disabled"} title="${canView ? "ดูใบขน PDF และภาพหน้าจอขั้นตอนการนำเข้า" : "ยังไม่มีไฟล์ — ต้องนำเข้าระบบกรมฯ ก่อน"}">${svgIcon("file", 13)} ดูไฟล์</button>`;
+            return `<button class="btn btn-ghost btn-xs actFiles ${canView ? "" : "is-empty"}" data-id="${d.id}" ${canView ? "" : "disabled"} title="${canView ? "ดูใบขน PDF และภาพหน้าจอขั้นตอนการนำเข้า" : "ยังไม่มีไฟล์ — ต้องนำเข้าระบบกรมฯ ก่อน"}">${svgIcon("file", 13)}<span class="lbl"> ดูไฟล์</span></button>`;
           })()}
         </div>
       </td>
     </tr>`;
   }).join("");
+  markTableOverflow();
   // events
   // คลิกที่แถวตรงไหนก็เปิดรายละเอียด (ยกเว้นคลิกปุ่ม/checkbox/badge ที่คลิกได้ — ให้ตัวนั้นทำงานเอง)
   body.querySelectorAll("tr[data-id]").forEach((tr) => (tr.onclick = (e) => {

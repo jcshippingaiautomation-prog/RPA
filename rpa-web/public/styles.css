@@ -717,3 +717,39 @@ tr.ms-group > td {
 .cap-items tr.is-off td:first-child { opacity: 1; }
 .cap-more { margin-top: 12px; font-size: 13px; }
 .cap-more summary { cursor: pointer; color: var(--muted2); }
+
+/* ── ตารางรายการใบขนบนจอโน้ตบุ๊ก (1 พ.ย. 2569) ──
+   - ปุ่ม "รายละเอียด" เหลือไอคอน (คลิกแถวก็เปิดได้อยู่แล้ว)
+   - "แหล่งที่มา" ย้ายไปอยู่ใต้เลข Invoice
+   - คอลัมน์ "จัดการ" ตรึงไว้ขวาสุด → จอแคบจนตารางต้องเลื่อน ก็ยังเห็นปุ่มรันเสมอ */
+.card-table > .dt { min-width: 900px; }
+.dt td.nowrap { white-space: nowrap; }
+.dt td.cons-cell { max-width: 210px; }
+.clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.dt td.inv-cell .src { margin-top: 3px; font-size: 10.5px; padding: 1px 7px; }
+.row-actions .actDetail { min-width: 30px; }
+.row-actions { flex-wrap: nowrap; }
+.dt .col-act {
+  position: sticky; right: 0; z-index: 1;
+  background: var(--card);
+}
+.card-table.is-overflow .dt .col-act { box-shadow: -8px 0 10px -8px rgba(15,30,61,.22); }
+.dt thead .col-act { background: #fafbfd; }
+#listBody tr[data-id]:hover .col-act { background: #f2f6ff; }
+.dt td .st { white-space: nowrap; }
+.dt td.prod-cell { max-width: 150px; }
+/* จอโน้ตบุ๊ก — ลดช่องไฟซ้าย/ขวาของแต่ละช่อง ให้ตารางพอดีจอโดยไม่ต้องเลื่อน */
+@media (max-width: 1500px) {
+  .dt th, .dt td { padding: 10px 8px; }
+  .dt th:first-child, .dt td:first-child { padding-left: 14px; }
+  .dt .col-act { padding-right: 12px; }
+  .row-actions { gap: 4px; }
+  .row-actions-sep { margin: 4px 2px; }
+}
+/* จอแคบกว่านี้ — "ดูไฟล์" เหลือไอคอน (ชี้ค้างมีคำอธิบาย) + ย่อช่องรหัสสินค้า */
+@media (max-width: 1360px) {
+  .row-actions .actFiles { min-width: 30px; padding-left: 8px; padding-right: 8px; }
+  .row-actions .actFiles .lbl { display: none; }
+  .dt td.prod-cell { max-width: 118px; }
+  .dt td.cons-cell { max-width: 165px; }
+}
