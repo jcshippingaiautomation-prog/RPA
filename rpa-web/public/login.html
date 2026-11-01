@@ -3,49 +3,240 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>เข้าสู่ระบบ — JC Shipping RPA</title>
-  <link rel="stylesheet" href="styles.css" />
+  <title>เข้าสู่ระบบ — DCTK Automation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="preload" as="image" href="img/login-port.jpg" />
   <style>
-    .login-wrap {
-      min-height: 100vh; display: flex; align-items: center; justify-content: center;
-      background: var(--bg, #0f172a);
+    :root {
+      --navy: #14224e;
+      --navy-2: #0f1b3d;
+      --navy-ink: #0f1e3d;
+      --primary: #1e3a8a;
+      --primary-dark: #172b66;
+      --gold: #c9a24a;
+      --text: #0f1e3d;
+      --muted: #5b6780;
+      --border: #d6dce6;
+      --field: #f8fafc;
+      --red: #b91c1c;
+      --green: #15803d;
     }
-    .login-card {
-      background: #fff; border-radius: 14px; padding: 32px 28px; width: 360px;
-      box-shadow: 0 10px 40px rgba(0,0,0,.25);
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body {
+      font-family: "Sarabun", "Noto Sans Thai", "Segoe UI", sans-serif;
+      font-size: 16px; line-height: 1.55; color: var(--text); background: #eef1f6;
+      -webkit-font-smoothing: antialiased;
     }
-    .login-card h1 { font-size: 20px; margin: 0 0 4px; color: #1e293b; }
-    .login-card p.sub { margin: 0 0 20px; color: #64748b; font-size: 13px; }
-    .login-card label { display: block; font-size: 13px; color: #334155; margin: 12px 0 4px; }
-    .login-card input {
-      width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px;
-      font-family: inherit; font-size: 14px; box-sizing: border-box;
+    .icon { display: inline-block; vertical-align: middle; flex-shrink: 0; }
+    .ico-wrap { display: inline-flex; align-items: center; justify-content: center; line-height: 0; }
+
+    .shell { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+
+    /* ---------- ฝั่งภาพ ---------- */
+    .hero {
+      position: relative; overflow: hidden; color: #fff;
+      background: var(--navy-2) url("img/login-port.jpg") center / cover no-repeat;
+      display: flex; flex-direction: column; justify-content: space-between;
+      padding: 44px 52px;
     }
-    .login-card button {
-      width: 100%; margin-top: 20px; padding: 11px; border: 0; border-radius: 8px;
-      background: #1e3a8a; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
+    .hero::before {
+      content: ""; position: absolute; inset: 0;
+      background:
+        linear-gradient(160deg, rgba(15,27,61,.93) 0%, rgba(20,34,78,.80) 45%, rgba(15,27,61,.92) 100%);
     }
-    .login-card button:disabled { opacity: .6; cursor: default; }
-    .login-msg { margin-top: 14px; font-size: 13px; min-height: 18px; }
-    .login-msg.err { color: #dc2626; }
-    .login-msg.ok { color: #16a34a; }
+    .hero > * { position: relative; }
+    .brand { display: flex; align-items: center; gap: 14px; }
+    .brand-logo {
+      width: 48px; height: 48px; border-radius: 12px;
+      background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.22);
+      display: grid; place-items: center; color: #fff;
+    }
+    .brand-title { font-size: 19px; font-weight: 700; letter-spacing: .2px; }
+    .brand-sub { font-size: 14px; color: #c3cde3; }
+
+    .hero-body { max-width: 520px; }
+    .hero-kicker {
+      display: inline-flex; align-items: center; gap: 10px;
+      font-size: 13px; font-weight: 600; letter-spacing: 1.6px; text-transform: uppercase; color: #e3c97f;
+    }
+    .hero-kicker::before { content: ""; width: 28px; height: 2px; background: var(--gold); }
+    .hero h2 { font-size: 34px; line-height: 1.35; font-weight: 700; margin: 14px 0 12px; }
+    .hero p.lead { font-size: 17px; color: #d3dbec; margin: 0 0 30px; }
+    .features { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+    .features li { display: flex; gap: 14px; align-items: flex-start; }
+    .feat-ico {
+      width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
+      background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.18);
+      display: grid; place-items: center; color: #fff;
+    }
+    .features b { display: block; font-weight: 600; font-size: 16px; }
+    .features span { font-size: 14px; color: #c3cde3; }
+    .hero-foot { font-size: 13px; color: #9fadc9; }
+
+    /* ---------- ฝั่งฟอร์ม ---------- */
+    .panel { display: flex; align-items: center; justify-content: center; padding: 40px 24px; background: #fff; }
+    .form-box { width: 100%; max-width: 400px; }
+    .form-box .seal {
+      width: 52px; height: 52px; border-radius: 14px; margin-bottom: 22px;
+      background: var(--primary); color: #fff; display: grid; place-items: center;
+      box-shadow: 0 8px 20px rgba(30,58,138,.25);
+    }
+    .form-box h1 { font-size: 28px; font-weight: 700; margin: 0 0 6px; color: var(--navy-ink); }
+    .form-box p.sub { margin: 0 0 28px; color: var(--muted); font-size: 15px; }
+
+    .field { margin-bottom: 18px; }
+    .field label { display: block; font-size: 15px; font-weight: 600; color: #26324d; margin-bottom: 7px; }
+    .input-wrap { position: relative; }
+    .input-wrap .lead-ico {
+      position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #8390a8; pointer-events: none;
+    }
+    .input-wrap input {
+      width: 100%; height: 48px; padding: 0 14px 0 44px;
+      border: 1px solid var(--border); border-radius: 10px; background: var(--field);
+      font-family: inherit; font-size: 16px; color: var(--text);
+      transition: border-color .15s, box-shadow .15s, background .15s;
+    }
+    .input-wrap input::placeholder { color: #a3adbf; }
+    .input-wrap input:focus {
+      outline: none; border-color: var(--primary); background: #fff;
+      box-shadow: 0 0 0 4px rgba(30,58,138,.12);
+    }
+    .input-wrap input.has-toggle { padding-right: 48px; }
+    .toggle-pw {
+      position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+      width: 38px; height: 38px; border: 0; border-radius: 8px; background: transparent;
+      color: #6b7891; cursor: pointer; display: grid; place-items: center;
+    }
+    .toggle-pw:hover { background: #eef1f6; color: var(--primary); }
+    .toggle-pw:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+    .caps { display: none; margin-top: 6px; font-size: 13px; color: #b45309; }
+    .caps.on { display: block; }
+
+    .btn-login {
+      width: 100%; height: 50px; margin-top: 8px; border: 0; border-radius: 10px;
+      background: var(--primary); color: #fff; font-family: inherit; font-size: 17px; font-weight: 600;
+      cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+      transition: background .15s, transform .05s;
+    }
+    .btn-login:hover { background: var(--primary-dark); }
+    .btn-login:active { transform: translateY(1px); }
+    .btn-login:focus-visible { outline: 3px solid rgba(30,58,138,.35); outline-offset: 2px; }
+    .btn-login:disabled { opacity: .7; cursor: default; }
+    .btn-login .spin { display: none; }
+    .btn-login.busy .spin { display: inline-flex; animation: spin .8s linear infinite; }
+    .btn-login.busy .go { display: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .login-msg { margin-top: 16px; font-size: 15px; min-height: 22px; }
+    .login-msg:empty { display: none; }
+    .login-msg.err, .login-msg.ok {
+      padding: 10px 14px; border-radius: 10px; border: 1px solid;
+    }
+    .login-msg.err { color: var(--red); background: #fdf2f2; border-color: #f5caca; }
+    .login-msg.ok { color: var(--green); background: #effaf3; border-color: #bfe5cc; }
+    .login-msg:not(.err):not(.ok) { color: var(--muted); }
+
+    .notice {
+      margin-top: 28px; padding-top: 20px; border-top: 1px solid #e6e9ef;
+      display: flex; gap: 10px; align-items: flex-start; font-size: 14px; color: var(--muted);
+    }
+    .notice .ico-wrap { color: #8390a8; margin-top: 2px; }
+    .copy { margin-top: 22px; font-size: 13px; color: #98a2b6; }
+
+    /* ---------- จอเล็ก ---------- */
+    @media (max-width: 900px) {
+      .shell { grid-template-columns: 1fr; }
+      .hero { padding: 28px 20px; min-height: 0; }
+      .hero-body, .hero-foot { display: none; }
+      .panel { align-items: flex-start; padding: 32px 16px 40px; }
+      .form-box .seal { display: none; }
+      .form-box h1 { font-size: 24px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .btn-login.busy .spin { animation: none; }
+    }
   </style>
 </head>
 <body>
-  <div class="login-wrap">
-    <div class="login-card">
-      <h1>JC Shipping RPA</h1>
-      <p class="sub">เข้าสู่ระบบเพื่อใช้งาน</p>
-      <form id="loginForm">
-        <label for="email">อีเมล</label>
-        <input type="email" id="email" autocomplete="username" required />
-        <label for="password">รหัสผ่าน</label>
-        <input type="password" id="password" autocomplete="current-password" required />
-        <button type="submit" id="btnLogin">เข้าสู่ระบบ</button>
-      </form>
-      <div class="login-msg" id="msg"></div>
-    </div>
+  <div class="shell">
+    <!-- ภาพ: ท่าเรือตู้คอนเทนเนอร์ จาก Unsplash (photo-1494412574643) — ใช้ฟรีตาม Unsplash License -->
+    <aside class="hero">
+      <div class="brand">
+        <div class="brand-logo"><i data-icon="package" data-size="24"></i></div>
+        <div>
+          <div class="brand-title">DCTK Automation</div>
+          <div class="brand-sub">ระบบใบขนสินค้าขาออก</div>
+        </div>
+      </div>
+
+      <div class="hero-body">
+        <div class="hero-kicker">JC Shipping</div>
+        <h2>จัดทำใบขนสินค้าขาออก<br />รวดเร็ว ถูกต้อง ตรวจสอบได้</h2>
+        <p class="lead">ระบบช่วยงานพิธีการศุลกากร<br />ตั้งแต่รับเอกสารจากลูกค้า จนได้ใบขนในระบบ DCTK</p>
+        <ul class="features">
+          <li>
+            <div class="feat-ico"><i data-icon="scan-text" data-size="20"></i></div>
+            <div><b>อ่านเอกสารลูกค้าด้วย AI</b><span>Invoice, Packing List และ Booking</span></div>
+          </li>
+          <li>
+            <div class="feat-ico"><i data-icon="bot" data-size="20"></i></div>
+            <div><b>กรอกใบขนใน DCTK อัตโนมัติ</b><span>ใช้ค่ามาตรฐานจาก Master ของลูกค้าแต่ละราย</span></div>
+          </li>
+          <li>
+            <div class="feat-ico"><i data-icon="shield-check" data-size="20"></i></div>
+            <div><b>ตรวจสอบได้ทุกขั้นตอน</b><span>สถานะงาน ภาพหน้าจอ และเอกสาร อยู่ในที่เดียว</span></div>
+          </li>
+        </ul>
+      </div>
+
+      <div class="hero-foot">สำหรับเจ้าหน้าที่ที่ได้รับอนุญาตเท่านั้น</div>
+    </aside>
+
+    <main class="panel">
+      <div class="form-box">
+        <div class="seal"><i data-icon="lock" data-size="24"></i></div>
+        <h1>เข้าสู่ระบบ</h1>
+        <p class="sub">กรุณาลงชื่อเข้าใช้ด้วยบัญชีที่ได้รับจากผู้ดูแลระบบ</p>
+
+        <form id="loginForm" novalidate>
+          <div class="field">
+            <label for="email">อีเมล</label>
+            <div class="input-wrap">
+              <span class="lead-ico"><i data-icon="mail" data-size="18"></i></span>
+              <input type="email" id="email" autocomplete="username" placeholder="name@company.com" required />
+            </div>
+          </div>
+          <div class="field">
+            <label for="password">รหัสผ่าน</label>
+            <div class="input-wrap">
+              <span class="lead-ico"><i data-icon="lock" data-size="18"></i></span>
+              <input type="password" id="password" class="has-toggle" autocomplete="current-password" placeholder="กรอกรหัสผ่าน" required />
+              <button type="button" class="toggle-pw" id="togglePw" aria-label="แสดงรหัสผ่าน" title="แสดงรหัสผ่าน">
+                <i data-icon="eye" data-size="18"></i>
+              </button>
+            </div>
+            <div class="caps" id="capsWarn">แป้น Caps Lock เปิดอยู่</div>
+          </div>
+          <button type="submit" class="btn-login" id="btnLogin">
+            <span class="spin"><i data-icon="loader" data-size="18"></i></span>
+            <span class="label">เข้าสู่ระบบ</span>
+            <span class="go"><i data-icon="arrow-right" data-size="18"></i></span>
+          </button>
+        </form>
+        <div class="login-msg" id="msg" role="status" aria-live="polite"></div>
+
+        <div class="notice">
+          <i data-icon="info" data-size="16"></i>
+          <div>หากลืมรหัสผ่านหรือยังไม่มีบัญชี กรุณาติดต่อผู้ดูแลระบบ</div>
+        </div>
+        <div class="copy" id="copy">© JC Shipping · DCTK Automation</div>
+      </div>
+    </main>
   </div>
+  <script src="icons.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="login.js"></script>
 </body>
