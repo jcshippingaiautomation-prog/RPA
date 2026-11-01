@@ -1332,39 +1332,186 @@ async function cancelJobById(jobId) {
   } catch (e) { toast("ยกเลิกไม่สำเร็จ: " + e.message, "error"); }
   loadCaptures();
 }
+// ── รายการแคปหน้าจอ: 1 แถว = 1 ครั้งที่สั่ง (งาน + ไฟล์ที่ได้) ดูได้ทันทีว่าเสร็จหรือยัง ──
+const CAP_LIVE = ["pending", "claimed", "processing", "running"];
+let capShowAll = false;
+function capSelectText(sel) {
+  if (!sel) return "ทุกหน้า ทุกรายการ";
+  const pages = [sel.header && "หัวใบ", sel.list && "ตารางใบกำกับ/รายการ", sel.invoice && "ฟอร์มใบกำกับ", sel.exchange && "การแลกเปลี่ยนข้อมูล"].filter(Boolean);
+  const items = sel.items || [];
+  const g = items.filter((x) => x.general).length, pr = items.filter((x) => x.privilege).length;
+  const it = items.length ? `รายการ ${items.map((x) => x.no).join(", ")}${g && pr ? "" : g ? " (ทั่วไป)" : " (สิทธิประโยชน์)"}` : "";
+  return [pages.join(" · "), it].filter(Boolean).join(" · ") || "—";
+}
 async function loadCaptures() {
   clearTimeout(capTimer);
   let d;
-  try { d = await api("/api/captures"); } catch (e) { $("capJobs").textContent = "โหลดไม่ได้: " + e.message; return; }
-  const st = { pending: "รอคิว", claimed: "กำลังเริ่ม", processing: "กำลังแคป…", running: "กำลังแคป…", done: "เสร็จ", error: "ไม่สำเร็จ", failed: "ไม่สำเร็จ", cancel: "ยกเลิกแล้ว" };
+  try { d = await api("/api/captures"); } catch (e) { $("capList").textContent = "โหลดไม่ได้: " + e.message; return; }
   const jobs = d.jobs || [];
-  $("capJobs").innerHTML = jobs.length
-    ? `<table class="dt"><thead><tr><th>เวลา</th><th>เลขที่สั่ง</th><th>สถานะ</th><th>หมายเหตุ</th><th></th></tr></thead><tbody>${jobs.map((j) => {
-        const p = j.payload || {}; const r = j.result || {};
-        const live = ["pending", "claimed", "processing", "running"].includes(j.status);
-        const note = live ? (JOB_PROGRESS[j.id] || "")
-          : [r.stopped ? "ยกเลิกโดยผู้ใช้" : "", r.shots && !r.stopped ? `${r.shots} ภาพ` : "", ...(r.notes || []), j.error || ""].filter(Boolean).join(" · ");
-        return `<tr><td>${new Date(j.created_at).toLocaleString("th-TH")}</td><td>${escapeHtml(p.ref || "")}</td>
-          <td>${escapeHtml(st[j.status] || j.status)}${j.status === "done" && r.done === 0 && !r.stopped ? " (ไม่ได้ไฟล์)" : ""}</td>
-          <td class="muted" data-progress="${j.id}">${escapeHtml(note)}</td>
-          <td class="ta-right">${live ? `<button class="btn btn-ghost btn-xs capCancel" data-id="${j.id}">${svgIcon("stop", 13)} ยกเลิก</button>` : ""}</td></tr>`;
-      }).join("")}</tbody></table>`
+  const docs = (d.documents || []).slice();
+  // งานเก่า (ก่อนแนบไฟล์ไว้กับงาน) → จับคู่ไฟล์ด้วยเวลาที่งานจบ
+  const used = new Set();
+  const rows = jobs.map((j) => {
+    const r = j.result || {};
+    let file = r.file || null;
+    if (file) used.add(file.storage_path);
+    else if (j.status === "done" && r.done) {
+      const end = new Date(j.finished_at || j.created_at).getTime();
+      const hit = docs.find((x) => !used.has(x.storage_path) && Math.abs(new Date(x.created_at).getTime() - end) < 120000);
+      if (hit) { used.add(hit.storage_path); file = hit; }
+    }
+    return { at: j.created_at, job: j, file };
+  });
+  // ไฟล์ที่ไม่มีงานคู่ (เช่น แคปตอนสร้างใบตามที่ตั้งใน Master) → แสดงเป็นแถวเสร็จแล้ว
+  for (const x of docs) if (!used.has(x.storage_path)) rows.push({ at: x.created_at, job: null, file: x, doc: x });
+  rows.sort((a, b) => new Date(b.at) - new Date(a.at));
+  const total = rows.length;
+  if (!capShowAll) rows.splice(25);
+  const nDone = rows.filter((x) => x.file).length, nLive = rows.filter((x) => x.job && CAP_LIVE.includes(x.job.status)).length;
+  $("capSummary").textContent = `เสร็จ ${nDone} · กำลังทำ ${nLive}`;
+  $("capList").innerHTML = rows.length ? `<div class="table-scroll"><table class="dt cap-table"><thead><tr>
+      <th>เวลาที่สั่ง</th><th>ใบขน</th><th>ส่วนที่แคป</th><th>สถานะ</th><th class="ta-right">ไฟล์</th></tr></thead><tbody>${rows.map((x) => {
+      const j = x.job, p = (j && j.payload) || {}, r = (j && j.result) || {};
+      const live = j && CAP_LIVE.includes(j.status);
+      const who = [x.doc ? x.doc.customer : p.customer, (x.file && x.file.invoice) || r.invoice || (x.doc && x.doc.invoice)].filter(Boolean).join(" · ");
+      const ref = p.ref || (x.doc && x.doc.invoice) || "";
+      let st;
+      if (x.file) st = `<span class="st st-done">✓ เสร็จแล้ว</span>${r.shots ? ` <span class="muted cap-sub">${r.shots} ภาพ</span>` : ""}`;
+      else if (live) st = `<span class="st st-running">${j.status === "pending" ? "รอคิว" : "กำลังแคป…"}</span><div class="st-progress" data-progress="${j.id}">${escapeHtml(JOB_PROGRESS[j.id] || "")}</div>`;
+      else if (r.stopped || j.status === "cancel") st = `<span class="st st-cancelled">ยกเลิกแล้ว</span>`;
+      else st = `<span class="st st-error">ไม่สำเร็จ</span>`;
+      const notes = [...(r.notes || []), (!x.file && j && j.error) || ""].filter(Boolean).join(" · ");
+      if (notes) st += `<div class="muted cap-sub" title="${escapeHtml(notes)}">${escapeHtml(notes.slice(0, 120))}</div>`;
+      const url = x.file ? dlUrl(x.file.storage_path, x.file.public_url) : "";
+      const act = x.file
+        ? `<a class="btn btn-ghost btn-xs" href="${url}" target="_blank" rel="noopener">${svgIcon("file", 13)} ดู</a>
+           <a class="btn btn-dark btn-xs" href="${url}" download>${svgIcon("download", 13)} ดาวน์โหลด</a>`
+        : live ? `<button class="btn btn-ghost btn-xs capCancel" data-id="${j.id}">${svgIcon("stop", 13)} ยกเลิก</button>`
+        : ref ? `<button class="btn btn-ghost btn-xs capAgain" data-ref="${escapeHtml(ref)}">${svgIcon("refresh", 13)} สั่งใหม่</button>` : "";
+      return `<tr class="${x.file ? "cap-row-done" : ""}"><td class="nowrap">${new Date(x.at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</td>
+        <td><b>${escapeHtml(ref)}</b>${who ? `<div class="muted cap-sub">${escapeHtml(who)}</div>` : ""}</td>
+        <td class="cap-sel">${escapeHtml(x.doc ? "แคปอัตโนมัติตอนสร้างใบ" : capSelectText(p.select || null))}</td>
+        <td>${st}</td><td class="ta-right nowrap">${act}</td></tr>`;
+    }).join("")}</tbody></table></div>`
+    + (total > rows.length ? `<div style="text-align:center;margin-top:8px"><button class="btn btn-ghost btn-sm" id="capMore">แสดงทั้งหมด (${total})</button></div>` : "")
     : '<p class="muted">ยังไม่มีงานแคปหน้าจอ</p>';
-  $("capJobs").querySelectorAll(".capCancel").forEach((b) => (b.onclick = () => cancelJobById(b.dataset.id)));
-  const docs = d.documents || [];
-  $("capFiles").innerHTML = docs.length ? docs.map((doc) => {
-    const url = dlUrl(doc.storage_path, doc.public_url);
-    return `<div class="file-card"><div class="file-pdf">${svgIcon("file", 32)}</div><div class="file-meta">
-      <div class="file-name" title="${escapeHtml(doc.filename)}">${escapeHtml([doc.customer, doc.invoice].filter(Boolean).join(" · ") || doc.filename)}</div>
-      <div class="muted" style="font-size:11px">${new Date(doc.created_at).toLocaleString("th-TH")}</div>
-      <div class="file-actions"><a class="btn btn-ghost btn-xs" href="${url}" target="_blank" rel="noopener">${svgIcon("file", 13)} ดู</a>
-        <a class="btn btn-dark btn-xs" href="${url}" download>${svgIcon("download", 13)} ดาวน์โหลด</a></div></div></div>`;
-  }).join("") : '<p class="muted">ยังไม่มีไฟล์</p>';
+  if ($("capMore")) $("capMore").onclick = () => { capShowAll = true; loadCaptures(); };
+  $("capList").querySelectorAll(".capCancel").forEach((b) => (b.onclick = () => cancelJobById(b.dataset.id)));
+  $("capList").querySelectorAll(".capAgain").forEach((b) => (b.onclick = () => { $("capRef").value = b.dataset.ref; startCapScan(); }));
   // มีงานค้าง → รีเฟรชเองทุก 10 วินาทีตอนอยู่หน้านี้
-  if (jobs.some((j) => ["pending", "claimed", "processing", "running"].includes(j.status)) && $("page-captures").style.display !== "none") {
-    capTimer = setTimeout(loadCaptures, 10000);
-  }
+  if (nLive && $("page-captures").style.display !== "none") capTimer = setTimeout(loadCaptures, 10000);
 }
+
+// ── ขั้นเลือก: ดึงข้อมูลใบ → แสดงหน้า/รายการให้ติ๊ก (ค่าเริ่มต้น = ทุกหน้า ทุกรายการ) → แคปตามที่เลือก ──
+let capScan = null;   // { jobId, ref, timer, t0, data }
+const CAP_PAGES = [
+  ["header", "หน้า 1 · ใบขนสินค้าขาออก (หัวใบ)"],
+  ["list", "หน้า 2 · ตารางใบกำกับ & รายการสินค้า"],
+  ["invoice", "ฟอร์มใบกำกับสินค้า"],
+  ["exchange", "หน้า 3 · การแลกเปลี่ยนข้อมูล"],
+];
+function capPickHtml(inner) { $("capPick").innerHTML = `<div class="cap-pick">${inner}</div>`; }
+async function startCapScan() {
+  const ref = $("capRef").value.trim();
+  if (!ref) { toast("กรุณาใส่เลขอ้างอิง DCTK / เลขใบขน / เลขใบกำกับ", "error"); return; }
+  if (capScan && capScan.timer) clearInterval(capScan.timer);
+  let r;
+  try { r = await api("/api/captures", "POST", { ref, mode: "scan" }); }
+  catch (e) { toast("ดึงข้อมูลใบไม่สำเร็จ: " + e.message, "error"); return; }
+  capScan = { jobId: r.jobId, ref: r.ref, declarationId: r.declarationId, t0: Date.now(), timer: null, data: null };
+  renderCapScanning();
+  capScan.timer = setInterval(pollCapScan, 3000);
+}
+function renderCapScanning(msg) {
+  const s = Math.round((Date.now() - capScan.t0) / 1000);
+  capPickHtml(`<div class="cap-scanning"><span class="task-spin"></span>
+    <div><b>กำลังดึงข้อมูลใบ ${escapeHtml(capScan.ref)}</b>
+      <div class="muted" style="font-size:12px">${escapeHtml(msg || JOB_PROGRESS[capScan.jobId] || "รอคิว…")} · ${s} วินาที</div></div>
+    <button class="btn btn-ghost btn-xs" id="capScanStop">${svgIcon("x", 13)} ยกเลิก</button></div>`);
+  $("capScanStop").onclick = async () => {
+    clearInterval(capScan.timer);
+    await api(`/api/jobs/${encodeURIComponent(capScan.jobId)}/cancel`, "POST", {}).catch(() => {});
+    capScan = null; $("capPick").innerHTML = ""; toast("ยกเลิกการดึงข้อมูลแล้ว", "info");
+  };
+}
+async function pollCapScan() {
+  if (!capScan) return;
+  let j;
+  try { j = (await api(`/api/jobs/${encodeURIComponent(capScan.jobId)}`)).job; } catch { renderCapScanning(); return; }
+  if (CAP_LIVE.includes(j.status)) { renderCapScanning(); return; }
+  clearInterval(capScan.timer); capScan.timer = null;
+  const res = j.result || {};
+  if (j.status === "done" && res.scan) { capScan.data = res.scan; renderCapChoices(); return; }
+  const why = (res.notes || [])[0] || j.error || (res.stopped || j.status === "cancel" ? "ยกเลิกแล้ว" : "ไม่ทราบสาเหตุ");
+  capPickHtml(`<div class="cap-err">${svgIcon("info", 16)} ดึงข้อมูลใบ ${escapeHtml(capScan.ref)} ไม่สำเร็จ — ${escapeHtml(why)}
+    <div class="muted" style="font-size:12px;margin-top:4px">ตรวจเลขใบแล้วลองใหม่ หรือกด "แคปทุกหน้าเลย" เพื่อแคปโดยไม่ต้องเลือก</div></div>`);
+}
+function renderCapChoices() {
+  const d = capScan.data;
+  const inv = d.invoices || [], items = d.items || [];
+  const num = (v) => { const n = Number(v); return Number.isFinite(n) && v !== "" ? n.toLocaleString("en-US", { maximumFractionDigits: 3 }) : (v || ""); };
+  const head = [d.referenceNo, inv.map((x) => x.no).join(", "), inv[0] && inv[0].consignee].filter(Boolean).map(escapeHtml).join(" · ");
+  capPickHtml(`
+    <div class="cap-head">${svgIcon("check", 16)} <b>${head}</b>
+      <span class="muted">· ใบกำกับ ${inv.length} ใบ · รายการสินค้า ${items.length} รายการ</span></div>
+    <div class="cap-step">เลือกหน้า</div>
+    <div class="cap-pages">${CAP_PAGES.map(([k, t]) => `<label class="cap-opt"><input type="checkbox" class="capPg" value="${k}" checked/> ${t}</label>`).join("")}</div>
+    <div class="cap-step">เลือกรายการสินค้า <span class="muted">(แต่ละรายการมี 2 แท็บ)</span></div>
+    ${items.length ? `<div class="table-scroll"><table class="dt cap-items"><thead><tr>
+        <th style="width:44px">ที่</th><th>สินค้า</th><th>พิกัด</th><th class="ta-right">ปริมาณ</th><th class="ta-right">ราคา</th>
+        <th class="ta-center"><label class="cap-colchk"><input type="checkbox" id="capAllGen" checked/> ทั่วไป</label></th>
+        <th class="ta-center"><label class="cap-colchk"><input type="checkbox" id="capAllPriv" checked/> สิทธิประโยชน์/ภาษีอากร</label></th>
+      </tr></thead><tbody>${items.map((it) => `<tr>
+        <td>${it.no}</td>
+        <td><b>${escapeHtml(it.productCode || "")}</b>${it.description && it.description !== it.productCode ? `<div class="muted cap-sub">${escapeHtml(it.description.slice(0, 90))}</div>` : ""}</td>
+        <td class="nowrap">${escapeHtml(it.tariff || "")}</td>
+        <td class="ta-right nowrap">${escapeHtml(num(it.quantity))} ${escapeHtml(it.unit || "")}</td>
+        <td class="ta-right nowrap">${escapeHtml(num(it.amount))} ${escapeHtml(it.currency || "")}</td>
+        <td class="ta-center"><input type="checkbox" class="capGen" data-no="${it.no}" checked/></td>
+        <td class="ta-center"><input type="checkbox" class="capPriv" data-no="${it.no}" checked/></td></tr>`).join("")}</tbody></table></div>`
+      : '<p class="muted">ไม่พบรายการสินค้าในใบนี้</p>'}
+    <div class="cap-foot">
+      <span class="muted" id="capCount"></span>
+      <span style="flex:1"></span>
+      <button class="btn btn-ghost btn-sm" id="capDefault">${svgIcon("refresh", 13)} กลับค่าเริ่มต้น (ทุกหน้า)</button>
+      <button class="btn btn-ghost btn-sm" id="capClose">ปิด</button>
+      <button class="btn btn-dark" id="capGo">${svgIcon("camera", 15)} แคปตามที่เลือก</button>
+    </div>`);
+  const box = $("capPick");
+  const count = () => {
+    const pages = box.querySelectorAll(".capPg:checked").length;
+    const g = box.querySelectorAll(".capGen:checked").length, pr = box.querySelectorAll(".capPriv:checked").length;
+    const n = pages + g + pr;
+    $("capCount").textContent = n ? `จะได้ ${n} ภาพ · ประมาณ ${Math.max(1, Math.round((70 + (g || pr ? Math.max(g, pr) * 15 : 0)) / 60))} นาที` : "ยังไม่ได้เลือกอะไร";
+    $("capGo").disabled = !n;
+    const sync = (all, cls) => { const el = $(all); if (!el) return; const t = box.querySelectorAll(cls).length, c = box.querySelectorAll(cls + ":checked").length; el.checked = c === t; el.indeterminate = c > 0 && c < t; };
+    sync("capAllGen", ".capGen"); sync("capAllPriv", ".capPriv");
+  };
+  box.querySelectorAll("input[type=checkbox]").forEach((el) => (el.onchange = count));
+  const allTo = (id, cls) => { const el = $(id); if (el) el.onchange = () => { box.querySelectorAll(cls).forEach((c) => (c.checked = el.checked)); count(); }; };
+  allTo("capAllGen", ".capGen"); allTo("capAllPriv", ".capPriv");
+  $("capDefault").onclick = () => { box.querySelectorAll("input[type=checkbox]").forEach((c) => { c.checked = true; c.indeterminate = false; }); count(); };
+  $("capClose").onclick = () => { capScan = null; $("capPick").innerHTML = ""; };
+  $("capGo").onclick = async () => {
+    const pg = new Set([...box.querySelectorAll(".capPg:checked")].map((c) => c.value));
+    const byNo = {};
+    box.querySelectorAll(".capGen:checked").forEach((c) => ((byNo[c.dataset.no] ??= { no: Number(c.dataset.no) }).general = true));
+    box.querySelectorAll(".capPriv:checked").forEach((c) => ((byNo[c.dataset.no] ??= { no: Number(c.dataset.no) }).privilege = true));
+    const sel = { header: pg.has("header"), list: pg.has("list"), invoice: pg.has("invoice"), exchange: pg.has("exchange"),
+      items: Object.values(byNo).sort((a, b) => a.no - b.no) };
+    // เลือกครบทุกอย่าง = ไม่ต้องส่งรายการเลือก (แคปทุกหน้า ทุกรายการ — ถ้าใบมีรายการเพิ่มทีหลังก็ได้ครบ)
+    const all = pg.size === CAP_PAGES.length && !box.querySelector(".capGen:not(:checked), .capPriv:not(:checked)");
+    $("capGo").disabled = true;
+    try {
+      await requestCapture({ ref: capScan.ref, ...(all ? {} : { select: sel }) });
+      capScan = null; $("capPick").innerHTML = ""; $("capRef").value = "";
+      loadCaptures();
+    } catch (e) { $("capGo").disabled = false; toast("ส่งคำสั่งแคปหน้าจอไม่สำเร็จ: " + e.message, "error"); }
+  };
+  count();
+}
+$("btnCapScan").onclick = startCapScan;
+$("capRef").addEventListener("keydown", (e) => { if (e.key === "Enter") startCapScan(); });
 $("btnCapture").onclick = async () => {
   const ref = $("capRef").value.trim();
   if (!ref) { toast("กรุณาใส่เลขอ้างอิง DCTK / เลขใบขน / เลขใบกำกับ", "error"); return; }
@@ -1837,7 +1984,7 @@ $("btnClearSel").onclick = () => { selected.clear(); renderList(); };
 const PAGE_META = {
   list: { title: "รายการใบขน", sub: "จัดการใบขนสินค้าทั้งหมดในที่เดียว" },
   masters: { title: "คลัง Master", sub: "ชุดค่าที่ใช้ซ้ำได้ของลูกค้าแต่ละราย แยกตาม Consignee และรหัสสินค้า" },
-  captures: { title: "แคปหน้าจอใบขน", sub: "แคปทุกหน้าของใบขนใน DCTK เป็น PDF (อ่านอย่างเดียว)" },
+  captures: { title: "แคปหน้าจอใบขน", sub: "เลือกหน้าและรายการที่จะแคปจากใบขนใน DCTK เป็น PDF (อ่านอย่างเดียว)" },
   history: { title: "ประวัติงาน", sub: "ประวัติการนำเข้าและเอกสารที่ระบบสร้าง" },
   settings: { title: "ตั้งค่า", sub: "Allowlist · AI · ตารางเวลา · RPA · ลูกค้า" },
 };
@@ -2354,7 +2501,12 @@ function connectSSE() {
   // ขั้นที่ x/y ของงาน RPA ที่ไม่ผูกกับใบ (เช่น แคปหน้าจอ) → อัปเดตช่องหมายเหตุสด ๆ
   es.addEventListener("job-progress", (e) => {
     const r = JSON.parse(e.data);
-    if (r.done) { delete JOB_PROGRESS[r.jobId]; if ($("page-captures") && $("page-captures").style.display !== "none") loadCaptures(); return; }
+    if (r.done) {
+      delete JOB_PROGRESS[r.jobId];
+      if (capScan && capScan.jobId === r.jobId) { pollCapScan(); return; }   // ดึงข้อมูลใบเสร็จ → โชว์ตัวเลือกทันที
+      if ($("page-captures") && $("page-captures").style.display !== "none") loadCaptures();
+      return;
+    }
     if (r.text) JOB_PROGRESS[r.jobId] = r.text;
     const cell = document.querySelector(`[data-progress="${r.jobId}"]`);
     if (cell && r.text) cell.textContent = r.text;

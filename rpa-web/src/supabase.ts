@@ -2115,8 +2115,10 @@ export async function listCaptures(limit = 60): Promise<{ documents: DocumentRec
   const [docs, jobs] = await Promise.all([
     sb.from("documents").select("*").eq("kind", "capture").order("created_at", { ascending: false }).limit(limit),
     sb.from("job_queue").select("id,type,status,payload,result,error,created_at,started_at,finished_at")
-      .in("type", ["rpa_capture", "rpa_import"]).order("created_at", { ascending: false }).limit(40),
+      .in("type", ["rpa_capture", "rpa_import"]).order("created_at", { ascending: false }).limit(80),
   ]);
-  const capJobs = (jobs.data ?? []).filter((j) => j.type === "rpa_capture" || (j.payload as { capture?: boolean })?.capture);
-  return { documents: (docs.data ?? []) as DocumentRecord[], jobs: capJobs.slice(0, 20) };
+  // งาน "ดึงข้อมูลใบให้เลือก" ไม่ใช่งานแคป — ไม่ต้องขึ้นในรายการ
+  const capJobs = (jobs.data ?? []).filter((j) => (j.type === "rpa_capture" || (j.payload as { capture?: boolean })?.capture)
+    && (j.payload as { mode?: string })?.mode !== "scan");
+  return { documents: (docs.data ?? []) as DocumentRecord[], jobs: capJobs.slice(0, 30) };
 }

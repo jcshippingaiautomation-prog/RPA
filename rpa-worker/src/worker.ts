@@ -2,7 +2,7 @@
 //  RPA Worker — poll Supabase job_queue → claim → run → stream logs
 //  รันบน VM ที่มีเบราว์เซอร์จริง (Playwright)
 // ============================================================
-import { runImport, captureExistingDeclaration, setLogSink, type AppConfig, type RowInfo, type RunProgress } from "rpa-import-node";
+import { runImport, captureExistingDeclaration, scanDeclaration, setLogSink, type AppConfig, type RowInfo, type RunProgress, type CaptureSelection } from "rpa-import-node";
 import { config, assertConfig } from "./config.js";
 import {
   claimNextJob,
@@ -260,31 +260,48 @@ async function runRpaPrint(job: JobRow): Promise<void> {
  *     เพื่อไม่ให้ตัวติดตามงานบนเว็บไปเปลี่ยนสถานะใบ (แคปหน้าจอไม่ได้แก้อะไรในใบ)
  */
 async function runRpaCapture(job: JobRow): Promise<void> {
-  const payload = job.payload as { ref?: string; headless?: boolean; captureDeclId?: string | null; customer?: string | null };
+  const payload = job.payload as {
+    ref?: string; headless?: boolean; captureDeclId?: string | null; customer?: string | null;
+    /** "scan" = ดึงรายการในใบมาให้ผู้ใช้เลือกก่อน (ไม่แคป) */
+    mode?: string;
+    /** ส่วนที่ผู้ใช้เลือก — ไม่ส่ง = ทุกหน้า ทุกรายการ */
+    select?: CaptureSelection | null;
+  };
   const ref = String(payload.ref ?? "").trim();
-  await appendLog(job.id, "lifecycle", { event: "run-start", startedAt: Date.now(), mode: "capture" });
-  await appendLog(job.id, "log", { line: `[WORKER] 📸 แคปหน้าจอใบขน ${ref}` });
+  const scanOnly = payload.mode === "scan";
+  await appendLog(job.id, "lifecycle", { event: "run-start", startedAt: Date.now(), mode: scanOnly ? "capture-scan" : "capture" });
+  await appendLog(job.id, "log", { line: `[WORKER] ${scanOnly ? "🔎 ดึงข้อมูลใบ" : "📸 แคปหน้าจอใบขน"} ${ref}` });
   setLogSink((line) => void appendLog(job.id, "log", { line }));
   let result: Record<string, unknown>;
   try {
-    // ไม่ส่ง declId ให้ตัวแจ้งความคืบหน้า — แคปหน้าจอต้องไม่เปลี่ยนสถานะใบ
-    const r = await captureExistingDeclaration({
-      ref, headless: payload.headless ?? true,
-      shouldStop: () => cancelFlag,
-      onProgress: progressReporter(job, null),
-    });
-    if (r.pdf) {
-      const rec = await uploadDocument(r.pdf, {
-        customer: payload.customer ?? null, invoice: r.invoice || ref, kind: "capture",
-        declarationId: payload.captureDeclId ?? null,
+    if (scanOnly) {
+      // ผลลัพธ์ (ใบกำกับ + รายการสินค้า) เก็บใน job.result ให้หน้าเว็บอ่านไปแสดงให้เลือก
+      const r = await scanDeclaration({ ref, headless: payload.headless ?? true, shouldStop: () => cancelFlag, onProgress: progressReporter(job, null) });
+      result = { total: 1, done: r.scan ? 1 : 0, errors: r.scan || r.stopped ? 0 : 1, skipped: r.stopped ? 1 : 0, stopped: !!r.stopped, scan: r.scan, notes: r.error ? [r.error] : [] };
+    } else {
+      // ไม่ส่ง declId ให้ตัวแจ้งความคืบหน้า — แคปหน้าจอต้องไม่เปลี่ยนสถานะใบ
+      const r = await captureExistingDeclaration({
+        ref, headless: payload.headless ?? true,
+        shouldStop: () => cancelFlag,
+        onProgress: progressReporter(job, null),
+        select: payload.select ?? null,
       });
-      if (rec) await appendLog(job.id, "document", rec);
+      let doc: Record<string, unknown> | null = null;
+      if (r.pdf) {
+        const rec = await uploadDocument(r.pdf, {
+          customer: payload.customer ?? null, invoice: r.invoice || ref, kind: "capture",
+          declarationId: payload.captureDeclId ?? null,
+        });
+        if (rec) { await appendLog(job.id, "document", rec); doc = rec as unknown as Record<string, unknown>; }
+      }
+      // แนบไฟล์ที่ได้ไว้กับงานด้วย — หน้ารายการแคปหน้าจอจับคู่งานกับไฟล์ได้ตรง ๆ
+      const file = doc ? { storage_path: doc.storage_path, public_url: doc.public_url, filename: doc.filename } : null;
+      result = { total: 1, done: r.pdf ? 1 : 0, errors: r.pdf || r.stopped ? 0 : 1, skipped: r.stopped ? 1 : 0, stopped: !!r.stopped, shots: r.shots, notes: r.notes, invoice: r.invoice, file };
     }
-    result = { total: 1, done: r.pdf ? 1 : 0, errors: r.pdf || r.stopped ? 0 : 1, skipped: r.stopped ? 1 : 0, stopped: !!r.stopped, shots: r.shots, notes: r.notes };
   } finally {
     setLogSink(null);
   }
-  await appendLog(job.id, "lifecycle", { event: "run-done", result, mode: "capture" });
+  await appendLog(job.id, "lifecycle", { event: "run-done", result, mode: scanOnly ? "capture-scan" : "capture" });
   await markDone(job.id, result);
 }
 

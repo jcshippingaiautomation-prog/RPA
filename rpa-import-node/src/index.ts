@@ -7,7 +7,7 @@ export type {
   RowStatus,
 } from "./runner.js";
 export type { AppConfig } from "./types.js";
-export { captureExistingDeclaration } from "./capture.js";
+export { captureExistingDeclaration, scanDeclaration, type CaptureSelection, type DeclarationScan } from "./capture.js";
 export type { CaptureResult } from "./capture.js";
 export { setLogSink } from "./helpers.js";
 export type { RunProgress } from "./helpers.js";

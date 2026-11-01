@@ -77,6 +77,8 @@
       '<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/>',
     user:
       '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+    search:
+      '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
   };
 
   /** คืน SVG string ของ icon (ปรับ size ได้) */

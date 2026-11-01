@@ -422,7 +422,12 @@ app.post("/api/declarations/:id/run", async (req, res) => {
 app.post("/api/captures", async (req, res) => {
   if (!supabaseEnabled()) { res.status(400).json({ error: "ยังไม่ได้ตั้งค่า Supabase" }); return; }
   try {
-    const body = (req.body ?? {}) as { declarationId?: string; ref?: string };
+    const body = (req.body ?? {}) as { declarationId?: string; ref?: string; mode?: string; select?: unknown };
+    const scan = body.mode === "scan";
+    const select = scan ? null : cleanCaptureSelect(body.select);
+    if (select && !select.header && !select.list && !select.invoice && !select.exchange && !select.items.length) {
+      res.status(400).json({ error: "ยังไม่ได้เลือกหน้าที่จะแคป" }); return;
+    }
     let ref = String(body.ref ?? "").trim();
     let declId: string | null = null;
     let customer: string | null = null;
@@ -439,7 +444,7 @@ app.post("/api/captures", async (req, res) => {
       if (hit) { declId = hit.id; customer = hit.customer_name; }
     }
     // ⚠ ใช้ captureDeclId ไม่ใช่ declId — ตัวติดตามงานจะได้ไม่ไปเปลี่ยนสถานะใบ (แคปหน้าจอไม่ได้แก้อะไรในใบ)
-    const payload = { ref, captureDeclId: declId, customer, headless: true };
+    const payload = { ref, captureDeclId: declId, customer, headless: true, ...(scan ? { mode: "scan" } : {}), ...(select ? { select } : {}) };
     const meta = { dryRun: false, triggeredBy: req.user?.id ?? null, triggerSource: "manual" };
     let jobId = await enqueueJob("rpa_capture", payload, meta);
     // ฐานข้อมูลยังไม่รับชนิดงานนี้ (ยังไม่ได้รัน sql/14) → ฝากไปกับคิวสร้างใบ (worker แยกให้เอง)
@@ -452,6 +457,17 @@ app.post("/api/captures", async (req, res) => {
     res.status(500).json({ error: String(err) });
   }
 });
+/** ส่วนที่ผู้ใช้เลือกแคป — รับเฉพาะรูปแบบที่รู้จัก (ไม่ส่ง/ผิดรูป = null = ทุกหน้า ทุกรายการ) */
+function cleanCaptureSelect(v: unknown): { header: boolean; list: boolean; invoice: boolean; exchange: boolean; items: { no: number; general: boolean; privilege: boolean }[] } | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const items = (Array.isArray(o.items) ? o.items : [])
+    .map((x) => x as Record<string, unknown>)
+    .map((x) => ({ no: Math.trunc(Number(x.no)), general: x.general === true, privilege: x.privilege === true }))
+    .filter((x) => Number.isFinite(x.no) && x.no > 0 && (x.general || x.privilege))
+    .slice(0, 500);
+  return { header: o.header === true, list: o.list === true, invoice: o.invoice === true, exchange: o.exchange === true, items };
+}
 app.get("/api/captures", async (_req, res) => {
   if (!supabaseEnabled()) { res.json({ documents: [], jobs: [] }); return; }
   res.json(await listCaptures());

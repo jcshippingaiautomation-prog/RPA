@@ -675,3 +675,35 @@ tr.ms-group > td {
 .task-card.is-cancelling .task-detail { color: #b45309; }
 @keyframes taskspin { to { transform: rotate(360deg); } }
 @keyframes taskindet { 0% { left: -35%; } 100% { left: 100%; } }
+
+/* ── แคปหน้าจอใบขน: ขั้นเลือก + รายการ ── */
+.cap-start { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.cap-pick:empty { display: none; }
+.cap-pick { margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; padding: 14px; background: #fafbfc; }
+.cap-scanning { display: flex; align-items: center; gap: 12px; }
+.cap-scanning > div { flex: 1; }
+.cap-err { color: var(--red); display: flex; flex-direction: column; gap: 2px; }
+.cap-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13.5px; color: var(--green-dark); }
+.cap-head .muted { color: var(--muted2); }
+.cap-step { margin: 14px 0 6px; font-weight: 600; font-size: 13px; }
+.cap-pages { display: flex; flex-wrap: wrap; gap: 8px; }
+.cap-opt { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: #fff; font-size: 13px; cursor: pointer; }
+.cap-opt input, .cap-items input, .cap-colchk input { accent-color: var(--primary); width: 15px; height: 15px; cursor: pointer; }
+.cap-colchk { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap; }
+.cap-items td, .cap-items th { vertical-align: middle; }
+.cap-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.cap-sub { font-size: 11.5px; margin-top: 2px; }
+.cap-sel { font-size: 12.5px; color: var(--muted2); max-width: 260px; }
+.cap-table .nowrap, .cap-items .nowrap { white-space: nowrap; }
+.cap-row-done td:first-child { box-shadow: inset 3px 0 0 var(--green-dark); }
+.ta-center { text-align: center; }
+@media (max-width: 640px) {
+  .cap-start .inp { max-width: none !important; flex: 1 1 100%; }
+  .cap-foot > span[style] { display: none; }
+  .cap-items th:nth-child(3), .cap-items td:nth-child(3),
+  .cap-items th:nth-child(4), .cap-items td:nth-child(4),
+  .cap-items th:nth-child(5), .cap-items td:nth-child(5) { display: none; }
+  .cap-colchk { white-space: normal; flex-direction: column; font-size: 11px; }
+  .cap-table th:nth-child(3), .cap-table td:nth-child(3) { display: none; }
+}
+.table-scroll { overflow-x: auto; }
