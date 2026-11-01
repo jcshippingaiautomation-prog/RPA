@@ -155,9 +155,9 @@ export function postProcess(rawText: string): DeclarationRecord {
     //   → ถ้าเป็นตัวเลขล้วน 8 หลัก ให้ย้ายไปช่องพิกัดศุลกากรจริง เติมศูนย์หน้าให้ครบ 12 หลัก
     const etRaw = String(item.export_tariff ?? "").trim();
     if (/^\d{8}$/.test(etRaw)) {
-      const ex = (item.extra_fields ?? {}) as Record<string, unknown>;
-      if (!String(ex.tariff_code ?? "").trim()) ex.tariff_code = etRaw.padStart(12, "0");
-      item.extra_fields = ex;
+      // ⚠ ใส่ที่ระดับบนของ item (ช่องเดียวกับที่ AI ตอบ tariff_code) — ถ้าใส่ใน extra_fields
+      //   ค่า tariff_code ว่าง ๆ ที่ระดับบนจะชนะตอนบันทึก แล้วเลขพิกัดหายเงียบ ๆ
+      if (!String(item.tariff_code ?? "").trim()) item.tariff_code = etRaw.padStart(12, "0");
       item.export_tariff = "";        // ปล่อยให้ Master/preset เป็นคนใส่ "ประเภทพิกัด"
     }
     if (!item.customs_unit_code && r.customs_unit_code) item.customs_unit_code = r.customs_unit_code as string;

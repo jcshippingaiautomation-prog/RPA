@@ -582,11 +582,19 @@ async function answerReopenPrompt(page: Page): Promise<void> {
   //   จะกลายเป็นการเปลี่ยนสถานะใบขนจริงที่ยื่นกรมฯ ไปแล้ว
   for (let i = 0; i < 8; i++) {
     const clicked = await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll("button, input[type=button]"));
-      const no = btns.find((b) => {
-        const t = ((b as HTMLElement).innerText || (b as HTMLInputElement).value || "").trim().toUpperCase();
-        return t === "NO";
-      }) as HTMLElement | undefined;
+      // กด NO เฉพาะในกล่องคำถาม "ปรับสถานะ/พร้อมแก้ไข" ที่มองเห็นอยู่จริง
+      //   เดิมกดปุ่ม NO ปุ่มแรกของทั้งหน้า (รวมปุ่มที่ซ่อนอยู่ในกล่องอื่น) → กล่องจริงยังค้าง เปิดใบไม่ได้
+      //   กล่องลอยทับหน้า (position: fixed) → offsetParent เป็น null แม้มองเห็น ต้องวัดขนาดบนจอแทน
+      const vis = (el: Element) => {
+        const r = (el as HTMLElement).getBoundingClientRect();
+        const cs = getComputedStyle(el as HTMLElement);
+        return r.width > 0 && r.height > 0 && cs.visibility !== "hidden" && cs.display !== "none";
+      };
+      const box = Array.from(document.querySelectorAll(".modal, [role='dialog'], .k-window")).find(
+        (m) => vis(m) && /ปรับสถานะ|พร้อมแก้ไข/.test((m as HTMLElement).innerText || ""));
+      if (!box) return false;
+      const no = Array.from(box.querySelectorAll("button, input[type=button]")).find((b) => vis(b)
+        && (((b as HTMLElement).innerText || (b as HTMLInputElement).value || "").trim().toUpperCase() === "NO")) as HTMLElement | undefined;
       if (!no) return false;
       no.click();
       return true;

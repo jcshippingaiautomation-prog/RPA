@@ -100,6 +100,15 @@ export async function uploadDocument(
  * อัปเดตสถานะ declaration ตรง ๆ จาก worker (ไม่พึ่งเว็บ bridge ที่หลับบน Render free).
  * worker รันบน VM ตลอด → อัปเดตเชื่อถือได้กว่า. (เว็บ bridge ยังทำงานคู่ขนานได้ ไม่ชน)
  */
+/** สถานะปัจจุบันของใบ (null = ไม่พบ/อ่านไม่ได้) — ใช้เช็กก่อนรันว่าใบยังรอทำอยู่จริง */
+export async function getDeclarationState(declId: string): Promise<{ status: string; doc_status: boolean } | null | undefined> {
+  try {
+    const { data, error } = await workerSupabase().from("declarations").select("status,doc_status").eq("id", declId).maybeSingle();
+    if (error) return undefined;            // อ่านไม่ได้ = ไม่รู้ (ไม่ใช่ "ไม่มี")
+    return data ? { status: String(data.status ?? ""), doc_status: !!data.doc_status } : null;
+  } catch { return undefined; }
+}
+
 export async function setDeclarationStatus(
   declId: string,
   fields: { status?: string; declaration_no?: string; status_message?: string },

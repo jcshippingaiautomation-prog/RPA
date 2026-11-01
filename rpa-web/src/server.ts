@@ -367,20 +367,38 @@ app.post("/api/declarations/:id/copy", async (req, res) => {
   // เติม (สำเนา) ต่อท้าย invoice กันซ้ำ
   const copy: Record<string, unknown> = { ...src };
   delete copy.id; delete copy.created_at; delete copy.updated_at; delete copy.last_job_id;
+  // สำเนาเป็นใบใหม่ที่ยังไม่ได้ยื่น — ห้ามติดเลขใบขน/สถานะของต้นฉบับ (ไม่งั้นแก้/พิมพ์ซ้ำจะไปโดนใบจริงของต้นฉบับ)
+  delete copy.declaration_no; delete copy.status_message; delete copy.doc_status;
   copy.invoice_number = `${src.invoice_number ?? ""} (สำเนา)`.trim();
   const created = await createDeclaration(
     copy as Record<string, unknown> & { _items?: Record<string, unknown>[] },
-    { source: "manual", status: "new" },
+    { source: "manual", status: "new", prepare: "none", fieldModes: (src.field_modes ?? undefined) as { [k: string]: string } | undefined },
   );
   if (!created) { res.status(500).json({ error: "สร้างสำเนาไม่สำเร็จ" }); return; }
   res.json({ ok: true, id: created.id });
 });
+
+/**
+ * ใบนี้มีงาน RPA ค้างอยู่ในคิว/กำลังทำไหม — กันกดซ้ำ/ส่งซ้ำจนได้ใบขนซ้ำใน DCTK
+ *   ดูจากงานล่าสุดของใบ (last_job_id) ไม่ใช่ป้ายสถานะอย่างเดียว (ป้ายอาจค้างจากงานที่จบไปแล้ว)
+ */
+async function declarationBusy(id: string): Promise<boolean> {
+  const d = await getDeclaration(id).catch(() => null);
+  const jobId = String((d as { last_job_id?: string } | null)?.last_job_id ?? "");
+  if (!jobId) return false;
+  const j = await getJob(jobId).catch(() => null);
+  return !!j && ["pending", "claimed", "processing", "running"].includes(String(j.status));
+}
+const BUSY_MSG = "ใบนี้มีงาน RPA อยู่ในคิวหรือกำลังทำอยู่แล้ว — รอให้เสร็จ หรือกดยกเลิกก่อน";
+/** สถานะที่คืนให้ตอนยกเลิกงานแก้/พิมพ์ซ้ำ — ห้ามเป็นสถานะชั่วคราว ไม่งั้นใบค้าง "รอคิว" ตลอด */
+const stableStatus = (st: unknown) => (["queued", "running"].includes(String(st ?? "")) ? "partial" : String(st ?? ""));
 
 // รัน RPA สำหรับใบขนใบเดียว → enqueue job (worker หยิบไปกรอกฟอร์ม)
 app.post("/api/declarations/:id/run", async (req, res) => {
   if (!supabaseEnabled()) { res.status(400).json({ error: "ยังไม่ได้ตั้งค่า Supabase" }); return; }
   const id = req.params.id;
   try {
+    if (await declarationBusy(id)) { res.status(409).json({ error: BUSY_MSG }); return; }
     // ---- ตรวจข้อมูลก่อนรัน (กันรันแล้วไม่ผ่าน) ----
     //   ถ้ามี error และไม่ได้ force → ไม่ enqueue, ส่ง issues กลับให้ user แก้ก่อน
     const force = !!(req.body && (req.body as { force?: boolean }).force);
@@ -485,6 +503,7 @@ app.post("/api/declarations/:id/reprint", async (req, res) => {
   if (!supabaseEnabled()) { res.status(400).json({ error: "ยังไม่ได้ตั้งค่า Supabase" }); return; }
   const id = req.params.id;
   try {
+    if (await declarationBusy(id)) { res.status(409).json({ error: BUSY_MSG }); return; }
     const decl = await getDeclaration(id);
     if (!decl) { res.status(404).json({ error: "ไม่พบรายการ" }); return; }
     const declarationNo = String(decl.declaration_no ?? "").trim();
@@ -499,7 +518,7 @@ app.post("/api/declarations/:id/reprint", async (req, res) => {
     const jobId = await enqueueJob(
       "rpa_print",
       // prevStatus: ถ้าผู้ใช้กดยกเลิก คืนป้ายเดิมให้ (เช่น "สร้างใบแล้ว · รอพิมพ์") ไม่ใช่ "ยกเลิกแล้ว" ที่ชวนกดรันซ้ำ
-      { headless, declId: id, declaration_no: declarationNo, prevStatus: String(decl.status ?? "") },
+      { headless, declId: id, declaration_no: declarationNo, prevStatus: stableStatus(decl.status) },
       { dryRun: false, triggeredBy: req.user?.id ?? null, triggerSource: "manual" },
     );
     if (!jobId) { res.status(409).json({ error: "คิวไม่พร้อม" }); return; }
@@ -520,6 +539,7 @@ app.post("/api/declarations/:id/edit", async (req, res) => {
   if (!supabaseEnabled()) { res.status(400).json({ error: "ยังไม่ได้ตั้งค่า Supabase" }); return; }
   const id = req.params.id;
   try {
+    if (await declarationBusy(id)) { res.status(409).json({ error: BUSY_MSG }); return; }
     // 1) บันทึกค่าที่ user แก้ก่อน (patch มาจาก detail modal)
     const patch = (req.body || {}) as Record<string, unknown>;
     if (Object.keys(patch).length) await updateDeclaration(id, patch);
@@ -539,7 +559,7 @@ app.post("/api/declarations/:id/edit", async (req, res) => {
     // 4) enqueue job แก้ไข
     const jobId = await enqueueJob(
       "rpa_edit",
-      { onlyRows: [row.index], headless, declId: id, declaration_no: declarationNo, prevStatus: String(decl.status ?? "") },
+      { onlyRows: [row.index], headless, declId: id, declaration_no: declarationNo, prevStatus: stableStatus(decl.status) },
       { dryRun: false, triggeredBy: req.user?.id ?? null, triggerSource: "manual" },
     );
     if (!jobId) { res.status(409).json({ error: "คิวไม่พร้อม" }); return; }
@@ -577,7 +597,8 @@ app.post("/api/upload", async (req, res) => {
     task.log(`📤 ประมวลผล ${attachments.length} ไฟล์ด้วย AI…`);
     const { record, customer } = await extractFromAttachments(attachments, (line) => task.log(line), customerHint);
     // ⚠ จุดตัดสุดท้าย: ยกเลิกแล้วต้องไม่สร้างรายการ (AI อ่านเสร็จแล้วก็ทิ้งผลไป)
-    task.check();
+    //   หลังบรรทัดนี้ยกเลิกไม่ได้แล้ว — แจ้งหน้าเว็บให้ปิดปุ่มยกเลิก (ไม่งั้นบอกว่ายกเลิก แต่รายการถูกสร้างแล้ว → อัปซ้ำ)
+    task.log("💾 กำลังบันทึกรายการ — ยกเลิกไม่ได้แล้ว");
     const needsReview = record._needs_review === true;
     const created = await createDeclaration(record, {
       source: "upload", status: needsReview ? "new" : "ready", templateId,
@@ -745,6 +766,10 @@ function bridgeJobLog(row: JobLogRow): void {
             broadcast("decl-status", { id: declId, status: back, message: msg });
             jobToDeclaration.delete(row.job_id);
             jobKind.delete(row.job_id);
+          } else if (declId && (p as { mode?: string }).mode === "skip") {
+            // worker ข้ามงาน (ใบทำไปแล้ว/ถูกลบ) — ไม่แตะสถานะใบ
+            jobToDeclaration.delete(row.job_id);
+            jobKind.delete(row.job_id);
           } else if (declId) {
             const ok = r ? (r.errors ?? 0) === 0 : true;
             // status สะท้อนผลจริง:
@@ -759,6 +784,10 @@ function bridgeJobLog(row: JobLogRow): void {
             } else if (r?.declarationCreated && !isEdit) {
               status = "partial";
               msg = "สร้างใบใน DCTK แล้ว แต่ยังไม่ได้ไฟล์ใบขนจริง — กดพิมพ์ใบขนซ้ำในเว็บ";
+            } else if (isPrint) {
+              // พิมพ์ซ้ำไม่สำเร็จ ≠ ใบเสีย — คืนสถานะเดิม (ใบที่ยื่นแล้วต้องไม่กลายเป็น "ผิดพลาด")
+              try { status = String(((await getJob(row.job_id))?.payload as { prevStatus?: string } | undefined)?.prevStatus || "partial"); } catch { status = "partial"; }
+              msg = "พิมพ์ใบขนซ้ำไม่สำเร็จ — ลองกดพิมพ์ซ้ำอีกครั้ง";
             } else {
               status = "error";
               msg = "RPA มีข้อผิดพลาด — ดูประวัติงาน";
@@ -1180,6 +1209,7 @@ app.post("/api/templates/:id/create-declaration", requireUser, async (req, res) 
   const created = await createDeclaration(record, {
     source: "master",
     fieldModes: applied.fieldModes,
+    prepare: "noMaster",   // ค่าที่ผู้ใช้แก้ในฟอร์มต้องชนะ — ไม่ผสม Master (หรือ Master อื่นที่จับคู่ได้) ทับอีกรอบ
   });
   if (!created) { res.status(500).json({ error: "สร้างใบขนไม่สำเร็จ" }); return; }
   res.json({ ok: true, id: created.id, appliedFrom: tpl.name });

@@ -607,16 +607,25 @@ async function cancelDeclarationRun(id) {
 }
 
 // ---- รัน RPA ต่อใบ ----
+// ใบที่กำลังส่งคำสั่งรันอยู่ — กันกดซ้ำระหว่างรอเซิร์ฟเวอร์ตอบ (ส่งซ้ำ = ยื่นใบขนซ้ำใน DCTK)
+const RUN_INFLIGHT = new Set();
 async function runDeclaration(id) {
   const d = DECLS.find((x) => x.id === id);
+  if (RUN_INFLIGHT.has(id) || (d && ["queued", "running"].includes(d.status))) {
+    toast("ใบนี้อยู่ในคิว/กำลังรันอยู่แล้ว", "info");
+    return;
+  }
   const name = d ? `${d.customer_name || ""} / ${d.invoice_number || ""}` : "";
   const est = estImportMinutes(d);
   if (!confirm(`ยืนยันการนำเข้าใบขนนี้สู่ระบบกรมศุลกากร?\n\n${name}\n\n⏱ ใช้เวลาประมาณ ${est}  — ระบบจะกรอกข้อมูลให้อัตโนมัติ หากมีงานรออยู่ในคิวอาจใช้เวลานานกว่านี้`)) return;
+  if (RUN_INFLIGHT.has(id)) return;
+  RUN_INFLIGHT.add(id);
   try {
     await api(`/api/declarations/${encodeURIComponent(id)}/run`, "POST", {});
     toast(`ส่งเข้าคิว RPA แล้ว — กำลังรัน (⏱ ประมาณ ${est})`, "info");
     setDeclStatusLocal(id, "queued", `ส่งเข้าคิว RPA แล้ว (⏱ ประมาณ ${est})`);
   } catch (e) { toast("รันไม่สำเร็จ: " + e.message, "error"); }
+  finally { RUN_INFLIGHT.delete(id); }
 }
 
 // ประเมินเวลานำเข้า (RPA) คร่าว ๆ — ฐาน ~3 นาที + ~1 นาที/รายการสินค้าเพิ่ม
@@ -672,18 +681,30 @@ async function deleteSelected() {
 }
 
 async function runSelected() {
-  const ids = [...selected];
-  if (!ids.length) return;
+  // ส่งเฉพาะใบที่ยังไม่ได้ทำ — ใบที่อยู่ในคิว/กำลังรัน/เสร็จแล้ว ห้ามส่งซ้ำ (= ยื่นใบขนซ้ำ)
+  const skip = ["queued", "running", "done", "partial", "edited"];
+  const all = [...selected];
+  const ids = all.filter((id) => { const d = DECLS.find((x) => x.id === id); return !(d && skip.includes(d.status)) && !RUN_INFLIGHT.has(id); });
+  const skipped = all.length - ids.length;
+  if (!ids.length) { toast(skipped ? "ใบที่เลือกอยู่ในคิว/ทำเสร็จแล้วทั้งหมด — ไม่ได้ส่งซ้ำ" : "ยังไม่ได้เลือกรายการ", "info"); return; }
   const totalEst = `${ids.length * 3}–${ids.length * 5} นาที`;
-  if (!confirm(`ยืนยันการนำเข้าใบขน ${ids.length} รายการที่เลือก?\n\n⏱ ใช้เวลารวมประมาณ ${totalEst} (ระบบดำเนินการทีละใบตามลำดับ)`)) return;
+  if (!confirm(`ยืนยันการนำเข้าใบขน ${ids.length} รายการที่เลือก?${skipped ? `\n(ข้าม ${skipped} ใบที่อยู่ในคิว/ทำเสร็จแล้ว)` : ""}\n\n⏱ ใช้เวลารวมประมาณ ${totalEst} (ระบบดำเนินการทีละใบตามลำดับ)`)) return;
+  let ok = 0;
+  const fails = [];
   for (const id of ids) {
+    RUN_INFLIGHT.add(id);
     try {
       await api(`/api/declarations/${encodeURIComponent(id)}/run`, "POST", {});
       setDeclStatusLocal(id, "queued", "ส่งเข้าคิว RPA แล้ว");
-    } catch (e) { /* ต่อ */ }
+      ok++;
+    } catch (e) {
+      const d = DECLS.find((x) => x.id === id);
+      fails.push(`${(d && d.invoice_number) || id}: ${e.message}`);
+    } finally { RUN_INFLIGHT.delete(id); }
   }
   selected.clear();
-  toast(`ส่ง ${ids.length} รายการเข้าคิวแล้ว (⏱ ประมาณ ${totalEst})`, "info");
+  if (fails.length) toast(`ส่งเข้าคิว ${ok} รายการ · ไม่สำเร็จ ${fails.length} — ${fails.slice(0, 2).join(" · ")}`, "error", 10000);
+  else toast(`ส่ง ${ok} รายการเข้าคิวแล้ว (⏱ ประมาณ ${totalEst})`, "info");
   renderList();
 }
 
@@ -702,6 +723,7 @@ let detailValidation = null;   // ผลตรวจข้อมูลก่อ�
 let detailWizard = false;      // true = เปิดจากการอัปโหลด (ขั้นที่ 3 ตรวจสอบ) → โชว์แบนเนอร์ wizard
 async function openDetail(id, opts) {
   detailId = id;
+  $("mdRun").disabled = true;   // รอข้อมูลใบนี้ก่อน (ไม่งั้นค้างสถานะปุ่มของใบที่เปิดก่อนหน้า)
   detailWizard = !!(opts && opts.wizard);
   const box = $("mdBody");
   $("modalDetail").style.display = "flex";
@@ -1415,16 +1437,21 @@ const CAP_PAGES = [
   ["exchange", "หน้า 3 · การแลกเปลี่ยนข้อมูล"],
 ];
 function capPickHtml(inner) { $("capPick").innerHTML = `<div class="cap-pick">${inner}</div>`; }
+let capScanStarting = false;   // กด Enter + คลิกปุ่มพร้อมกัน = ส่งงานดึงข้อมูล 2 งาน แล้วตัวเลือกโดนรีเซ็ตทุก 3 วิ
 async function startCapScan() {
   const ref = $("capRef").value.trim();
   if (!ref) { toast("กรุณาใส่เลขอ้างอิง DCTK / เลขใบขน / เลขใบกำกับ", "error"); return; }
+  if (capScanStarting) return;
+  capScanStarting = true;
   if (capScan && capScan.timer) clearInterval(capScan.timer);
   let r;
   try { r = await api("/api/captures", "POST", { ref, mode: "scan" }); }
   catch (e) { toast("ดึงข้อมูลใบไม่สำเร็จ: " + e.message, "error"); return; }
+  finally { capScanStarting = false; }
   capScan = { jobId: r.jobId, ref: r.ref, declarationId: r.declarationId, t0: Date.now(), timer: null, data: null };
   renderCapScanning();
-  capScan.timer = setInterval(pollCapScan, 3000);
+  const jobId = r.jobId;
+  capScan.timer = setInterval(() => pollCapScan(jobId), 3000);
 }
 function renderCapScanning(msg) {
   const s = Math.round((Date.now() - capScan.t0) / 1000);
@@ -1438,8 +1465,14 @@ function renderCapScanning(msg) {
     capScan = null; $("capPick").innerHTML = ""; toast("ยกเลิกการดึงรายการแล้ว", "info");
   };
 }
-async function pollCapScan() {
-  if (!capScan) return;
+async function pollCapScan(jobId) {
+  if (!capScan || (jobId && capScan.jobId !== jobId)) return;   // งานเก่าที่ถูกแทนที่แล้ว — ห้ามวาดทับตัวเลือกปัจจุบัน
+  if (capScan.data) { clearInterval(capScan.timer); capScan.timer = null; return; }
+  if (Date.now() - capScan.t0 > 10 * 60 * 1000) {               // เกิน 10 นาที = worker ไม่ตอบ — หยุดถามซ้ำ
+    clearInterval(capScan.timer); capScan.timer = null;
+    capPickHtml(`<div class="cap-err">${svgIcon("info", 16)} ดึงรายการสินค้าในใบ ${escapeHtml(capScan.ref)} นานเกิน 10 นาที — worker อาจไม่ได้ทำงาน ลองใหม่อีกครั้ง</div>`);
+    return;
+  }
   let j;
   try { j = (await api(`/api/jobs/${encodeURIComponent(capScan.jobId)}`)).job; } catch { renderCapScanning(); return; }
   if (CAP_LIVE.includes(j.status)) { renderCapScanning(); return; }
@@ -1450,12 +1483,18 @@ async function pollCapScan() {
   capPickHtml(`<div class="cap-err">${svgIcon("info", 16)} ดึงรายการสินค้าในใบ ${escapeHtml(capScan.ref)} ไม่สำเร็จ — ${escapeHtml(why)}
     <div class="muted" style="font-size:12px;margin-top:4px">ตรวจเลขใบแล้วลองใหม่ หรือกด "แคปทุกรายการเลย" เพื่อแคปโดยไม่ต้องเลือก</div></div>`);
 }
-/** "8-15, 18-20, 66 96" → Set ของเลขรายการ (ตัดเลขที่ไม่มีในใบทิ้ง) */
+/** ชื่อลูกค้าที่มี ( ) + ฯลฯ ใช้สร้าง RegExp ตรง ๆ ไม่ได้ */
+function reEscape(s) { return String(s ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+/** "8-15, 18 - 20, 66 96" → Set ของเลขรายการ (ตัดเลขที่ไม่มีในใบทิ้ง) */
 function parseItemRanges(text, valid) {
   const out = new Set();
-  for (const part of String(text).split(/[,\s;]+/).filter(Boolean)) {
-    const m = part.match(/^(\d+)\s*[-–]\s*(\d+)$/);
-    if (m) { let [x, y] = [Number(m[1]), Number(m[2])]; if (x > y) [x, y] = [y, x]; for (let n = x; n <= y; n++) if (valid.has(n)) out.add(n); }
+  const max = valid.size ? Math.max(...valid) : 0;
+  // ⚠ รวมช่องว่างรอบขีดก่อนแยกคำ ไม่งั้น "8 - 15" กลายเป็น 8 กับ 15 (ไม่ได้ 9–14)
+  const norm = String(text).replace(/\s*[-–]\s*/g, "-");
+  for (const part of norm.split(/[,\s;]+/).filter(Boolean)) {
+    const m = part.match(/^(\d+)-(\d+)$/);
+    if (m) { let [x, y] = [Number(m[1]), Number(m[2])]; if (x > y) [x, y] = [y, x]; y = Math.min(y, max); for (let n = x; n <= y; n++) if (valid.has(n)) out.add(n); }
     else if (/^\d+$/.test(part) && valid.has(Number(part))) out.add(Number(part));
   }
   return out;
@@ -1680,7 +1719,7 @@ async function fillUploadTemplates(customer) {
   // เลือกลูกค้าแล้วไม่ต้องเอาชื่อลูกค้ามาซ้ำในทุกบรรทัด — เหลือแค่ Consignee · สินค้า จะอ่านง่ายกว่ามาก
   const label = (t) => {
     const n = String(t.name || "");
-    return c ? n.replace(new RegExp(`^${t.customer_name}\\s*—\\s*`, "i"), "") || n : n;
+    return c ? n.replace(new RegExp(`^${reEscape(t.customer_name)}\\s*—\\s*`, "i"), "") || n : n;
   };
   sel.innerHTML = '<option value="">— เลือกให้อัตโนมัติจาก Consignee/สินค้า —</option>' +
     list.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(label(t))}</option>`).join("");
@@ -1705,7 +1744,8 @@ function openUpload() {
 }
 function closeUpload() {
   // ปิดหน้าต่างระหว่าง AI กำลังอ่าน = ยกเลิกงาน (ไม่งั้นรายการจะโผล่ขึ้นมาเองทีหลังแบบงง ๆ)
-  if (upTask && !upTask.cancelled) {
+  //   ยกเว้นช่วงกำลังบันทึก — ปล่อยให้บันทึกจนเสร็จ (รายการจะขึ้นในตารางเอง)
+  if (upTask && !upTask.cancelled && !upTask.saving) {
     if (!confirm("AI กำลังอ่านเอกสารอยู่ — ปิดหน้าต่างจะยกเลิกงานนี้ ต้องการยกเลิกไหม?")) return;
     cancelUploadTask();
   }
@@ -1744,7 +1784,7 @@ function fileToBase64(file) {
 // งานอัปโหลดที่กำลังทำ (ให้ปุ่มยกเลิก/ปิดหน้าต่างหยุดงานได้)
 let upTask = null;
 function cancelUploadTask() {
-  if (!upTask || upTask.cancelled) return;
+  if (!upTask || upTask.cancelled || upTask.saving) return;
   upTask.cancelled = true;
   try { upTask.ctrl.abort(); } catch { /* */ }
   api(`/api/tasks/${upTask.id}/cancel`, "POST", {}).catch(() => {});
@@ -1767,7 +1807,12 @@ $("upSubmit").onclick = async () => {
   tick();
   const timer = setInterval(tick, 1000);
   // ขั้นตอนที่เซิร์ฟเวอร์ทำอยู่ (ส่งมาทาง SSE) → แสดงบรรทัดล่าสุด
-  TASK_LISTENERS[task.id] = (line) => { if (!task.cancelled) $("upProgress").textContent = line; };
+  TASK_LISTENERS[task.id] = (line) => {
+    if (task.cancelled) return;
+    $("upProgress").textContent = line;
+    // เซิร์ฟเวอร์เริ่มบันทึกรายการแล้ว — ยกเลิกตอนนี้จะได้รายการค้างครึ่ง ๆ (หน้าเว็บบอกว่ายกเลิก แต่รายการถูกสร้างแล้ว)
+    if (/บันทึกรายการ/.test(line)) { task.saving = true; $("upStop").disabled = true; }
+  };
   try {
     const files = [];
     for (const f of uploadFiles) {
@@ -2688,7 +2733,7 @@ function renderMasters() {
       }
       const nVals = Object.keys(t.header || {}).length;
       // ชื่อขึ้นต้นด้วยชื่อลูกค้าอยู่แล้ว — ตัดออกเพราะอยู่ในหัวกลุ่มแล้ว
-      const autoName = String(t.name || "").replace(new RegExp(`^${cust}\\s*—\\s*`, "i"), "") || t.name;
+      const autoName = String(t.name || "").replace(new RegExp(`^${reEscape(cust)}\\s*—\\s*`, "i"), "") || t.name;
       // ผู้ใช้ตั้งชื่อเองได้ (sql/13) — ถ้ามี ให้ชื่อนั้นเป็นตัวหลัก ส่วนชื่ออัตโนมัติไปอยู่บรรทัดรอง
       const userLabel = String(t.label || "").trim();
       const shortName = userLabel || autoName;

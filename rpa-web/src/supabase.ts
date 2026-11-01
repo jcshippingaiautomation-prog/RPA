@@ -619,6 +619,21 @@ function reconcilePackageCount(
  * และแถวตัวอย่าง (SAMPLE) ของบางผู้รับมีรหัสสินค้าแยกต่างหาก
  * ถ้าไม่มีแถวไหนใกล้พอ ใช้แถวแรกเป็นต้นแบบ (เป็นสินค้าหลักของผู้รับรายนั้น)
  */
+/** แถวใน Master ที่เป็นสินค้าตัวเดียวกันจริงไหม (false = ใช้แถวแรกแทนเพราะหาไม่เจอ) */
+function masterItemMatches(aiItem: Record<string, unknown>, tplItems: Record<string, unknown>[], picked: Record<string, unknown>): boolean {
+  if (tplItems.length <= 1) return true;                 // Master สินค้าเดียว = ใช้กับทุกรายการ
+  const words = (v: unknown) =>
+    new Set(String(v ?? "").toUpperCase().replace(/[^A-Z0-9ก-๙ ]/g, " ").split(/\s+/).filter((w) => w.length >= 2));
+  const need = new Set<string>();
+  for (const k of ["description_eng_field", "description_eng", "product_description_eng"]) for (const w of words(aiItem[k])) need.add(w);
+  const have = new Set<string>();
+  for (const k of ["product_description_eng", "product_code"]) for (const w of words(picked[k])) have.add(w);
+  if (!need.size || !have.size) return false;
+  let hit = 0;
+  for (const w of have) if (need.has(w)) hit++;
+  return hit / Math.min(have.size, need.size) >= 0.5;
+}
+
 function pickMasterItem(
   aiItem: Record<string, unknown>,
   tplItems: Record<string, unknown>[],
@@ -987,7 +1002,7 @@ function reconcileWeights(record: Record<string, unknown> & { _items?: Record<st
  */
 export async function prepareDeclarationRecord(
   record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
-  opts: { fieldModes?: { [k: string]: string }; templateId?: string } = {},
+  opts: { fieldModes?: { [k: string]: string }; templateId?: string; skipMaster?: boolean } = {},
 ): Promise<{
   record: Record<string, unknown> & { _items?: Record<string, unknown>[] };
   fieldModes: { [k: string]: string };
@@ -1008,12 +1023,15 @@ export async function prepareDeclarationRecord(
       console.log(`[code] ${f.scope === "item" ? `รายการ ${f.itemLine}: ` : ""}${f.label}: "${f.from}" → "${f.to}" (${f.listLabel})`);
     }
 
-    const mastered = await applyMasterToRecord(
-      record,
-      String(record.customer_name ?? ""),
-      String(record.invoice_number ?? ""),
-      opts.templateId,
-    );
+    // skipMaster: ค่ามาจาก Master + ผู้ใช้แก้ในฟอร์มแล้ว (สร้างใบจาก Master) — ผสม Master ซ้ำจะทับค่าที่ผู้ใช้แก้
+    const mastered = opts.skipMaster
+      ? { record, fieldModes: undefined, templateName: undefined, masterNotes: [] }
+      : await applyMasterToRecord(
+        record,
+        String(record.customer_name ?? ""),
+        String(record.invoice_number ?? ""),
+        opts.templateId,
+      );
     record = mastered.record;
     const fieldModes = { ...(mastered.fieldModes ?? {}), ...(opts.fieldModes ?? {}) };
     // เอกสารเขียนไม่ตรง Master → ใช้ค่า Master แต่ต้องบอกผู้ใช้ (ไม่แก้เงียบ ๆ)
@@ -1066,14 +1084,20 @@ export async function createDeclaration(
     source?: string; status?: string; fieldModes?: { [k: string]: string };
     /** บังคับใช้ Master ตัวนี้ (ผู้ใช้เลือกเองตอนอัปโหลด) — ไม่ต้องให้ระบบจับคู่เอง */
     templateId?: string;
+    /** "full" (ปกติ) · "noMaster" ไม่ผสม Master ซ้ำ · "none" บันทึกตามที่ส่งมา (สำเนาใบที่เตรียมแล้ว) */
+    prepare?: "full" | "noMaster" | "none";
   } = {},
 ): Promise<{ id: string; codeFixes?: { label: string; from: string; to: string; master?: boolean }[] } | null> {
   const sb = getClient();
   if (!sb) return null;
   try {
-    const prepared = await prepareDeclarationRecord(record, {
-      fieldModes: opts.fieldModes, templateId: opts.templateId,
-    });
+    // ⚠ สำเนาใบ: ข้อมูลผ่านการเตรียมมาแล้ว — เตรียมซ้ำจะบวกค่าระวาง/ค่าใช้จ่ายเข้ายอดซ้ำ (reconcileItemAmounts ไม่ idempotent)
+    //   และผสม Master ทับค่าที่ผู้ใช้แก้ไปแล้วในใบต้นฉบับ
+    const prepared = opts.prepare === "none"
+      ? { record, fieldModes: opts.fieldModes ?? {}, codeFixes: [] as Awaited<ReturnType<typeof prepareDeclarationRecord>>["codeFixes"], templateName: undefined }
+      : await prepareDeclarationRecord(record, {
+        fieldModes: opts.fieldModes, templateId: opts.templateId, skipMaster: opts.prepare === "noMaster",
+      });
     record = prepared.record;
     const fieldModes = prepared.fieldModes;
     const codeFixes = prepared.codeFixes;
@@ -1490,7 +1514,10 @@ export async function applyMasterToRecord(
       //   → เอกสารเขียนค่ามา = ใช้ค่า Master + บันทึกคำเตือนให้ผู้ใช้ตรวจ
       //   → AI ตอบว่าง = คงไว้แบบเดิม (DCTK เติมเองจากคลังสินค้า ซึ่งเป็นค่าที่ยื่นจริงอยู่ทุกวันนี้
       //     ตรวจกับ PDF ใบขน 55 ใบแล้ว 1 พ.ย.: Master บางราย เช่น THANAKORN KPV/ALF/VSI ไม่ตรงกับที่ยื่นจริง)
+      // สินค้านี้ไม่ตรงกับแถวไหนใน Master (ระบบหยิบแถวแรกมาแทน) → ไม่เอาค่าของสินค้าอื่นมาทับค่าจากเอกสาร
+      const sameProduct = masterItemMatches(aiIt, tplItems, raw as Record<string, unknown>);
       for (const k of Object.keys(base)) {
+        if (!sameProduct) break;
         if (!(k in sp.extra) || !(k in aiIt)) continue;
         const docVal = String(aiIt[k] ?? "").trim();
         if (!docVal) continue;

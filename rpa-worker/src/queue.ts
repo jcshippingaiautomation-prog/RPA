@@ -62,21 +62,18 @@ export async function isCancelRequested(jobId: string): Promise<boolean> {
 
 /** mark งานเสร็จ (done) + เก็บ result */
 export async function markDone(jobId: string, result: unknown): Promise<void> {
-  await sb()
-    .from("job_queue")
-    .update({ status: "done", result, finished_at: new Date().toISOString() })
-    .eq("id", jobId)
-    // ถ้าถูก cancel ไปแล้ว อย่าทับเป็น done
-    .neq("status", "cancel");
+  const now = new Date().toISOString();
+  // ถ้าถูก cancel ไปแล้ว อย่าทับเป็น done — แต่ต้องเก็บผล + เวลาจบไว้ด้วย
+  //   (เลขใบร่างที่ค้าง / ไฟล์แคปที่ได้ก่อนหยุด หายจากประวัติงาน · และ auto-update ใช้ finished_at ดูว่างานจบหรือยัง)
+  await sb().from("job_queue").update({ status: "done", result, finished_at: now }).eq("id", jobId).neq("status", "cancel");
+  await sb().from("job_queue").update({ result, finished_at: now }).eq("id", jobId).eq("status", "cancel");
 }
 
 /** mark งาน error */
 export async function markError(jobId: string, errMsg: string): Promise<void> {
-  await sb()
-    .from("job_queue")
-    .update({ status: "error", error: errMsg, finished_at: new Date().toISOString() })
-    .eq("id", jobId)
-    .neq("status", "cancel");
+  const now = new Date().toISOString();
+  await sb().from("job_queue").update({ status: "error", error: errMsg, finished_at: now }).eq("id", jobId).neq("status", "cancel");
+  await sb().from("job_queue").update({ error: errMsg, finished_at: now }).eq("id", jobId).eq("status", "cancel");
 }
 
 export { sb as workerSupabase };

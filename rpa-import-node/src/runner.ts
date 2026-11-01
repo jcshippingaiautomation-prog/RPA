@@ -98,8 +98,11 @@ export interface RunOptions {
   editDeclarationNo?: string;
   /** id ใน Supabase ของใบที่จะแก้/พิมพ์ซ้ำ (ผูก status + onCaptureMeta/onDocument) */
   editDeclarationId?: string;
-  /** รันเฉพาะแถวเหล่านี้ (1-based). ว่าง = ทุกแถว */
+  /** รันเฉพาะแถวเหล่านี้ (1-based). ว่าง = ทุกแถว
+   *  ⚠ ลำดับแถวเลื่อนได้ระหว่างรอคิว (ใบที่ทำเสร็จหลุดออกจากรายการ) — งานจากเว็บให้ใช้ onlyDeclarationId แทน */
   onlyRows?: number[];
+  /** รันเฉพาะใบที่ id ใน Supabase ตรงกัน (ชนะ onlyRows) — ไม่เจอ = ไม่รันอะไรเลย ห้ามไปทำใบอื่นแทน */
+  onlyDeclarationId?: string;
   /** ทำเฉพาะใบที่เลขใบกำกับตรงกัน (ใช้ทดสอบบนเครื่อง) */
   onlyInvoice?: string;
   /** ตัวรับ log สด */
@@ -439,7 +442,16 @@ export async function runImport(opts: RunOptions = {}): Promise<RunResult> {
     });
     opts.onRows?.(rows);
 
-    const onlySet = opts.onlyInvoice
+    // 🔒 ระบุใบด้วย id (งานจากเว็บ) — เดิมใช้ "ลำดับแถว" ซึ่งเลื่อนเมื่อใบก่อนหน้าทำเสร็จแล้วหลุดจากรายการ
+    //   เช่น สั่งรัน A,B,C (แถว 1,2,3) → A เสร็จหลุดออก → งานของ B ขอแถว 2 = C → ยื่น C แทน B
+    const byId = opts.onlyDeclarationId && opts.mode !== "edit" && opts.mode !== "reprint"
+      ? records.map((r, i) => (String(r.__supabase_id__ ?? "") === opts.onlyDeclarationId ? i + 1 : 0)).filter(Boolean)
+      : null;
+    if (byId && !byId.length) {
+      throw new Error("ไม่พบใบนี้ในรายการที่รอทำ (อาจทำเสร็จแล้วหรือถูกลบ) — ไม่ได้กรอกใบอื่นแทน");
+    }
+    const onlySet = byId ? new Set(byId)
+      : opts.onlyInvoice
       ? new Set(rows.filter((x) => x.invoice === opts.onlyInvoice).map((x) => x.index))
       : opts.onlyRows && opts.onlyRows.length
         ? new Set(opts.onlyRows)
@@ -763,9 +775,21 @@ async function runBrowser(
   // จำนวนขั้นของงานแต่ละแบบ (ให้เว็บแสดง "ขั้น 2/6")
   const totalSteps = opts.mode === "edit" ? 6 : opts.mode === "reprint" ? 2 : 6;
   stepProgress(1, totalSteps, "เปิดระบบ DCTK และเข้าสู่ระบบ");
-  await page.goto(cfg.url, { waitUntil: "commit", timeout: 60000 });
-  await waitForPageReady(page, "หน้า login");
-  await login(page, cfg.username, cfg.password);
+  try {
+    await page.goto(cfg.url, { waitUntil: "commit", timeout: 60000 });
+    await waitForPageReady(page, "หน้า login");
+    await login(page, cfg.username, cfg.password);
+  } catch (e) {
+    // DCTK ล่ม/ช้าตั้งแต่หน้า login — ยังไม่ได้แตะอะไรในใบ
+    //   เดิมโยน error ออกไปตรง ๆ: เบราว์เซอร์ค้างบน VM · worker ไม่ลองใหม่ (ดูแค่ result.errors) · ใบค้าง "กำลังรัน"
+    const msg = `เข้า DCTK ไม่ได้ (ยังไม่ได้แตะอะไรในใบ): ${e instanceof Error ? e.message.slice(0, 160) : String(e)}`;
+    log(`  ✗ ${msg}`);
+    for (let k = 0; k < records.length; k++) {
+      if (!onlySet || onlySet.has(k + 1)) { setStatus(k, "error", msg); result.errors++; }
+    }
+    await context.close().catch(() => {}); await browser.close().catch(() => {});
+    return;
+  }
   if (opts.shouldStop?.()) {
     log("⏹ ผู้ใช้กดยกเลิก — หยุดก่อนเริ่มกรอก (ยังไม่ได้แตะอะไรใน DCTK)");
     result.stopped = true;

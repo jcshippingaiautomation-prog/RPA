@@ -12,7 +12,7 @@ import {
   markError,
   type JobRow,
 } from "./queue.js";
-import { listCustomerSettings, uploadDocument, setDeclarationStatus, type CustomerCase } from "./supa.js";
+import { listCustomerSettings, uploadDocument, setDeclarationStatus, getDeclarationState, type CustomerCase } from "./supa.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -46,6 +46,19 @@ async function runRpaImport(job: JobRow): Promise<void> {
   const onlyRows = Array.isArray(payload.onlyRows) ? payload.onlyRows : undefined;
   const declId = payload.declId;
   let declDocUploaded = false; // ได้ไฟล์ใบขนจริง (kind=declaration) ไหม — ใช้ตัดสินสถานะ
+
+  // 🔒 ใบนี้ยังรอทำอยู่จริงไหม (กดรันซ้ำ/ส่งซ้ำจากหลายแท็บ → งานที่สองต้องไม่ยื่นใบซ้ำ และไม่ไปทับสถานะ "เสร็จ")
+  if (declId && !dryRun) {
+    const st = await getDeclarationState(declId);
+    if (st === null || st?.doc_status) {
+      const why = st === null ? "ไม่พบใบนี้แล้ว (ถูกลบ)" : "ใบนี้ทำเอกสารไปแล้ว";
+      await appendLog(job.id, "log", { line: `[WORKER] ⏭ ${why} — ข้ามงานนี้ ไม่ได้เข้า DCTK` });
+      const skipped = { total: 0, done: 0, errors: 0, skipped: 1, stopped: false, note: why };
+      await appendLog(job.id, "lifecycle", { event: "run-done", result: skipped, mode: "skip" });
+      await markDone(job.id, skipped);
+      return;
+    }
+  }
 
   const configOverrides: Partial<AppConfig> = {};
   if (typeof payload.headless === "boolean") configOverrides.headless = payload.headless;
@@ -94,6 +107,8 @@ async function runRpaImport(job: JobRow): Promise<void> {
     presetsOverride,
     casesOverride,
     onlyRows,
+    // 🔒 งานของใบเจาะจง → ระบุด้วย id เสมอ (ลำดับแถวเลื่อนได้ระหว่างรอคิว)
+    onlyDeclarationId: declId || undefined,
     onLog: (line) => void appendLog(job.id, "log", { line }),
     onRows: (rows: RowInfo[]) => void appendLog(job.id, "row", { rows }),
     onRowStatus: (row) => void appendLog(job.id, "row-status", row),
@@ -109,7 +124,8 @@ async function runRpaImport(job: JobRow): Promise<void> {
       });
       if (rec) await appendLog(job.id, "document", rec);
       else await appendLog(job.id, "log", { line: "[WORKER] ⚠ อัปเอกสารไม่สำเร็จ" });
-      if (doc.kind === "declaration") declDocUploaded = true; // ได้ใบขนจริงแล้ว
+      // ได้ใบขนจริงแล้ว — นับเฉพาะเมื่ออัปขึ้นคลังสำเร็จ (ไม่งั้นใบขึ้น "เสร็จ" แต่ไม่มีไฟล์ให้เปิด)
+      if (rec && doc.kind === "declaration") declDocUploaded = true;
     },
     onCaptureMeta: async (meta) => {
       await appendLog(job.id, "log", { line: `[WORKER] 🧾 เลขใบขน DCTK: ${meta.declarationNo}` });
@@ -134,7 +150,7 @@ async function runRpaImport(job: JobRow): Promise<void> {
       line: `[WORKER] ↻ รอบ ${attempt - 1} ไม่สำเร็จ (DCTK ช้า/ล่ม ก่อนสร้างใบ) — ลองใหม่อัตโนมัติ (รอบ ${attempt}/3)`,
     });
     await sleep(8000);
-    if (cancelFlag) break;
+    if (cancelFlag) { result = { ...result, stopped: true }; break; }   // กดยกเลิกระหว่างรอ = ยกเลิก ไม่ใช่ error
     result = await runOnce();
   }
 
@@ -210,6 +226,12 @@ async function runRpaEdit(job: JobRow): Promise<void> {
   await appendLog(job.id, "lifecycle", { event: "run-done", result, mode: "edit" });
   if (payload.declId && result.stopped) {
     await setDeclarationStatus(payload.declId, { status: payload.prevStatus || "cancelled", status_message: "ยกเลิกการแก้ไขแล้ว — หน้าที่บันทึกไปก่อนกดยกเลิกยังอยู่ในใบ" });
+  } else if (payload.declId) {
+    // เขียนสถานะสุดท้ายเอง (เว็บบน Render อาจหลับ → ใบค้าง "กำลังรัน" ตลอด)
+    const ok = (result.errors ?? 0) === 0;
+    await setDeclarationStatus(payload.declId, ok
+      ? { status: "edited", status_message: "แก้ไขใบขนเสร็จ" }
+      : { status: "error", status_message: "แก้ไขใบขนไม่สำเร็จ — ดูประวัติงาน" });
   }
   await markDone(job.id, result as unknown as Record<string, unknown>);
 }
@@ -225,6 +247,7 @@ async function runRpaPrint(job: JobRow): Promise<void> {
   const configOverrides: Partial<AppConfig> = {};
   if (typeof payload.headless === "boolean") configOverrides.headless = payload.headless;
 
+  let printUploaded = false;
   await appendLog(job.id, "lifecycle", { event: "run-start", startedAt: Date.now(), mode: "reprint" });
   await appendLog(job.id, "log", { line: `[WORKER] 🖨 พิมพ์ใบขนซ้ำ DCTK เลข ${declarationNo}` });
 
@@ -240,6 +263,7 @@ async function runRpaPrint(job: JobRow): Promise<void> {
     onDocument: async (doc) => {
       const rec = await uploadDocument(doc.filePath, { customer: doc.customer, invoice: doc.invoice, kind: doc.kind, declarationId: payload.declId ?? null });
       if (rec) await appendLog(job.id, "document", rec);
+      if (rec && doc.kind === "declaration") printUploaded = true;
     },
     onCaptureMeta: async (meta) => void appendLog(job.id, "capture-meta", meta),
     shouldStop: () => cancelFlag,
@@ -249,6 +273,11 @@ async function runRpaPrint(job: JobRow): Promise<void> {
   await appendLog(job.id, "lifecycle", { event: "run-done", result, mode: "reprint" });
   if (payload.declId && result.stopped) {
     await setDeclarationStatus(payload.declId, { status: payload.prevStatus || "cancelled", status_message: "ยกเลิกการพิมพ์ใบขนซ้ำแล้ว" });
+  } else if (payload.declId) {
+    // พิมพ์ไม่สำเร็จ ≠ ใบเสีย — คืนสถานะเดิม (ใบที่ยื่นแล้วต้องไม่กลายเป็น "ผิดพลาด")
+    await setDeclarationStatus(payload.declId, printUploaded
+      ? { status: "done", status_message: "พิมพ์ใบขนซ้ำเสร็จ" }
+      : { status: payload.prevStatus || "partial", status_message: "พิมพ์ใบขนซ้ำไม่สำเร็จ — ลองกดพิมพ์ซ้ำอีกครั้ง" });
   }
   await markDone(job.id, result as unknown as Record<string, unknown>);
 }
@@ -345,6 +374,15 @@ async function handleJob(job: JobRow): Promise<void> {
     const msg = err instanceof Error ? err.message : String(err);
     await appendLog(job.id, "lifecycle", { event: "run-error", error: msg });
     await markError(job.id, msg);
+    // ใบที่ผูกกับงานนี้ต้องไม่ค้าง "กำลังรัน" — สร้างใบ: ผิดพลาด · แก้/พิมพ์ซ้ำ: คืนสถานะเดิม
+    const p = (job.payload ?? {}) as { declId?: string; prevStatus?: string };
+    if (p.declId && !job.dry_run) {
+      const isImport = job.type === "rpa_import";
+      await setDeclarationStatus(p.declId, {
+        status: isImport ? "error" : (p.prevStatus || "error"),
+        status_message: `RPA หยุดกลางทาง: ${msg.slice(0, 160)}`,
+      });
+    }
   } finally {
     cancelFlag = true; // หยุด watcher
     await cancelWatcher.catch(() => {});

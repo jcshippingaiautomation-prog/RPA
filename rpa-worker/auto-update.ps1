@@ -26,11 +26,18 @@ if ($before -and $remote -and ($before -ne $remote)) {
       if ($_ -match '^\s*SUPABASE_SERVICE_KEY\s*=\s*(.+)$') { $sk = $matches[1].Trim() }
     }
     if ($su -and $sk) {
+      # A cancelled job keeps running until a safe stop point (finalize cannot be cancelled),
+      # so status=cancel with finished_at empty is still BUSY. Only look at jobs started in the last 3 hours.
+      $since = (Get-Date).ToUniversalTime().AddHours(-3).ToString("yyyy-MM-ddTHH:mm:ss")
       try {
-        $r = Invoke-RestMethod -Uri "$su/rest/v1/job_queue?status=eq.processing&select=id&limit=1" `
+        $r = Invoke-RestMethod -Uri "$su/rest/v1/job_queue?status=in.(processing,cancel)&finished_at=is.null&started_at=gte.$since&select=id&limit=1" `
                -Headers @{ apikey = $sk; Authorization = "Bearer $sk" } -TimeoutSec 15
         if ($r -and @($r).Count -gt 0) { $busy = $true }
-      } catch { }
+      } catch {
+        # cannot check -> assume busy (never risk killing a job in the middle of finalize)
+        $busy = $true
+        Log "busy check failed: $($_.Exception.Message) -> defer"
+      }
     }
   }
   if ($busy) {
