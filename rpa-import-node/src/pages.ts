@@ -1106,6 +1106,16 @@ export async function fillPage2Fill(page: Page, r: Record): Promise<Page> {
   // ---- STEP 2: จำนวนเงิน "ราคา" (div:6 termForeign / #_AmountForeign) ----
   await put(page, r, "total_goods_amount", S.SEL_AMOUNT, stripZeroDecimals(r.amount ?? ""));
 
+  // ---- ค่าขนส่งโรงงาน (Forward) — ส่วนบวกจาก EXW ไป FOB (ZECK TSE: +3% หรือค่าขนส่งเหมาต่อใบ)
+  //   DCTK คิด FOB = ราคา + ค่าขนส่งโรงงาน เอง · กรอกจำนวนเงินก่อน แล้วเลือกสกุลเงินจริงทีหลัง (แบบเดียวกับค่าระวาง)
+  const fwdHead = Number(String((r.__extra_fields__ as { [k: string]: unknown } | undefined)?.forward_foreign ?? "").replace(/,/g, ""));
+  if (Number.isFinite(fwdHead) && fwdHead > 0) {
+    const got = await setKendoNumeric(page, "_ForwardForeign", fwdHead);
+    if (wantCurrency) await selectCurrencyRealClick(page, "_Forward_input", currency);
+    await forceCurrencyFields(page, "Forward", currency);
+    log(`  🚚 ค่าขนส่งโรงงาน (หัวใบ) = ${fwdHead.toLocaleString()} ${currency} (ช่องตอบกลับ "${got ?? "ไม่เจอช่อง"}")`);
+  }
+
   // ค่าระวาง: กรอกเมื่อ term รวมค่าระวาง (CIF/CFR/CNF/C&F) — DCTK บังคับค่าระวาง > 0
   //   🔑 จาก dump field จริง: ใส่ USD แล้ว _Freight="USD" ทันที แต่ "การกรอกจำนวนเงินทีหลัง"
   //      → DCTK คำนวณใหม่ → รีเซ็ต _Freight กลับเป็น "0" (เพราะแถวยัง aria-selected=false)
@@ -1335,6 +1345,24 @@ async function setKendoNumeric(page: Page, name: string, value: number): Promise
   }, { n: name, v: value }).catch(() => null);
 }
 
+/**
+ * ตั้งสกุลเงินของแถวค่าใช้จ่าย (Freight/Insurance/Forward ฯลฯ) ให้ครบทั้ง 2 ชั้น
+ *   model field (<Prefix>CurrencyCode) + Kendo widget (_<Prefix> / _<Prefix>_input)
+ *   Kendo recalc ชอบรีเซ็ต widget เป็น "0" → ตั้งซ้ำตอนท้ายก่อนเซฟ ([[dctk-currency-combo-attempts]])
+ */
+async function forceCurrencyFields(page: Page, prefix: string, cur: string): Promise<void> {
+  if (!cur) return;
+  await page.evaluate(({ p, c }: { p: string; c: string }) => {
+    for (const sel of [`[name="${p}CurrencyCode"]`, `[name="_${p}"]`, `input[name="_${p}_input"]`]) {
+      const el = document.querySelector(sel) as HTMLInputElement | null;
+      if (!el) continue;
+      el.value = c;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }, { p: prefix, c: cur }).catch(() => {});
+}
+
 /** ค่าตัวเลข "ของรายการนี้" ที่ต้องกรอกเอง (0 = ไม่ต้องกรอก ปล่อยค่าที่ DCTK เติม/คำนวณ) */
 function itemNumber(item: Record, key: string): number {
   const ex = (item.__extra_fields__ ?? {}) as { [k: string]: unknown };
@@ -1349,7 +1377,14 @@ function itemNumber(item: Record, key: string): number {
  * ย้ำค่าเงินรายรายการก่อนกดบันทึก — Kendo คำนวณใหม่ทุกครั้งที่แตะช่องอื่น
  * จึงต้องตั้งค่าซ้ำ "ตอนสุดท้ายก่อนเซฟ" ทั้งแถวสุดท้ายและแถวระหว่างทาง
  */
-async function forceItemMoneyBeforeSave(page: Page, item: Record): Promise<void> {
+async function forceItemMoneyBeforeSave(page: Page, item: Record, cur = ""): Promise<void> {
+  // ค่าขนส่งโรงงาน (ส่วนบวก EXW→FOB) ต่อรายการ — ถ้าปล่อยว่าง DCTK จะเฉลี่ยจากหัวใบเอง (อาจไม่ตรงที่เอกสารคิดไว้)
+  const fwd = itemNumber(item, "forward_foreign");
+  if (fwd > 0) {
+    await forceCurrencyFields(page, "Forward", cur);
+    const got = await setKendoNumeric(page, "_ForwardForeign", fwd);
+    log(`  🚚 ย้ำค่าขนส่งโรงงานรายรายการก่อนเซฟ = ${fwd.toLocaleString()} ${cur} (ช่องตอบกลับ "${got ?? "ไม่เจอช่อง"}")`);
+  }
   // ช่องเงิน — DCTK เฉลี่ยให้เองถ้าปล่อยว่าง (ตามน้ำหนัก ซึ่งไม่ใช่สิ่งที่ใบกำกับเขียนไว้)
   const freight = itemNumber(item, "freight_foreign");
   if (freight > 0) {
@@ -1618,7 +1653,7 @@ async function fillOneGoodsItem(
   }
 
   // ---- STEP: จำนวนเงิน "ค่าระวาง" ต่อ item (Kendo NumericTextBox — ตัวกรอกช่องเสริมพิมพ์ไม่ได้)
-  await forceItemMoneyBeforeSave(page, item);
+  await forceItemMoneyBeforeSave(page, item, String(r.currency ?? "").trim().toUpperCase());
 
   // ---- ช่องเสริมต่อรายการจากทะเบียนช่อง (รหัสสิทธิพิเศษ, ประเทศต้นกำเนิด, หมายเหตุรายการ ฯลฯ)
   //   ⚠ ตัวกรอกนี้ข้ามช่อง computed ทั้งหมด (พิกัด/หน่วยหลังพิกัด/ราคาต่อหน่วย) ที่ DCTK เติมเอง
@@ -1743,7 +1778,7 @@ export async function fillPage3(page: Page, r: Record): Promise<void> {
         }, { want: curP3, doFreight: hasFreightP3, doIns: hasInsuranceP3 });
         log(`  🔑 force สกุลเงินก่อนเซฟ (freight=${hasFreightP3} insurance=${hasInsuranceP3}): ${JSON.stringify(forced)}`);
       }
-      await forceItemMoneyBeforeSave(page, item);
+      await forceItemMoneyBeforeSave(page, item, String(r.currency ?? "").trim().toUpperCase());
       await page.click(S.SEL_BTN_SAVE_CLOSE);
       // ⏱ รอจน tab ปิดจริง (= DCTK บันทึก Page 3 + ปิดหน้าสำเร็จ) แทน sleep(5000) ตายตัว
       //   🔑 ROOT CAUSE จริง (ที่ทำให้ใบไม่สมบูรณ์ → พิมพ์ไม่ออก): หลัง Save&Close DCTK เด้ง
@@ -1827,7 +1862,7 @@ export async function fillPage3(page: Page, r: Record): Promise<void> {
         log(`  🔎 สภาพช่องพิกัดก่อนกดบันทึก (รายการ 1):`);
         await dumpTariffWidgets(page);
       }
-      await forceItemMoneyBeforeSave(page, item);
+      await forceItemMoneyBeforeSave(page, item, String(r.currency ?? "").trim().toUpperCase());
       await page.click(S.SEL_BTN_SAVE_AND_ADD);
       await sleep(2000);
       await dismissAlertIfPresent(page); // บางลูกค้าเด้ง modal หลังบันทึก

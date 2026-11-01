@@ -109,6 +109,9 @@ export function postProcess(rawText: string): DeclarationRecord {
 
   applyFallbacks(r);
   flagIfIncomplete(r);
+  // ค่าขนส่งโรงงาน (ส่วนบวก EXW→FOB) — ไม่มีคอลัมน์ของตัวเอง เก็บใน extra_fields (RPA กรอกช่อง _ForwardForeign)
+  const fwdHead = toNumber(parsed.forward_charge);
+  if (fwdHead > 0) r.extra_fields = { ...((r.extra_fields ?? {}) as Record<string, unknown>), forward_foreign: String(fwdHead) };
 
   // items[] — normalize แต่ละรายการ
   r._items = [];
@@ -158,6 +161,8 @@ export function postProcess(rawText: string): DeclarationRecord {
       item.export_tariff = "";        // ปล่อยให้ Master/preset เป็นคนใส่ "ประเภทพิกัด"
     }
     if (!item.customs_unit_code && r.customs_unit_code) item.customs_unit_code = r.customs_unit_code as string;
+    const fwdItem = toNumber(it.forward);
+    if (fwdItem > 0) item.extra_fields = { ...((item.extra_fields ?? {}) as Record<string, unknown>), forward_foreign: String(fwdItem) };
     if (item.is_foc) item.container_or_volume_qty = "0";
     if (item.net_weight_ton <= 0 && item.net_weight_kg > 0) {
       item.net_weight_ton = round(item.net_weight_kg / 1000, 3);

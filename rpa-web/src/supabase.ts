@@ -836,6 +836,24 @@ async function customerPreset(customer: string, key: string): Promise<string> {
   } catch { return ""; }
 }
 
+/** แปลงหน่วยปริมาณตามตารางของลูกค้า ("PC=C62,PCS=C62,REEL=RL") — หัวใบและทุกรายการ */
+function applyUnitMap(record: Record<string, unknown> & { _items?: Record<string, unknown>[] }, spec: string): void {
+  const map = new Map<string, string>();
+  for (const pair of String(spec || "").split(/[,;\n]+/)) {
+    const [from, to] = pair.split("=").map((x) => x.trim().toUpperCase());
+    if (from && to) map.set(from, to);
+  }
+  if (!map.size) return;
+  const fix = (o: Record<string, unknown>) => {
+    for (const k of ["net_weight_unit_code", "customs_unit_code"]) {
+      const v = String(o[k] ?? "").trim().toUpperCase();
+      if (map.has(v)) o[k] = map.get(v);
+    }
+  };
+  fix(record);
+  for (const it of record._items ?? []) fix(it);
+}
+
 /** ลูกค้ารายนี้ให้ยอดหีบห่อหัวใบเดินตามผลรวมรายการไหม — เก็บใน presets ของตั้งค่าลูกค้า */
 async function packageFromItems(customer: string): Promise<boolean> {
   if (!customer.trim()) return false;
@@ -982,6 +1000,9 @@ export async function prepareDeclarationRecord(
     // ── ปรับหน่วย/สกุลเงิน/รหัสประเทศ ให้ตรงรหัสที่กรมฯ รับ ก่อนบันทึก ──
     //   AI อ่านตามที่เขียนในเอกสาร ("TON", "KGS") แต่ DCTK รับเฉพาะรหัสของตัวเอง
     //   ปรับตั้งแต่ตอนนี้ ผู้ใช้จะเห็นค่าที่ถูกในหน้าตรวจสอบ และ RPA ค้นคอมโบเจอ
+    // หน่วยที่เอกสารลูกค้ารายนี้เขียน แต่รหัสกรมฯ ตีความคนละอย่าง (preset __unit_map เช่น "PC=C62,REEL=RL")
+    //   ZECK TSE: เอกสารเขียน PC = ชิ้น แต่รหัส PC ของกรมฯ = PARCEL → ตัวแปลงรหัสกลางไม่แตะเพราะเป็นรหัสที่มีอยู่จริง
+    applyUnitMap(record, await customerPreset(String(record.customer_name ?? ""), "__unit_map"));
     const codeFixes = await normalizeToDctkCodes(record);
     for (const f of codeFixes) {
       console.log(`[code] ${f.scope === "item" ? `รายการ ${f.itemLine}: ` : ""}${f.label}: "${f.from}" → "${f.to}" (${f.listLabel})`);
