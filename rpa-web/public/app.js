@@ -1336,12 +1336,16 @@ async function cancelJobById(jobId) {
 const CAP_LIVE = ["pending", "claimed", "processing", "running"];
 let capShowAll = false;
 function capSelectText(sel) {
-  if (!sel) return "ทุกหน้า ทุกรายการ";
+  if (!sel) return "ทุกหน้าของใบ";
+  if (sel.allItems) {
+    const t = [sel.allItems.general && "ทั่วไป", sel.allItems.privilege && "สิทธิประโยชน์"].filter(Boolean).join(" + ");
+    return `ทุกรายการ (${t})`;
+  }
   const pages = [sel.header && "หัวใบ", sel.list && "ตารางใบกำกับ/รายการ", sel.invoice && "ฟอร์มใบกำกับ", sel.exchange && "การแลกเปลี่ยนข้อมูล"].filter(Boolean);
   const items = sel.items || [];
   const g = items.filter((x) => x.general).length, pr = items.filter((x) => x.privilege).length;
-  const it = items.length ? `รายการ ${items.map((x) => x.no).join(", ")}${g && pr ? "" : g ? " (ทั่วไป)" : " (สิทธิประโยชน์)"}` : "";
-  return [pages.join(" · "), it].filter(Boolean).join(" · ") || "—";
+  const it = items.length ? `รายการ ${rangesText(new Set(items.map((x) => x.no)))}${g && pr ? " (ทั่วไป + สิทธิประโยชน์)" : g ? " (ทั่วไป)" : " (สิทธิประโยชน์)"}` : "";
+  return [it, pages.join(" · ")].filter(Boolean).join(" · ") || "—";
 }
 async function loadCaptures() {
   clearTimeout(capTimer);
@@ -1425,13 +1429,13 @@ async function startCapScan() {
 function renderCapScanning(msg) {
   const s = Math.round((Date.now() - capScan.t0) / 1000);
   capPickHtml(`<div class="cap-scanning"><span class="task-spin"></span>
-    <div><b>กำลังดึงข้อมูลใบ ${escapeHtml(capScan.ref)}</b>
+    <div><b>กำลังดึงรายการสินค้าในใบ ${escapeHtml(capScan.ref)}</b>
       <div class="muted" style="font-size:12px">${escapeHtml(msg || JOB_PROGRESS[capScan.jobId] || "รอคิว…")} · ${s} วินาที</div></div>
     <button class="btn btn-ghost btn-xs" id="capScanStop">${svgIcon("x", 13)} ยกเลิก</button></div>`);
   $("capScanStop").onclick = async () => {
     clearInterval(capScan.timer);
     await api(`/api/jobs/${encodeURIComponent(capScan.jobId)}/cancel`, "POST", {}).catch(() => {});
-    capScan = null; $("capPick").innerHTML = ""; toast("ยกเลิกการดึงข้อมูลแล้ว", "info");
+    capScan = null; $("capPick").innerHTML = ""; toast("ยกเลิกการดึงรายการแล้ว", "info");
   };
 }
 async function pollCapScan() {
@@ -1443,67 +1447,115 @@ async function pollCapScan() {
   const res = j.result || {};
   if (j.status === "done" && res.scan) { capScan.data = res.scan; renderCapChoices(); return; }
   const why = (res.notes || [])[0] || j.error || (res.stopped || j.status === "cancel" ? "ยกเลิกแล้ว" : "ไม่ทราบสาเหตุ");
-  capPickHtml(`<div class="cap-err">${svgIcon("info", 16)} ดึงข้อมูลใบ ${escapeHtml(capScan.ref)} ไม่สำเร็จ — ${escapeHtml(why)}
-    <div class="muted" style="font-size:12px;margin-top:4px">ตรวจเลขใบแล้วลองใหม่ หรือกด "แคปทุกหน้าเลย" เพื่อแคปโดยไม่ต้องเลือก</div></div>`);
+  capPickHtml(`<div class="cap-err">${svgIcon("info", 16)} ดึงรายการสินค้าในใบ ${escapeHtml(capScan.ref)} ไม่สำเร็จ — ${escapeHtml(why)}
+    <div class="muted" style="font-size:12px;margin-top:4px">ตรวจเลขใบแล้วลองใหม่ หรือกด "แคปทุกรายการเลย" เพื่อแคปโดยไม่ต้องเลือก</div></div>`);
 }
+/** "8-15, 18-20, 66 96" → Set ของเลขรายการ (ตัดเลขที่ไม่มีในใบทิ้ง) */
+function parseItemRanges(text, valid) {
+  const out = new Set();
+  for (const part of String(text).split(/[,\s;]+/).filter(Boolean)) {
+    const m = part.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+    if (m) { let [x, y] = [Number(m[1]), Number(m[2])]; if (x > y) [x, y] = [y, x]; for (let n = x; n <= y; n++) if (valid.has(n)) out.add(n); }
+    else if (/^\d+$/.test(part) && valid.has(Number(part))) out.add(Number(part));
+  }
+  return out;
+}
+/** Set ของเลขรายการ → "8-15, 18-20, 66" (ไว้โชว์สรุป) */
+function rangesText(nums) {
+  const a = [...nums].sort((x, y) => x - y), out = [];
+  for (let i = 0; i < a.length; i++) {
+    let j = i; while (j + 1 < a.length && a[j + 1] === a[j] + 1) j++;
+    out.push(j > i ? `${a[i]}-${a[j]}` : `${a[i]}`); i = j;
+  }
+  return out.join(", ");
+}
+// เมนูนี้แคป "หน้ารายการสินค้า" ที่เลือก (แท็บทั่วไป + สิทธิประโยชน์) — ไม่ใช่ทุกหน้าแบบตอนสร้างใบขน
+//   หน้าอื่นของใบ (หัวใบ ฯลฯ) ไม่แคป เว้นแต่ผู้ใช้เปิดเลือกเอง
 function renderCapChoices() {
   const d = capScan.data;
   const inv = d.invoices || [], items = d.items || [];
+  const valid = new Set(items.map((x) => x.no));
+  const boiNos = items.filter((x) => x.boi).map((x) => x.no);
   const num = (v) => { const n = Number(v); return Number.isFinite(n) && v !== "" ? n.toLocaleString("en-US", { maximumFractionDigits: 3 }) : (v || ""); };
   const head = [d.referenceNo, inv.map((x) => x.no).join(", "), inv[0] && inv[0].consignee].filter(Boolean).map(escapeHtml).join(" · ");
   capPickHtml(`
     <div class="cap-head">${svgIcon("check", 16)} <b>${head}</b>
-      <span class="muted">· ใบกำกับ ${inv.length} ใบ · รายการสินค้า ${items.length} รายการ</span></div>
-    <div class="cap-step">เลือกหน้า</div>
-    <div class="cap-pages">${CAP_PAGES.map(([k, t]) => `<label class="cap-opt"><input type="checkbox" class="capPg" value="${k}" checked/> ${t}</label>`).join("")}</div>
-    <div class="cap-step">เลือกรายการสินค้า <span class="muted">(แต่ละรายการมี 2 แท็บ)</span></div>
-    ${items.length ? `<div class="table-scroll"><table class="dt cap-items"><thead><tr>
-        <th style="width:44px">ที่</th><th>สินค้า</th><th>พิกัด</th><th class="ta-right">ปริมาณ</th><th class="ta-right">ราคา</th>
-        <th class="ta-center"><label class="cap-colchk"><input type="checkbox" id="capAllGen" checked/> ทั่วไป</label></th>
-        <th class="ta-center"><label class="cap-colchk"><input type="checkbox" id="capAllPriv" checked/> สิทธิประโยชน์/ภาษีอากร</label></th>
-      </tr></thead><tbody>${items.map((it) => `<tr>
+      <span class="muted">· รายการสินค้า ${items.length} รายการ${boiNos.length ? ` · ใช้สิทธิ BOI ${boiNos.length} รายการ` : ""}</span></div>
+    <div class="cap-step">1. เลือกรายการที่จะแคป</div>
+    <div class="cap-range">
+      <input class="inp" id="capRange" placeholder="พิมพ์เลขรายการ เช่น 8-15, 18-20, 66-96" />
+      <button class="btn btn-dark btn-sm" id="capRangeApply">เลือกตามนี้</button>
+      <span class="cap-range-sep"></span>
+      <button class="btn btn-ghost btn-sm" id="capPickAll">ทั้งหมด</button>
+      <button class="btn btn-ghost btn-sm" id="capPickNone">ไม่เลือก</button>
+      ${boiNos.length ? `<button class="btn btn-ghost btn-sm" id="capPickBoi">เฉพาะ BOI (${boiNos.length})</button>` : ""}
+    </div>
+    ${items.length ? `<div class="table-scroll cap-items-wrap"><table class="dt cap-items"><thead><tr>
+        <th style="width:40px" class="ta-center"><input type="checkbox" id="capAllItems" checked/></th>
+        <th style="width:44px">ที่</th><th>สินค้า</th><th>พิกัด</th><th class="ta-right">ปริมาณ</th><th class="ta-right">ราคา</th><th>BOI</th>
+      </tr></thead><tbody>${items.map((it) => `<tr data-no="${it.no}">
+        <td class="ta-center"><input type="checkbox" class="capItem" data-no="${it.no}" checked/></td>
         <td>${it.no}</td>
         <td><b>${escapeHtml(it.productCode || "")}</b>${it.description && it.description !== it.productCode ? `<div class="muted cap-sub">${escapeHtml(it.description.slice(0, 90))}</div>` : ""}</td>
         <td class="nowrap">${escapeHtml(it.tariff || "")}</td>
         <td class="ta-right nowrap">${escapeHtml(num(it.quantity))} ${escapeHtml(it.unit || "")}</td>
         <td class="ta-right nowrap">${escapeHtml(num(it.amount))} ${escapeHtml(it.currency || "")}</td>
-        <td class="ta-center"><input type="checkbox" class="capGen" data-no="${it.no}" checked/></td>
-        <td class="ta-center"><input type="checkbox" class="capPriv" data-no="${it.no}" checked/></td></tr>`).join("")}</tbody></table></div>`
+        <td>${it.boi ? `<span class="st st-running" title="${escapeHtml(it.boiLicense || "")}">BOI</span>` : ""}</td></tr>`).join("")}</tbody></table></div>`
       : '<p class="muted">ไม่พบรายการสินค้าในใบนี้</p>'}
+    <div class="cap-step">2. แท็บของแต่ละรายการ</div>
+    <div class="cap-pages">
+      <label class="cap-opt"><input type="checkbox" id="capTabGen" checked/> ทั่วไป</label>
+      <label class="cap-opt"><input type="checkbox" id="capTabPriv" checked/> สิทธิประโยชน์/ภาษีอากร</label>
+    </div>
+    <details class="cap-more"><summary>หน้าอื่นของใบ (ไม่บังคับ — ปกติไม่ต้องใช้)</summary>
+      <div class="cap-pages" style="margin-top:8px">${CAP_PAGES.map(([k, t]) => `<label class="cap-opt"><input type="checkbox" class="capPg" value="${k}"/> ${t}</label>`).join("")}</div>
+    </details>
     <div class="cap-foot">
       <span class="muted" id="capCount"></span>
       <span style="flex:1"></span>
-      <button class="btn btn-ghost btn-sm" id="capDefault">${svgIcon("refresh", 13)} กลับค่าเริ่มต้น (ทุกหน้า)</button>
       <button class="btn btn-ghost btn-sm" id="capClose">ปิด</button>
       <button class="btn btn-dark" id="capGo">${svgIcon("camera", 15)} แคปตามที่เลือก</button>
     </div>`);
   const box = $("capPick");
+  const picked = () => new Set([...box.querySelectorAll(".capItem:checked")].map((c) => Number(c.dataset.no)));
+  const setPicked = (set) => { box.querySelectorAll(".capItem").forEach((c) => (c.checked = set.has(Number(c.dataset.no)))); count(); };
   const count = () => {
+    const sel = picked();
+    const tabs = ($("capTabGen").checked ? 1 : 0) + ($("capTabPriv").checked ? 1 : 0);
     const pages = box.querySelectorAll(".capPg:checked").length;
-    const g = box.querySelectorAll(".capGen:checked").length, pr = box.querySelectorAll(".capPriv:checked").length;
-    const n = pages + g + pr;
-    $("capCount").textContent = n ? `จะได้ ${n} ภาพ · ประมาณ ${Math.max(1, Math.round((70 + (g || pr ? Math.max(g, pr) * 15 : 0)) / 60))} นาที` : "ยังไม่ได้เลือกอะไร";
+    const n = sel.size * tabs + pages;
+    const all = $("capAllItems");
+    if (all) { all.checked = sel.size === items.length && items.length > 0; all.indeterminate = sel.size > 0 && sel.size < items.length; }
+    box.querySelectorAll(".cap-items tbody tr").forEach((tr) => tr.classList.toggle("is-off", !sel.has(Number(tr.dataset.no))));
+    const mins = Math.max(1, Math.round((60 + sel.size * (6 + 3 * tabs) + pages * 5) / 60));
+    $("capCount").textContent = !n ? (sel.size && !tabs ? "ยังไม่ได้เลือกแท็บ" : "ยังไม่ได้เลือกรายการ")
+      : `รายการ ${sel.size === items.length ? "ทั้งหมด" : rangesText(sel) || "-"} · ${n} ภาพ · ประมาณ ${mins} นาที`;
     $("capGo").disabled = !n;
-    const sync = (all, cls) => { const el = $(all); if (!el) return; const t = box.querySelectorAll(cls).length, c = box.querySelectorAll(cls + ":checked").length; el.checked = c === t; el.indeterminate = c > 0 && c < t; };
-    sync("capAllGen", ".capGen"); sync("capAllPriv", ".capPriv");
   };
   box.querySelectorAll("input[type=checkbox]").forEach((el) => (el.onchange = count));
-  const allTo = (id, cls) => { const el = $(id); if (el) el.onchange = () => { box.querySelectorAll(cls).forEach((c) => (c.checked = el.checked)); count(); }; };
-  allTo("capAllGen", ".capGen"); allTo("capAllPriv", ".capPriv");
-  $("capDefault").onclick = () => { box.querySelectorAll("input[type=checkbox]").forEach((c) => { c.checked = true; c.indeterminate = false; }); count(); };
+  if ($("capAllItems")) $("capAllItems").onchange = () => setPicked($("capAllItems").checked ? new Set(valid) : new Set());
+  $("capPickAll").onclick = () => setPicked(new Set(valid));
+  $("capPickNone").onclick = () => setPicked(new Set());
+  if ($("capPickBoi")) $("capPickBoi").onclick = () => setPicked(new Set(boiNos));
+  const applyRange = () => {
+    const txt = $("capRange").value.trim();
+    if (!txt) { toast("พิมพ์เลขรายการก่อน เช่น 8-15, 18-20", "error"); return; }
+    const set = parseItemRanges(txt, valid);
+    if (!set.size) { toast(`ไม่มีรายการตามที่พิมพ์ — ใบนี้มีรายการ 1–${items.length}`, "error"); return; }
+    setPicked(set);
+  };
+  $("capRangeApply").onclick = applyRange;
+  $("capRange").addEventListener("keydown", (e) => { if (e.key === "Enter") applyRange(); });
   $("capClose").onclick = () => { capScan = null; $("capPick").innerHTML = ""; };
   $("capGo").onclick = async () => {
+    const sel = picked();
+    const general = $("capTabGen").checked, privilege = $("capTabPriv").checked;
     const pg = new Set([...box.querySelectorAll(".capPg:checked")].map((c) => c.value));
-    const byNo = {};
-    box.querySelectorAll(".capGen:checked").forEach((c) => ((byNo[c.dataset.no] ??= { no: Number(c.dataset.no) }).general = true));
-    box.querySelectorAll(".capPriv:checked").forEach((c) => ((byNo[c.dataset.no] ??= { no: Number(c.dataset.no) }).privilege = true));
-    const sel = { header: pg.has("header"), list: pg.has("list"), invoice: pg.has("invoice"), exchange: pg.has("exchange"),
-      items: Object.values(byNo).sort((a, b) => a.no - b.no) };
-    // เลือกครบทุกอย่าง = ไม่ต้องส่งรายการเลือก (แคปทุกหน้า ทุกรายการ — ถ้าใบมีรายการเพิ่มทีหลังก็ได้ครบ)
-    const all = pg.size === CAP_PAGES.length && !box.querySelector(".capGen:not(:checked), .capPriv:not(:checked)");
+    const select = { header: pg.has("header"), list: pg.has("list"), invoice: pg.has("invoice"), exchange: pg.has("exchange"),
+      items: (general || privilege) ? [...sel].sort((a, b) => a - b).map((no) => ({ no, general, privilege })) : [] };
     $("capGo").disabled = true;
     try {
-      await requestCapture({ ref: capScan.ref, ...(all ? {} : { select: sel }) });
+      await requestCapture({ ref: capScan.ref, select });
       capScan = null; $("capPick").innerHTML = ""; $("capRef").value = "";
       loadCaptures();
     } catch (e) { $("capGo").disabled = false; toast("ส่งคำสั่งแคปหน้าจอไม่สำเร็จ: " + e.message, "error"); }
@@ -1515,7 +1567,8 @@ $("capRef").addEventListener("keydown", (e) => { if (e.key === "Enter") startCap
 $("btnCapture").onclick = async () => {
   const ref = $("capRef").value.trim();
   if (!ref) { toast("กรุณาใส่เลขอ้างอิง DCTK / เลขใบขน / เลขใบกำกับ", "error"); return; }
-  try { await requestCapture({ ref }); $("capRef").value = ""; loadCaptures(); }
+  // ทุกรายการ ทั้ง 2 แท็บ — ไม่รวมหัวใบ/หน้าอื่น (ต่างจากการแคปตอนสร้างใบขน)
+  try { await requestCapture({ ref, select: { allItems: { general: true, privilege: true } } }); $("capRef").value = ""; loadCaptures(); }
   catch (e) { toast("ส่งคำสั่งแคปหน้าจอไม่สำเร็จ: " + e.message, "error"); }
 };
 $("btnRefreshCaptures").onclick = loadCaptures;
@@ -1984,7 +2037,7 @@ $("btnClearSel").onclick = () => { selected.clear(); renderList(); };
 const PAGE_META = {
   list: { title: "รายการใบขน", sub: "จัดการใบขนสินค้าทั้งหมดในที่เดียว" },
   masters: { title: "คลัง Master", sub: "ชุดค่าที่ใช้ซ้ำได้ของลูกค้าแต่ละราย แยกตาม Consignee และรหัสสินค้า" },
-  captures: { title: "แคปหน้าจอใบขน", sub: "เลือกหน้าและรายการที่จะแคปจากใบขนใน DCTK เป็น PDF (อ่านอย่างเดียว)" },
+  captures: { title: "แคปหน้าจอใบขน", sub: "เลือกรายการสินค้าในใบขน DCTK แล้วแคปเป็น PDF (อ่านอย่างเดียว)" },
   history: { title: "ประวัติงาน", sub: "ประวัติการนำเข้าและเอกสารที่ระบบสร้าง" },
   settings: { title: "ตั้งค่า", sub: "Allowlist · AI · ตารางเวลา · RPA · ลูกค้า" },
 };

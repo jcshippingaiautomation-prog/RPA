@@ -37,6 +37,8 @@ export interface CaptureSelection {
   exchange?: boolean;
   /** รายการสินค้าที่เลือก (ItemNo ใน DCTK) — general = แท็บ "ทั่วไป" · privilege = แท็บ "สิทธิประโยชน์/ภาษีอากร" */
   items?: { no: number; general?: boolean; privilege?: boolean }[];
+  /** ทุกรายการในใบ (ไม่ต้องดึงรายการมาเลือกก่อน) — ใช้แท็บตามที่ระบุ */
+  allItems?: { general?: boolean; privilege?: boolean } | null;
 }
 
 /** ข้อมูลใบที่ดึงมาให้ผู้ใช้เลือกก่อนแคป */
@@ -44,7 +46,7 @@ export interface DeclarationScan {
   ref: string;
   referenceNo: string;
   invoices: { no: string; date: string; consignee: string }[];
-  items: { no: number; invoiceNo: string; productCode: string; description: string; tariff: string; quantity: string; unit: string; amount: string; currency: string }[];
+  items: { no: number; invoiceNo: string; productCode: string; description: string; tariff: string; quantity: string; unit: string; amount: string; currency: string; boi: boolean; boiLicense: string }[];
   status: string;
 }
 
@@ -133,9 +135,9 @@ export async function captureExistingDeclaration(opts: {
       const d: any[] = (window as any).$?.("#gridExDecDtl").data("kendoGrid")?.dataSource?.data?.() ?? [];
       return d.map((r) => ({ no: Number(r.ItemNo), uid: String(r.uid) }));
     }).catch(() => [] as { no: number; uid: string }[]);
-    const plan = sel
-      ? (sel.items ?? []).filter((x) => x.general || x.privilege)
-      : rows.map((r) => ({ no: r.no, general: true, privilege: true }));
+    const plan = !sel ? rows.map((r) => ({ no: r.no, general: true, privilege: true }))
+      : sel.allItems ? rows.map((r) => ({ no: r.no, general: !!sel.allItems!.general, privilege: !!sel.allItems!.privilege })).filter((x) => x.general || x.privilege)
+      : (sel.items ?? []).filter((x) => x.general || x.privilege);
     log(`  รายการสินค้าในใบ ${rows.length} รายการ · แคป ${plan.length} รายการ`);
     let itemFail = 0;
     for (let i = 0; i < plan.length; i++) {
@@ -306,6 +308,9 @@ export async function scanDeclaration(opts: {
           description: s(r.ProductDescriptionEng).slice(0, 160), tariff: s(r.TariffCode),
           quantity: s(r.Quantity), unit: s(r.QuantityUnitCode),
           amount: s(r.AmountForeign), currency: s(r.AmountCurrencyCode),
+          // ใช้สิทธิ BOI ไหม — อยู่ในตารางรายการอยู่แล้ว ไม่ต้องเปิดทีละรายการ
+          boi: r.UseBoi === true || r.UseBoi === 1 || /^(true|1|y)$/i.test(s(r.UseBoi)) || !!s(r.BoiLicenseNo),
+          boiLicense: s(r.BoiLicenseNo),
         })).sort((a, b) => a.no - b.no),
       };
     });

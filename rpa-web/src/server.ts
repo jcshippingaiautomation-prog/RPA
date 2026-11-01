@@ -425,7 +425,7 @@ app.post("/api/captures", async (req, res) => {
     const body = (req.body ?? {}) as { declarationId?: string; ref?: string; mode?: string; select?: unknown };
     const scan = body.mode === "scan";
     const select = scan ? null : cleanCaptureSelect(body.select);
-    if (select && !select.header && !select.list && !select.invoice && !select.exchange && !select.items.length) {
+    if (select && !select.header && !select.list && !select.invoice && !select.exchange && !select.items.length && !select.allItems) {
       res.status(400).json({ error: "ยังไม่ได้เลือกหน้าที่จะแคป" }); return;
     }
     let ref = String(body.ref ?? "").trim();
@@ -458,7 +458,11 @@ app.post("/api/captures", async (req, res) => {
   }
 });
 /** ส่วนที่ผู้ใช้เลือกแคป — รับเฉพาะรูปแบบที่รู้จัก (ไม่ส่ง/ผิดรูป = null = ทุกหน้า ทุกรายการ) */
-function cleanCaptureSelect(v: unknown): { header: boolean; list: boolean; invoice: boolean; exchange: boolean; items: { no: number; general: boolean; privilege: boolean }[] } | null {
+function cleanCaptureSelect(v: unknown): {
+  header: boolean; list: boolean; invoice: boolean; exchange: boolean;
+  items: { no: number; general: boolean; privilege: boolean }[];
+  allItems: { general: boolean; privilege: boolean } | null;
+} | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Record<string, unknown>;
   const items = (Array.isArray(o.items) ? o.items : [])
@@ -466,7 +470,9 @@ function cleanCaptureSelect(v: unknown): { header: boolean; list: boolean; invoi
     .map((x) => ({ no: Math.trunc(Number(x.no)), general: x.general === true, privilege: x.privilege === true }))
     .filter((x) => Number.isFinite(x.no) && x.no > 0 && (x.general || x.privilege))
     .slice(0, 500);
-  return { header: o.header === true, list: o.list === true, invoice: o.invoice === true, exchange: o.exchange === true, items };
+  const all = o.allItems && typeof o.allItems === "object" ? o.allItems as Record<string, unknown> : null;
+  const allItems = all && (all.general === true || all.privilege === true) ? { general: all.general === true, privilege: all.privilege === true } : null;
+  return { header: o.header === true, list: o.list === true, invoice: o.invoice === true, exchange: o.exchange === true, items, allItems };
 }
 app.get("/api/captures", async (_req, res) => {
   if (!supabaseEnabled()) { res.json({ documents: [], jobs: [] }); return; }
