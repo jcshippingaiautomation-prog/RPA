@@ -54,9 +54,9 @@
       <div id="page-list" class="page">
         <!-- Stat cards -->
         <div class="stat-grid stat-grid-3">
-          <div class="stat-card"><div class="stat-ico s-blue"><i data-icon="list"></i></div><div><div class="stat-num" id="cTotal">0</div><div class="stat-label">ทั้งหมด</div></div></div>
-          <div class="stat-card"><div class="stat-ico s-amber"><i data-icon="inbox"></i></div><div><div class="stat-num" id="cReady">0</div><div class="stat-label">พร้อมรัน</div></div></div>
-          <div class="stat-card"><div class="stat-ico s-green"><i data-icon="check-circle"></i></div><div><div class="stat-num" id="cDone">0</div><div class="stat-label">เสร็จแล้ว</div></div></div>
+          <div class="stat-card is-click" data-status="" title="แสดงทุกสถานะ"><div class="stat-ico s-blue"><i data-icon="list"></i></div><div><div class="stat-num" id="cTotal">0</div><div class="stat-label">ทั้งหมด</div></div></div>
+          <div class="stat-card is-click" data-status="ready" title="คลิกเพื่อดูเฉพาะใบที่พร้อมรัน"><div class="stat-ico s-amber"><i data-icon="inbox"></i></div><div><div class="stat-num" id="cReady">0</div><div class="stat-label">พร้อมรัน</div></div></div>
+          <div class="stat-card is-click" data-status="done" title="คลิกเพื่อดูเฉพาะใบที่เสร็จแล้ว"><div class="stat-ico s-green"><i data-icon="check-circle"></i></div><div><div class="stat-num" id="cDone">0</div><div class="stat-label">เสร็จแล้ว</div></div></div>
         </div>
 
         <!-- Toolbar -->
@@ -69,6 +69,7 @@
               <option value="">ทุกสถานะ</option>
               <option value="ready">พร้อมรัน</option>
               <option value="done">เสร็จแล้ว</option>
+              <option value="error">ผิดพลาด</option>
             </select>
           </div>
           <div class="toolbar-right">
@@ -107,6 +108,7 @@
               <tr><td colspan="9" class="empty">กำลังโหลด…</td></tr>
             </tbody>
           </table>
+          <div class="pager" id="declPager" style="display:none"></div>
         </div>
       </div>
 
@@ -126,6 +128,11 @@
           <p class="muted">Master คือชุดค่าที่ใช้ซ้ำได้ของลูกค้าแต่ละราย เช่น ท่าเรือ เงื่อนไขการส่งมอบ พิกัดศุลกากร
              เมื่อเอกสารใหม่เข้ามา ระบบจะเลือก Master ที่ตรงที่สุดให้อัตโนมัติ (ลูกค้า → Consignee → รหัสสินค้า)
              แล้วเติมเฉพาะช่องที่ตั้งไว้ ส่วนที่เหลือให้ AI อ่านจากเอกสาร</p>
+          <div class="ms-filter">
+            <select id="msFilterCust" class="sel sel-sm"><option value="">ทุกลูกค้า</option></select>
+            <div class="search-box"><i data-icon="search"></i><input id="msSearch" placeholder="ค้นหาชื่อ Master / ผู้ซื้อ / รหัสสินค้า" /></div>
+            <span class="muted" id="msCount" style="font-size:12px"></span>
+          </div>
           <div id="mastersNote" class="note"></div>
           <div class="table-wrap"><table class="tbl tbl-masters">
             <thead><tr>

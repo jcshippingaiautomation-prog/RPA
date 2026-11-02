@@ -505,6 +505,29 @@ export async function deleteEmailRule(sender: string): Promise<boolean> {
   }
 }
 
+/** แนบ "รหัสสินค้า" ของแต่ละใบ (ดึงเฉพาะคอลัมน์เดียว ไม่ดึงรายการทั้งก้อน)
+ *  ใน DCTK ช่องรหัสสินค้าเก็บที่คอลัมน์ description_eng ของ declaration_items */
+async function attachProductCodes(rows: Record<string, unknown>[]): Promise<void> {
+  const sb = getClient();
+  if (!sb) return;
+  const ids = rows.map((r) => String(r.id)).filter(Boolean);
+  if (!ids.length) return;
+  const { data: items } = await sb
+    .from("declaration_items")
+    .select("declaration_id, description_eng")
+    .in("declaration_id", ids);
+  const byDecl = new Map<string, string[]>();
+  for (const it of items ?? []) {
+    const k = String((it as { declaration_id?: unknown }).declaration_id ?? "");
+    const v = String((it as { description_eng?: unknown }).description_eng ?? "").trim();
+    if (!k || !v) continue;
+    const arr = byDecl.get(k) ?? [];
+    if (!arr.includes(v)) arr.push(v);
+    byDecl.set(k, arr);
+  }
+  for (const r of rows) r.product_codes = byDecl.get(String(r.id)) ?? [];
+}
+
 /** อ่านใบขนล่าสุดจาก declarations (สำหรับแสดงในเว็บ) — ใส่ status เสมอ (derive ถ้าไม่มีคอลัมน์) */
 export async function listDeclarations(limit = 100): Promise<Record<string, unknown>[]> {
   const sb = getClient();
@@ -518,29 +541,94 @@ export async function listDeclarations(limit = 100): Promise<Record<string, unkn
     if (error) throw error;
     const rows = (data ?? []).map((r) => ({ ...r, status: deriveStatus(r) })) as Record<string, unknown>[];
 
-    // แนบ "รหัสสินค้า" ของแต่ละใบมาด้วย (ดึงเฉพาะคอลัมน์เดียว ไม่ดึงรายการทั้งก้อน)
-    //   ใน DCTK ช่องรหัสสินค้าเก็บที่คอลัมน์ description_eng ของ declaration_items
-    const ids = rows.map((r) => String(r.id)).filter(Boolean);
-    if (ids.length) {
-      const { data: items } = await sb
-        .from("declaration_items")
-        .select("declaration_id, description_eng")
-        .in("declaration_id", ids);
-      const byDecl = new Map<string, string[]>();
-      for (const it of items ?? []) {
-        const k = String((it as { declaration_id?: unknown }).declaration_id ?? "");
-        const v = String((it as { description_eng?: unknown }).description_eng ?? "").trim();
-        if (!k || !v) continue;
-        const arr = byDecl.get(k) ?? [];
-        if (!arr.includes(v)) arr.push(v);
-        byDecl.set(k, arr);
-      }
-      for (const r of rows) r.product_codes = byDecl.get(String(r.id)) ?? [];
-    }
+    await attachProductCodes(rows);
     return rows;
   } catch (err) {
     console.error("[supabase] listDeclarations error:", errMsg(err));
     return [];
+  }
+}
+
+/**
+ * สถานะที่หน้าเว็บแสดง (effStatus ใน app.js) → เงื่อนไข PostgREST
+ *   done  = status=done หรือ (มีไฟล์ใบขน และไม่ได้กำลังรัน/แก้)
+ *   ready = ยังไม่รัน/ยกเลิก และยังไม่มีไฟล์ใบขน
+ *   อื่น ๆ = status ตรงตัว (error/partial ต้องยังไม่มีไฟล์ใบขน)
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applyDeclStatusFilter(q: any, status: string): any {
+  const BUSY = "(running,queued,edited)";
+  if (status === "done") {
+    return q.or(`status.eq.done,and(doc_status.is.true,or(status.is.null,status.not.in.${BUSY}))`);
+  }
+  if (status === "ready") {
+    return q.or("status.is.null,status.in.(new,cancelled,ready)").not("doc_status", "is", true);
+  }
+  if (status === "error" || status === "partial") return q.eq("status", status).not("doc_status", "is", true);
+  return q.eq("status", status);
+}
+
+export interface DeclarationPage {
+  declarations: Record<string, unknown>[];
+  total: number;                      // จำนวนตามตัวกรอง (ทั้งลูกค้า + สถานะ) — ใช้แบ่งหน้า
+  page: number;
+  size: number;
+  counts: { total: number; ready: number; done: number; error: number }; // ตามตัวกรองลูกค้าเท่านั้น
+  customers: string[];                // รายชื่อลูกค้าทั้งหมด (สำหรับ dropdown)
+}
+
+/** ใบขนแบบแบ่งหน้า — กรองลูกค้า/สถานะที่ฐานข้อมูล ไม่ต้องโหลดทั้งหมดมาที่เว็บ */
+export async function listDeclarationsPage(opts: {
+  page?: number; size?: number; customer?: string; status?: string;
+}): Promise<DeclarationPage> {
+  const size = Math.min(Math.max(Math.floor(opts.size || 20), 5), 200);
+  const page = Math.max(Math.floor(opts.page || 1), 1);
+  const customer = (opts.customer || "").trim();
+  const status = (opts.status || "").trim();
+  const empty: DeclarationPage = { declarations: [], total: 0, page, size, counts: { total: 0, ready: 0, done: 0, error: 0 }, customers: [] };
+  const sb = getClient();
+  if (!sb) return empty;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const base = (sel: string, head = false): any => {
+      let q = sb.from("declarations").select(sel, head ? { count: "exact", head: true } : { count: "exact" });
+      if (customer) q = q.eq("customer_name", customer);
+      return q;
+    };
+    let main = base("*");
+    if (status) main = applyDeclStatusFilter(main, status);
+    const from = (page - 1) * size;
+    const [pg, cAll, cReady, cDone, cErr, custs] = await Promise.all([
+      main.order("created_at", { ascending: false }).range(from, from + size - 1),
+      base("id", true),
+      applyDeclStatusFilter(base("id", true), "ready"),
+      applyDeclStatusFilter(base("id", true), "done"),
+      applyDeclStatusFilter(base("id", true), "error"),
+      sb.from("declarations").select("customer_name").not("customer_name", "is", null).limit(10000),
+    ]);
+    const customers = [...new Set(((custs.data ?? []) as { customer_name?: string }[])
+      .map((r) => String(r.customer_name || "").trim()).filter(Boolean))].sort();
+    const counts = { total: cAll.count ?? 0, ready: cReady.count ?? 0, done: cDone.count ?? 0, error: cErr.count ?? 0 };
+    // ขอหน้าที่เกินจำนวนจริง (เช่น เพิ่งลบใบสุดท้ายของหน้า) → ไม่ใช่ error: คืนแถวว่าง + จำนวนจริง ให้หน้าเว็บถอยหน้าเอง
+    if (pg.error && /range not satisfiable/i.test(String(pg.error.message))) {
+      let cq = base("id", true);
+      if (status) cq = applyDeclStatusFilter(cq, status);
+      const c = await cq;
+      return { declarations: [], total: c.count ?? 0, page, size, counts, customers };
+    }
+    if (pg.error) throw pg.error;
+    const rows = ((pg.data ?? []) as Record<string, unknown>[]).map((r) => ({ ...r, status: deriveStatus(r) })) as Record<string, unknown>[];
+    await attachProductCodes(rows);
+    return {
+      declarations: rows,
+      total: pg.count ?? rows.length,
+      page, size,
+      counts,
+      customers,
+    };
+  } catch (err) {
+    console.error("[supabase] listDeclarationsPage error:", errMsg(err));
+    return empty;
   }
 }
 
@@ -2157,16 +2245,17 @@ export async function findDeclarationByRef(ref: string): Promise<{ id: string; c
 }
 
 /** ไฟล์แคปหน้าจอล่าสุด + งานแคปที่ยังไม่เสร็จ (สำหรับเมนู "แคปหน้าจอใบขน") */
-export async function listCaptures(limit = 60): Promise<{ documents: DocumentRecord[]; jobs: Record<string, unknown>[] }> {
+export async function listCaptures(limit = 300): Promise<{ documents: DocumentRecord[]; jobs: Record<string, unknown>[] }> {
   const sb = getClient();
   if (!sb) return { documents: [], jobs: [] };
   const [docs, jobs] = await Promise.all([
     sb.from("documents").select("*").eq("kind", "capture").order("created_at", { ascending: false }).limit(limit),
     sb.from("job_queue").select("id,type,status,payload,result,error,created_at,started_at,finished_at")
-      .in("type", ["rpa_capture", "rpa_import"]).order("created_at", { ascending: false }).limit(80),
+      .in("type", ["rpa_capture", "rpa_import"]).order("created_at", { ascending: false }).limit(500),
   ]);
   // งาน "ดึงข้อมูลใบให้เลือก" ไม่ใช่งานแคป — ไม่ต้องขึ้นในรายการ
   const capJobs = (jobs.data ?? []).filter((j) => (j.type === "rpa_capture" || (j.payload as { capture?: boolean })?.capture)
     && (j.payload as { mode?: string })?.mode !== "scan");
-  return { documents: (docs.data ?? []) as DocumentRecord[], jobs: capJobs.slice(0, 30) };
+  // หน้าเว็บแบ่งหน้าเอง — ส่งย้อนหลังพอสมควร
+  return { documents: (docs.data ?? []) as DocumentRecord[], jobs: capJobs.slice(0, 300) };
 }

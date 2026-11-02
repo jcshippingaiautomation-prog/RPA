@@ -36,6 +36,51 @@ function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
+
+// ============================================================
+//  ตัวแบ่งหน้า — ใช้ร่วมกันทุกเมนู (รายการใบขน / แคปหน้าจอ / ประวัติงาน)
+//  renderPager(el, { page, size, total, sizes, onPage(p), onSize(n) })
+//  จำ "แสดงหน้าละ" ไว้ต่อเมนูด้วย pageSizeGet/pageSizeSet
+// ============================================================
+function pageSizeGet(key, def) {
+  try { const n = parseInt(localStorage.getItem("pageSize:" + key), 10); return n > 0 ? n : def; } catch { return def; }
+}
+function pageSizeSet(key, n) { try { localStorage.setItem("pageSize:" + key, String(n)); } catch { /* ไม่เป็นไร */ } }
+function renderPager(el, o) {
+  if (!el) return;
+  const total = o.total || 0, size = o.size || 20;
+  const pages = Math.max(1, Math.ceil(total / size));
+  const page = Math.min(Math.max(o.page || 1, 1), pages);
+  if (!total) { el.innerHTML = ""; el.style.display = "none"; return; }
+  el.style.display = "";
+  const from = (page - 1) * size + 1, to = Math.min(page * size, total);
+  const btn = (label, p, disabled, active, title) =>
+    `<button type="button" class="pager-btn${active ? " active" : ""}" ${disabled ? "disabled" : ""} data-page="${p}"${title ? ` title="${title}"` : ""}>${label}</button>`;
+  let nums = "";
+  for (let p = 1; p <= pages; p++) {
+    if (pages > 7 && p > 1 && p < pages && Math.abs(p - page) > 1) {
+      if (p === 2 || p === pages - 1) nums += `<span class="pager-dots">…</span>`;
+      continue;
+    }
+    nums += btn(String(p), p, false, p === page);
+  }
+  const sizes = o.sizes || [20, 50, 100];
+  el.innerHTML = `<span class="pager-info">แสดง ${from.toLocaleString()}–${to.toLocaleString()} จาก ${total.toLocaleString()} รายการ</span>
+    <div class="pager-btns">${pages > 1 ? btn("‹", page - 1, page <= 1, false, "หน้าก่อนหน้า") + nums + btn("›", page + 1, page >= pages, false, "หน้าถัดไป") : ""}</div>
+    ${o.onSize ? `<label class="pager-size">แสดงหน้าละ <select class="sel sel-sm">${sizes.map((n) => `<option value="${n}"${n === size ? " selected" : ""}>${n}</option>`).join("")}</select></label>` : ""}`;
+  el.querySelectorAll(".pager-btn[data-page]").forEach((b) => (b.onclick = () => {
+    const p = parseInt(b.dataset.page, 10);
+    if (p >= 1 && p <= pages && p !== page) o.onPage(p);
+  }));
+  const sel = el.querySelector(".pager-size select");
+  if (sel) sel.onchange = () => o.onSize(parseInt(sel.value, 10));
+}
+/** เลื่อนกลับขึ้นไปหัวตารางหลังเปลี่ยนหน้า (ถ้าหัวตารางเลื่อนพ้นจอไปแล้ว) */
+function scrollToTop(el) {
+  if (!el) return;
+  const top = el.getBoundingClientRect().top;
+  if (top < 0) el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
 function fmtDate(iso) {
   if (!iso) return "—";
   try {
@@ -427,7 +472,13 @@ function collectRegValues(root, cls) {
 }
 
 
-let DECLS = [];      // รายการทั้งหมด (จาก /api/declarations)
+let DECLS = [];      // ใบขนในหน้าปัจจุบัน (จาก /api/declarations — กรอง+แบ่งหน้าที่ server)
+let DECL_CUSTOMERS = [];   // รายชื่อลูกค้าทั้งหมด (สำหรับ dropdown)
+let DECL_COUNTS = { total: 0, ready: 0, done: 0, error: 0 };
+let DECL_TOTAL = 0;        // จำนวนตามตัวกรอง (ใช้แบ่งหน้า)
+let declPage = 1;
+let declSize = pageSizeGet("decls", 20);
+let declLoadSeq = 0;       // กันผลโหลดเก่ามาทับผลใหม่ (โหลดซ้อนกันตอนมี event)
 let selected = new Set();
 
 // สถานะที่ใช้จริง: new→ready (ไม่มีใหม่·ต้องตรวจ), doc_status=true → done
@@ -437,32 +488,26 @@ function effStatus(d) {
   if (d.doc_status && s !== "running" && s !== "queued" && s !== "edited") return "done";
   return s;
 }
-function filteredDecls() {
-  const cust = $("filterCustomer").value;
-  const st = $("filterStatus").value;
-  return DECLS.filter((d) => {
-    if (st && effStatus(d) !== st) return false;
-    if (cust && (d.customer_name || "") !== cust) return false;
-    return true;
-  });
-}
+// กรองที่ server แล้ว — DECLS คือรายการของหน้านี้พอดี
+function filteredDecls() { return DECLS; }
 
 // เติมรายชื่อลูกค้าใน dropdown filter (จากข้อมูลจริง) — คงค่าที่เลือกไว้
 function populateCustomerFilter() {
   const sel = $("filterCustomer");
   const cur = sel.value;
-  const names = [...new Set(DECLS.map((d) => d.customer_name).filter(Boolean))].sort();
+  const names = DECL_CUSTOMERS.length ? DECL_CUSTOMERS : [...new Set(DECLS.map((d) => d.customer_name).filter(Boolean))].sort();
   sel.innerHTML = '<option value="">ทุกลูกค้า</option>' +
     names.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
   if (names.includes(cur)) sel.value = cur;
 }
 
 function updateStats() {
-  // นับจากรายการที่แสดงจริง (หลัง filter/search) → ตัวเลขตรงกับตารางเสมอ
-  const rows = filteredDecls();
-  $("cTotal").textContent = rows.length;
-  $("cReady").textContent = rows.filter((d) => effStatus(d) === "ready").length;
-  $("cDone").textContent = rows.filter((d) => effStatus(d) === "done").length;
+  // นับจากฐานข้อมูลทั้งหมด (ตามลูกค้าที่เลือก) — ไม่ใช่แค่หน้าที่เห็น
+  $("cTotal").textContent = DECL_COUNTS.total.toLocaleString();
+  $("cReady").textContent = DECL_COUNTS.ready.toLocaleString();
+  $("cDone").textContent = DECL_COUNTS.done.toLocaleString();
+  const st = $("filterStatus").value;
+  document.querySelectorAll("#page-list .stat-card[data-status]").forEach((c) => c.classList.toggle("is-active", c.dataset.status === st));
 }
 
 // ตารางกว้างเกินจอ → ใส่เงาที่คอลัมน์ "จัดการ" (ตรึงขวา) ให้รู้ว่ายังมีข้อมูลซ่อนอยู่ เลื่อนดูได้
@@ -472,9 +517,26 @@ function markTableOverflow() {
 }
 window.addEventListener("resize", () => markTableOverflow());
 
+function renderDeclPager() {
+  renderPager($("declPager"), {
+    page: declPage, size: declSize, total: DECL_TOTAL,
+    onPage: (p) => { declPage = p; loadDecls().then(() => scrollToTop($("page-list").querySelector(".card-table"))); },
+    onSize: (n) => { declSize = n; pageSizeSet("decls", n); declPage = 1; loadDecls(); },
+  });
+}
+
 function renderList() {
   const rows = filteredDecls();
   const body = $("listBody");
+  if (!rows.length && ($("filterCustomer").value || $("filterStatus").value)) {
+    body.innerHTML = `<tr><td colspan="9" class="empty">
+      <div style="font-weight:600;margin-bottom:6px">ไม่พบใบขนตามตัวกรองที่เลือก</div>
+      <button class="btn btn-ghost btn-sm" id="btnClearFilter">ล้างตัวกรอง</button>
+    </td></tr>`;
+    $("btnClearFilter").onclick = () => { $("filterCustomer").value = ""; $("filterStatus").value = ""; declPage = 1; loadDecls(); };
+    updateStats(); updateBulkBar(); renderDeclPager();
+    return;
+  }
   if (!rows.length) {
     // ชี้ทางต่อให้ชัด — และไม่พูดถึง "ดึงอีเมล" เพราะปิดถาวรแล้ว
     body.innerHTML = `<tr><td colspan="9" class="empty">
@@ -483,9 +545,10 @@ function renderList() {
       <button class="btn btn-primary btn-sm" onclick="document.getElementById('btnUpload').click()">อัปโหลดเอกสาร</button>
       <button class="btn btn-ghost btn-sm" onclick="document.getElementById('btnCreate').click()">สร้างเอง</button>
     </td></tr>`;
-    updateStats(); updateBulkBar();
+    updateStats(); updateBulkBar(); renderDeclPager();
     return;
   }
+  renderDeclPager();
   body.innerHTML = rows.map((d) => {
     const running = d.status === "running" || d.status === "queued";
     const checked = selected.has(d.id) ? "checked" : "";
@@ -559,9 +622,20 @@ function updateBulkBar() {
 }
 
 async function loadDecls() {
+  const seq = ++declLoadSeq;
   try {
-    const d = await api("/api/declarations");
+    const qs = new URLSearchParams({ page: String(declPage), size: String(declSize) });
+    if ($("filterCustomer").value) qs.set("customer", $("filterCustomer").value);
+    if ($("filterStatus").value) qs.set("status", $("filterStatus").value);
+    const d = await api(`/api/declarations?${qs}`);
+    if (seq !== declLoadSeq) return;            // มีการโหลดใหม่กว่าแล้ว
+    // หน้าที่อยู่หายไป (เช่น ลบใบสุดท้ายของหน้า) → ถอยไปหน้าสุดท้ายที่มีจริง
+    const lastPage = Math.max(1, Math.ceil((d.total || 0) / declSize));
+    if (declPage > lastPage) { declPage = lastPage; return loadDecls(); }
     DECLS = d.declarations || [];
+    DECL_TOTAL = d.total || 0;
+    DECL_COUNTS = d.counts || { total: DECLS.length, ready: 0, done: 0, error: 0 };
+    if (Array.isArray(d.customers)) DECL_CUSTOMERS = d.customers;
     // ลบ selected ที่ไม่มีแล้ว
     const ids = new Set(DECLS.map((x) => x.id));
     selected = new Set([...selected].filter((id) => ids.has(id)));
@@ -1363,7 +1437,8 @@ async function cancelJobById(jobId) {
 }
 // ── รายการแคปหน้าจอ: 1 แถว = 1 ครั้งที่สั่ง (งาน + ไฟล์ที่ได้) ดูได้ทันทีว่าเสร็จหรือยัง ──
 const CAP_LIVE = ["pending", "claimed", "processing", "running"];
-let capShowAll = false;
+let capPage = 1;
+let capSize = pageSizeGet("captures", 20);
 function capSelectText(sel) {
   if (!sel) return "ทุกหน้าของใบ";
   if (sel.allItems) {
@@ -1399,11 +1474,14 @@ async function loadCaptures() {
   for (const x of docs) if (!used.has(x.storage_path)) rows.push({ at: x.created_at, job: null, file: x, doc: x });
   rows.sort((a, b) => new Date(b.at) - new Date(a.at));
   const total = rows.length;
-  if (!capShowAll) rows.splice(25);
+  // นับจากทั้งหมด (ไม่ใช่แค่หน้านี้) — งานที่กำลังทำต้องรู้เสมอแม้อยู่หน้าอื่น
   const nDone = rows.filter((x) => x.file).length, nLive = rows.filter((x) => x.job && CAP_LIVE.includes(x.job.status)).length;
   $("capSummary").textContent = `เสร็จ ${nDone} · กำลังทำ ${nLive}`;
-  $("capList").innerHTML = rows.length ? `<div class="table-scroll"><table class="dt cap-table"><thead><tr>
-      <th>เวลาที่สั่ง</th><th>ใบขน</th><th>ส่วนที่แคป</th><th>สถานะ</th><th class="ta-right">ไฟล์</th></tr></thead><tbody>${rows.map((x) => {
+  const capPages = Math.max(1, Math.ceil(total / capSize));
+  if (capPage > capPages) capPage = capPages;
+  const pageRows = rows.slice((capPage - 1) * capSize, capPage * capSize);
+  $("capList").innerHTML = pageRows.length ? `<div class="table-scroll"><table class="dt cap-table"><thead><tr>
+      <th>เวลาที่สั่ง</th><th>ใบขน</th><th>ส่วนที่แคป</th><th>สถานะ</th><th class="ta-right">ไฟล์</th></tr></thead><tbody>${pageRows.map((x) => {
       const j = x.job, p = (j && j.payload) || {}, r = (j && j.result) || {};
       const live = j && CAP_LIVE.includes(j.status);
       const who = [x.doc ? x.doc.customer : p.customer, (x.file && x.file.invoice) || r.invoice || (x.doc && x.doc.invoice)].filter(Boolean).join(" · ");
@@ -1425,10 +1503,13 @@ async function loadCaptures() {
         <td><b>${escapeHtml(ref)}</b>${who ? `<div class="muted cap-sub">${escapeHtml(who)}</div>` : ""}</td>
         <td class="cap-sel">${escapeHtml(x.doc ? "แคปอัตโนมัติตอนสร้างใบ" : capSelectText(p.select || null))}</td>
         <td>${st}</td><td class="ta-right nowrap">${act}</td></tr>`;
-    }).join("")}</tbody></table></div>`
-    + (total > rows.length ? `<div style="text-align:center;margin-top:8px"><button class="btn btn-ghost btn-sm" id="capMore">แสดงทั้งหมด (${total})</button></div>` : "")
+    }).join("")}</tbody></table></div><div class="pager pager-plain" id="capPager"></div>`
     : '<p class="muted">ยังไม่มีงานแคปหน้าจอ</p>';
-  if ($("capMore")) $("capMore").onclick = () => { capShowAll = true; loadCaptures(); };
+  renderPager($("capPager"), {
+    page: capPage, size: capSize, total,
+    onPage: (p) => { capPage = p; loadCaptures().then(() => scrollToTop($("capList"))); },
+    onSize: (n) => { capSize = n; pageSizeSet("captures", n); capPage = 1; loadCaptures(); },
+  });
   $("capList").querySelectorAll(".capCancel").forEach((b) => (b.onclick = () => cancelJobById(b.dataset.id)));
   $("capList").querySelectorAll(".capAgain").forEach((b) => (b.onclick = () => { $("capRef").value = b.dataset.ref; startCapScan(); }));
   // มีงานค้าง → รีเฟรชเองทุก 10 วินาทีตอนอยู่หน้านี้
@@ -2071,8 +2152,15 @@ $("pollSubmit").onclick = async () => {
 
 // ---- toolbar ----
 $("btnRefresh").onclick = loadDecls;
-$("filterCustomer").onchange = renderList;
-$("filterStatus").onchange = renderList;
+// เปลี่ยนตัวกรอง → กลับไปหน้า 1 แล้วโหลดจาก server
+$("filterCustomer").onchange = () => { declPage = 1; loadDecls(); };
+$("filterStatus").onchange = () => { declPage = 1; loadDecls(); };
+// คลิกการ์ดสถิติ = กรองตามสถานะนั้น (คลิกซ้ำ = ยกเลิกกรอง)
+document.querySelectorAll("#page-list .stat-card[data-status]").forEach((c) => (c.onclick = () => {
+  const v = c.dataset.status;
+  $("filterStatus").value = $("filterStatus").value === v ? "" : v;
+  declPage = 1; loadDecls();
+}));
 $("checkAll").onchange = () => {
   const visible = filteredDecls();
   if ($("checkAll").checked) visible.forEach((d) => selected.add(d.id));
@@ -2272,7 +2360,7 @@ if ($("btnAiSave")) $("btnAiSave").onclick = aiSaveCustomer;
 //  ประวัติงาน + เอกสาร
 // ============================================================
 // ---- ประวัติงาน: filter ประเภท + แบ่งหน้า 10 รายการ/หน้า ----
-const JOBS_PER_PAGE = 10;
+let JOBS_PER_PAGE = pageSizeGet("jobs", 20);
 let JOBS_ALL = [];     // ทุก job ที่โหลดมา (กรองแล้วตามประเภท)
 let jobsPage = 1;
 const JOB_TYPE_MAP = { rpa_import: "นำเข้าข้อมูล", rpa_edit: "แก้ไขใบเดิม", get_email: "ดึงอีเมล" };
@@ -2315,8 +2403,11 @@ function renderJobs() {
     </tr>`;
   }).join("");
   body.querySelectorAll(".job-row").forEach((tr) => (tr.onclick = () => openJobLog(tr.dataset.id)));
-  // pager
-  renderJobsPager(totalPages);
+  renderPager($("jobsPager"), {
+    page: jobsPage, size: JOBS_PER_PAGE, total: JOBS_ALL.length,
+    onPage: (p) => { jobsPage = p; renderJobs(); scrollToTop($("page-history")); },
+    onSize: (n) => { JOBS_PER_PAGE = n; pageSizeSet("jobs", n); jobsPage = 1; renderJobs(); },
+  });
 }
 
 // ---- Modal: ดู log + สรุปสาเหตุของงาน 1 งาน (จากประวัติงาน) ----
@@ -2347,31 +2438,10 @@ if ($("jlClose")) $("jlClose").onclick = closeJobLog;
 if ($("jlCloseBtn")) $("jlCloseBtn").onclick = closeJobLog;
 if ($("modalJobLog")) $("modalJobLog").onclick = (e) => { if (e.target === $("modalJobLog")) closeJobLog(); };
 
-function renderJobsPager(totalPages) {
-  const pager = $("jobsPager");
-  if (totalPages <= 1) { pager.innerHTML = `<span class="pager-info">${JOBS_ALL.length} รายการ</span>`; return; }
-  const btn = (label, page, disabled, active) =>
-    `<button class="pager-btn${active ? " active" : ""}" ${disabled ? "disabled" : ""} data-page="${page}">${label}</button>`;
-  let html = `<span class="pager-info">${JOBS_ALL.length} รายการ · หน้า ${jobsPage}/${totalPages}</span><div class="pager-btns">`;
-  html += btn("‹ ก่อนหน้า", jobsPage - 1, jobsPage <= 1, false);
-  // เลขหน้า (ย่อถ้าเยอะ)
-  for (let p = 1; p <= totalPages; p++) {
-    if (totalPages > 7 && p > 2 && p < totalPages - 1 && Math.abs(p - jobsPage) > 1) {
-      if (p === 3 || p === totalPages - 2) html += `<span class="pager-dots">…</span>`;
-      continue;
-    }
-    html += btn(String(p), p, false, p === jobsPage);
-  }
-  html += btn("ถัดไป ›", jobsPage + 1, jobsPage >= totalPages, false);
-  html += `</div>`;
-  pager.innerHTML = html;
-  pager.querySelectorAll(".pager-btn[data-page]").forEach((b) => (b.onclick = () => {
-    const p = parseInt(b.dataset.page, 10);
-    if (p >= 1 && p <= totalPages) { jobsPage = p; renderJobs(); }
-  }));
-}
 
 $("btnRefreshJobs").onclick = loadJobs;
+$("msFilterCust").onchange = () => renderMasters();
+{ let t; $("msSearch").oninput = () => { clearTimeout(t); t = setTimeout(() => renderMasters(), 200); }; }
 if ($("jobFilterType")) $("jobFilterType").onchange = loadJobs;
 
 // (loadDocuments ถูกย้ายไป modal "ดูไฟล์" ต่อใบในหน้ารายการแล้ว — ดู openFiles)
@@ -2719,9 +2789,29 @@ function renderMasters() {
     return;
   }
 
+  // ตัวกรองลูกค้า + ค้นหา (Master เยอะแล้ว ไม่ต้องเลื่อนหายาว)
+  const fSel = $("msFilterCust");
+  const custNames = [...new Set(MASTERS.map((t) => (t.customer_name || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "th"));
+  const curCust = fSel.value;
+  fSel.innerHTML = '<option value="">ทุกลูกค้า</option>' + custNames.map((n) =>
+    `<option value="${escapeHtml(n)}">${escapeHtml(n)} (${MASTERS.filter((t) => (t.customer_name || "").trim() === n).length})</option>`).join("");
+  if (custNames.includes(curCust)) fSel.value = curCust;
+  const q = ($("msSearch").value || "").trim().toUpperCase();
+  const shown = MASTERS.filter((t) => {
+    if (fSel.value && (t.customer_name || "").trim() !== fSel.value) return false;
+    if (!q) return true;
+    const hay = [t.name, t.label, t.customer_name, ...(t.consignee_names || []), ...(t.product_codes || [])].join(" ").toUpperCase();
+    return hay.includes(q);
+  });
+  $("msCount").textContent = shown.length === MASTERS.length ? `${MASTERS.length} Master` : `แสดง ${shown.length} จาก ${MASTERS.length} Master`;
+  if (!shown.length) {
+    body.innerHTML = `<tr><td colspan="5" class="empty">ไม่พบ Master ตามที่ค้นหา</td></tr>`;
+    return;
+  }
+
   // จัดกลุ่มตามลูกค้า — เรียงตามชื่อ และให้กลุ่มที่มี Master มากอยู่บน
   const groups = new Map();
-  for (const t of MASTERS) {
+  for (const t of shown) {
     const key = (t.customer_name || "").trim() || "— ไม่ระบุลูกค้า —";
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(t);
@@ -2825,7 +2915,7 @@ function closeMaster() { $("modalMaster").style.display = "none"; msEditing = nu
 /** ฟอร์ม Master = ทุกช่อง 3 หน้า + ตัวเลือกโหมดต่อช่อง */
 function renderMasterForm() {
   const t = msEditing;
-  const custOpts = [...new Set(DECLS.map((d) => d.customer_name).filter(Boolean))].sort();
+  const custOpts = [...new Set([...DECL_CUSTOMERS, ...DECLS.map((d) => d.customer_name)].filter(Boolean))].sort();
   // row สำหรับอ่านค่าเดิม: header เก็บด้วย key ของ registry อยู่แล้ว → ใส่เป็น extra_fields ให้ regValue อ่านเจอทุกช่อง
   const row = { extra_fields: { ...(t.header || {}) } };
   for (const f of REGISTRY) if (f.column && (t.header || {})[f.key] != null) row[f.column] = t.header[f.key];

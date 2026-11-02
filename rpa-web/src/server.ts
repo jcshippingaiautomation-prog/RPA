@@ -29,6 +29,7 @@ import {
   upsertCustomerSetting,
   deleteCustomerSetting,
   listDeclarations,
+  listDeclarationsPage,
   listEmailRules,
   upsertEmailRule,
   deleteEmailRule,
@@ -1358,11 +1359,17 @@ app.post("/api/email-schedule", requireAdmin, async (req, res) => {
 });
 
 // ---- Declarations (ผลจาก Get Email — แทน Sheet รายการ) -----
-app.get("/api/declarations", async (_req, res) => {
-  res.json({
-    enabled: supabaseEnabled(),
-    declarations: supabaseEnabled() ? await listDeclarations(50) : [],
+// แบ่งหน้า: ?page=1&size=20&customer=&status=  (กรองที่ฐานข้อมูล — ใบเก่าไม่หายจากรายการ)
+app.get("/api/declarations", async (req, res) => {
+  if (!supabaseEnabled()) { res.json({ enabled: false, declarations: [], total: 0, page: 1, size: 20, counts: { total: 0, ready: 0, done: 0, error: 0 }, customers: [] }); return; }
+  const q = req.query as Record<string, string | undefined>;
+  const result = await listDeclarationsPage({
+    page: Number(q.page) || 1,
+    size: Number(q.size) || 20,
+    customer: q.customer || "",
+    status: q.status || "",
   });
+  res.json({ enabled: true, ...result });
 });
 
 // ---- Email rules (กรอง sender/subject ของ Get Email) -------

@@ -753,3 +753,17 @@ tr.ms-group > td {
   .dt td.prod-cell { max-width: 118px; }
   .dt td.cons-cell { max-width: 165px; }
 }
+
+/* ── ตัวแบ่งหน้า (ทุกเมนู) ── */
+.pager-size { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted2); }
+.pager-size .sel { width: auto; padding: 5px 8px; }
+.pager-btn { min-width: 34px; }
+.pager-plain { border-top: none; padding: 12px 0 0; }
+/* การ์ดสถิติคลิกเพื่อกรองได้ */
+.stat-card.is-click { cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.stat-card.is-click:hover { border-color: #c9d4ea; }
+.stat-card.is-active { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(30,58,138,.10); }
+/* ตัวกรองหน้าคลัง Master */
+.ms-filter { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 4px 0 12px; }
+.ms-filter .search-box input { width: 280px; }
+.pager-btn.active, .pager-btn.active:hover { background: var(--primary); color: #fff; border-color: var(--primary); cursor: default; }
