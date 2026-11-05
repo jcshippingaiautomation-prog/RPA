@@ -1936,6 +1936,9 @@ $("upSubmit").onclick = async () => {
       const lines = [...new Set(byMaster.map((f) => `${f.label}: เอกสารเขียน ${f.from} → ใช้ ${f.to}`))].slice(0, 3).join(" · ");
       toast(`⚠ ใช้ค่าตาม Master แทนที่เอกสารเขียน ${byMaster.length} รายการ — ${lines} · ตรวจก่อนรัน`, "error", 10000);
     }
+    // ระบบเจอค่าที่ขัดกับเอกสาร แต่แก้ให้เองไม่ได้ → ต้องให้ผู้ใช้แก้ (ขึ้นท้ายสุด ค้างนาน)
+    const warns = (r && Array.isArray(r.warnings)) ? r.warnings : [];
+    if (warns.length) toast(`⚠ ${warns.join(" · ")}`, "error", 15000);
   } catch (e) {
     // กลับไปขั้นที่ 1 ให้แก้ไฟล์/ลองใหม่ พร้อมข้อความ error
     setUploadStep(1);

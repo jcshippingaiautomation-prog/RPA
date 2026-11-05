@@ -1035,13 +1035,32 @@ function reconcileItemAmounts(
   }
 }
 
-function reconcileWeights(record: Record<string, unknown> & { _items?: Record<string, unknown>[] }): void {
+/** คืนคำเตือนที่ผู้ใช้ต้องตรวจก่อนรัน (ไม่แก้ค่าเงียบ ๆ เมื่อเดาไม่ได้แน่) */
+function reconcileWeights(record: Record<string, unknown> & { _items?: Record<string, unknown>[] }): string[] {
+  const warnings: string[] = [];
   const items = record._items ?? [];
-  if (!items.length) return;
+  if (!items.length) return warnings;
   const n = (v: unknown) => {
     const x = Number(String(v ?? "").replace(/,/g, ""));
     return Number.isFinite(x) ? x : 0;
   };
+  // 0) AI เอา "น้ำหนักรวม" มาใส่เป็น "น้ำหนักสุทธิ" ทุกแถว
+  //   เจอจริง COCOS CTN2664 / CTN2658: คอลัมน์สุทธิเขียนเป็นลิตร ("12060.00 L") ส่วนน้ำหนักรวมเขียน "KG"
+  //   AI จึงหยิบคอลัมน์ KG มาใส่ทั้งสองช่อง → ผลรวมรายแถว = น้ำหนักรวมของเอกสาร
+  //   แล้วขั้นที่ 2 ข้างล่างจะทับยอดสุทธิที่อ่านถูกบนหัวใบ (20,598) ด้วยผลรวมที่ผิด (24,840.66)
+  //   แก้รายแถวให้ถูกไม่ได้ (เอกสารไม่ได้บอกสัดส่วน) → คงยอดหัวใบตามเอกสาร + เตือนให้แก้รายแถว
+  {
+    const docNet = n(record.net_weight_kg), docGross = n(record.gross_weight_kg);
+    const sNet = items.reduce((a, it) => a + n(it.net_weight_kg), 0);
+    const tolW = Math.max(0.05, docGross * 0.0005);
+    const allSame = items.every((it) => Math.abs(n(it.net_weight_kg) - n(it.gross_weight_kg)) < 0.005);
+    if (docNet > 0 && docGross > docNet * 1.005 && allSame && Math.abs(sNet - docGross) < tolW) {
+      const msg = `น้ำหนักสุทธิรายรายการเท่ากับน้ำหนักรวมทุกแถว (รวม ${sNet.toLocaleString()} kg) แต่เอกสารระบุน้ำหนักสุทธิรวม ${docNet.toLocaleString()} kg — AI น่าจะอ่านผิดคอลัมน์ แก้น้ำหนักสุทธิ/ปริมาณรายรายการก่อนรัน`;
+      console.log(`[น้ำหนัก] ⚠ ${msg}`);
+      warnings.push(msg);
+      return warnings;   // ไม่กระทบยอดต่อ — ถ้าทำต่อจะทับยอดสุทธิที่ถูกด้วยผลรวมที่ผิด
+    }
+  }
   // 1) แถวไหนไม่มีน้ำหนักรวม → ใช้น้ำหนักสุทธิของแถวนั้น (เอกสารให้มาแค่นั้น)
   for (const it of items) {
     if (n(it.gross_weight_kg) <= 0 && n(it.net_weight_kg) > 0) {
@@ -1081,6 +1100,7 @@ function reconcileWeights(record: Record<string, unknown> & { _items?: Record<st
     record[col] = Number(sum.toFixed(3));
     if (col === "net_weight_kg") record.net_weight_ton = Number((sum / 1000).toFixed(3));
   }
+  return warnings;
 }
 
 /**
@@ -1095,6 +1115,8 @@ export async function prepareDeclarationRecord(
   record: Record<string, unknown> & { _items?: Record<string, unknown>[] };
   fieldModes: { [k: string]: string };
   codeFixes: { label: string; from: string; to: string; scope?: string; itemLine?: number; listLabel?: string }[];
+  /** สิ่งที่ระบบเดาแก้ให้ไม่ได้ ผู้ใช้ต้องตรวจเองก่อนรัน */
+  warnings: string[];
   templateName?: string;
 }> {
 
@@ -1154,7 +1176,7 @@ export async function prepareDeclarationRecord(
     //   (ยืนยันกับใบขนที่ยื่นกรมฯ จริง CTN2648: แถวตัวอย่างแถวแรก = 1 กล่อง)
     //   → เติมส่วนต่างคืนให้แถวของแถมแถวแรกที่เป็น 0 เมื่อส่วนต่างเล็กเท่านั้น
     reconcilePackageCount(record, await packageFromItems(String(record.customer_name ?? "")));
-    reconcileWeights(record);
+    const warnings = reconcileWeights(record);
     reconcileItemAmounts(record, await extraAmountAlloc(String(record.customer_name ?? "")));
     normalizeItemText(record,
       await customerPreset(String(record.customer_name ?? ""), "__product_code_from"),
@@ -1163,7 +1185,7 @@ export async function prepareDeclarationRecord(
     reconcileTotalQuantity(record);
 
 
-  return { record, fieldModes, codeFixes, templateName: mastered.templateName };
+  return { record, fieldModes, codeFixes, warnings, templateName: mastered.templateName };
 }
 
 export async function createDeclaration(
@@ -1175,14 +1197,14 @@ export async function createDeclaration(
     /** "full" (ปกติ) · "noMaster" ไม่ผสม Master ซ้ำ · "none" บันทึกตามที่ส่งมา (สำเนาใบที่เตรียมแล้ว) */
     prepare?: "full" | "noMaster" | "none";
   } = {},
-): Promise<{ id: string; codeFixes?: { label: string; from: string; to: string; master?: boolean }[] } | null> {
+): Promise<{ id: string; codeFixes?: { label: string; from: string; to: string; master?: boolean }[]; warnings?: string[] } | null> {
   const sb = getClient();
   if (!sb) return null;
   try {
     // ⚠ สำเนาใบ: ข้อมูลผ่านการเตรียมมาแล้ว — เตรียมซ้ำจะบวกค่าระวาง/ค่าใช้จ่ายเข้ายอดซ้ำ (reconcileItemAmounts ไม่ idempotent)
     //   และผสม Master ทับค่าที่ผู้ใช้แก้ไปแล้วในใบต้นฉบับ
     const prepared = opts.prepare === "none"
-      ? { record, fieldModes: opts.fieldModes ?? {}, codeFixes: [] as Awaited<ReturnType<typeof prepareDeclarationRecord>>["codeFixes"], templateName: undefined }
+      ? { record, fieldModes: opts.fieldModes ?? {}, codeFixes: [] as Awaited<ReturnType<typeof prepareDeclarationRecord>>["codeFixes"], warnings: [] as string[], templateName: undefined }
       : await prepareDeclarationRecord(record, {
         fieldModes: opts.fieldModes, templateId: opts.templateId, skipMaster: opts.prepare === "noMaster",
       });
@@ -1214,6 +1236,10 @@ export async function createDeclaration(
       const uniq = [...new Set(mNotes.map((f) => `${f.label}: เอกสารเขียน ${f.from} → ใช้ ${f.to}`))];
       payload.status_message = `⚠ ใช้ค่าตาม Master แทนที่เอกสารเขียน (${mNotes.length} รายการ) — ${uniq.slice(0, 3).join(" · ")} · ตรวจก่อนรัน`;
     }
+    // ระบบเจอค่าที่ขัดกับเอกสารแต่แก้ให้เองไม่ได้ (เช่น น้ำหนักสุทธิ = น้ำหนักรวม) → ขึ้นก่อนคำเตือนอื่น
+    if (prepared.warnings.length && (await declarationStatusEnabled())) {
+      payload.status_message = [`⚠ ${prepared.warnings.join(" · ")}`, payload.status_message].filter(Boolean).join(" · ");
+    }
     if (await declarationStatusEnabled()) {
       // ไม่ใช้ "new" — เริ่มที่ "ready" (พร้อมรัน) เสมอ
       const st = opts.status ?? "ready";
@@ -1226,7 +1252,7 @@ export async function createDeclaration(
     const items = record._items ?? [];
     if (declId && items.length) await insertItems(declId, items);
     // คืนรายการที่ระบบปรับค่าให้ด้วย — ผู้ใช้ควรรู้ว่าเราแก้อะไรไป ไม่ใช่แก้เงียบ ๆ
-    return { id: declId, codeFixes: codeFixes.map((f) => ({ label: f.label, from: f.from, to: f.to, master: f.listLabel === "ตาม Master" })) };
+    return { id: declId, codeFixes: codeFixes.map((f) => ({ label: f.label, from: f.from, to: f.to, master: f.listLabel === "ตาม Master" })), warnings: prepared.warnings };
   } catch (err) {
     console.error("[supabase] createDeclaration error:", errMsg(err));
     return null;
@@ -1652,7 +1678,7 @@ export async function insertDeclaration(
     //   เดิมทางนี้ (Get Email) ข้ามไปทั้งชุด ใบที่มาจากอีเมลจึงไม่ได้กระทบยอด
     //   จำนวนหีบห่อ/น้ำหนัก และรายการยังติดสกุลเงินของ Master → DCTK ตีกลับหน้า 3
     reconcilePackageCount(rec, await packageFromItems(customer));
-    reconcileWeights(rec);
+    const weightWarnings = reconcileWeights(rec);
     reconcileItemAmounts(rec, await extraAmountAlloc(customer));
     normalizeItemText(rec, await customerPreset(customer, "__product_code_from"),
       /^(1|true|yes)$/i.test(await customerPreset(customer, "__skip_product_catalog")),
@@ -1674,6 +1700,7 @@ export async function insertDeclaration(
     }
     payload.source = "get-email";
     payload.doc_status = false;
+    if (weightWarnings.length) payload.status_message = `⚠ ${weightWarnings.join(" · ")}`;
     // ไม่ใช้ "new" — ทุกใบเริ่มที่ "ready" (พร้อมรัน) เสมอ
     if (await declarationStatusEnabled()) {
       payload.status = "ready";

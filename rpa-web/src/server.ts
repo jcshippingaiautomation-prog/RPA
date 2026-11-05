@@ -612,7 +612,7 @@ app.post("/api/upload", async (req, res) => {
     }
     broadcast("log", { line: `[UPLOAD] ✓ สร้างรายการ: ${customer} / ${inv || "(ไม่มี invoice)"}` });
     broadcast("decl-status", { id: created.id, status: needsReview ? "new" : "ready" });
-    res.json({ ok: true, id: created.id, customer, invoice: inv, needsReview, codeFixes: created.codeFixes ?? [] });
+    res.json({ ok: true, id: created.id, customer, invoice: inv, needsReview, codeFixes: created.codeFixes ?? [], warnings: created.warnings ?? [] });
   } catch (err) {
     if (err instanceof TaskCancelled) {
       broadcast("log", { line: "[UPLOAD] ⏹ ผู้ใช้กดยกเลิก — ไม่ได้สร้างรายการ" });
