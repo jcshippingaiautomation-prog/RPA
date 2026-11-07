@@ -2750,12 +2750,41 @@ let msEditing = null;      // Master ที่กำลังแก้ (null = �
 let msItems = [];          // รายการสินค้าของ Master ที่กำลังแก้
 let msPage = 1;
 
-const MODE_LABEL = { master: "ใช้ค่า Master", ai: "อ่านจากเอกสาร", off: "ไม่กรอก" };
+const MODE_LABEL = { master: "ใช้ค่า Master", ai: "อ่านจากเอกสาร", off: "ไม่กรอก", rule: "AI ทำตามคำสั่ง" };
+
+// โหมด "AI ทำตามคำสั่ง" (เฉพาะช่องหัวใบ): ช่องค่าใน Master กลายเป็น "คำสั่ง" ที่ AI ทำทุกใบ
+//   ใช้กับช่องที่เปลี่ยนทุกใบแต่มีรูปแบบตายตัว เช่น เลขหมายหีบห่อ "AS PER INVOICE NO.<เลขใบ> DATE: <วันที่>"
+function ruleExample(f) {
+  if (f.key === "shipping_mark") return "เช่น AS PER INVOICE NO. ตามด้วยเลขที่ใบกำกับ แล้วขึ้นบรรทัดใหม่ DATE: วันที่ใบกำกับ แบบ วว/ดด/ปปปป";
+  if (f.type === "date") return "เช่น ใช้วัน ETD ในใบ Booking (ไม่ใช่วันที่ในใบกำกับ)";
+  return "บอก AI ว่าช่องนี้เอาค่าจากเอกสารส่วนไหน และเขียนรูปแบบไหน";
+}
+/** สลับหน้าตาช่องตามโหมด — โหมดคำสั่งใช้กล่องข้อความใหญ่ + คำอธิบาย */
+function applyRuleUi(fld, f, isRule) {
+  if (!fld) return;
+  let el = fld.querySelector(".ms-edit");
+  if (!el) return;
+  if (isRule && el.tagName !== "TEXTAREA") {
+    const ta = document.createElement("textarea");
+    ta.className = el.className; ta.dataset.key = el.dataset.key; ta.rows = 3; ta.value = el.value;
+    el.replaceWith(ta); el = ta;
+  }
+  if (isRule && el.rows < 3) el.rows = 3;
+  el.classList.toggle("is-rule", isRule);
+  el.placeholder = isRule ? ruleExample(f) : "";
+  let hint = fld.querySelector(".rule-hint");
+  if (isRule && !hint) {
+    hint = document.createElement("div");
+    hint.className = "rule-hint";
+    hint.textContent = "🤖 ช่องนี้คือคำสั่งให้ AI — ทุกใบที่ใช้ Master นี้ AI จะอ่านเอกสารแล้วเขียนค่าตามคำสั่ง (ค่าที่ได้ตรวจ/แก้ได้ในหน้ารายละเอียดใบ)";
+    fld.appendChild(hint);
+  } else if (!isRule && hint) hint.remove();
+}
 
 /** โหมดที่ใช้จริงของช่อง (ตามที่ตั้งไว้ หรือเดาจากการมีค่า) — ตรงกับ effectiveMode ฝั่ง server */
 function msMode(tpl, key) {
   const m = (tpl.field_modes || {})[key];
-  if (m === "master" || m === "ai" || m === "off") return m;
+  if (m === "master" || m === "ai" || m === "off" || m === "rule") return m;
   // ⚠ ช่องระดับรายการสินค้าเก็บค่าไว้ใน items ไม่ใช่ header
   //   ถ้าเดาจาก header อย่างเดียว ช่องรายการจะขึ้นว่า "อ่านจากเอกสาร" เสมอ
   //   ทั้งที่ฝั่งเซิร์ฟเวอร์ถือว่า "รายการมีค่า = ใช้ค่า Master" → หน้าจอโกหกผู้ใช้
@@ -3031,9 +3060,10 @@ function renderMasterPage(pageNo, row) {
             ${regIsMultiline(f)
               ? `<textarea class="inp ms-edit" data-key="${f.key}" rows="2">${val}</textarea>`
               : `<input class="inp ms-edit" data-key="${f.key}" value="${val}" />`}
-            <select class="sel sel-sm ms-mode m-${mode}" data-key="${f.key}">
+            <select class="sel sel-sm ms-mode m-${mode}" data-key="${f.key}" data-scope="header">
               <option value="master" ${mode === "master" ? "selected" : ""}>ใช้ค่า Master</option>
               <option value="ai" ${mode === "ai" ? "selected" : ""}>อ่านจากเอกสาร</option>
+              <option value="rule" ${mode === "rule" ? "selected" : ""}>AI ทำตามคำสั่ง</option>
               <option value="off" ${mode === "off" ? "selected" : ""}>ไม่กรอก</option>
             </select>
           </div>
@@ -3085,7 +3115,17 @@ function bindMasterItems() {
   // สีของ dropdown โหมดเปลี่ยนตามค่าที่เลือก (อ่านง่ายเวลามี 100+ ช่อง)
   $("msBody").querySelectorAll(".ms-mode").forEach((sel) => (sel.onchange = () => {
     sel.className = `sel sel-sm ms-mode m-${sel.value}`;
+    if (sel.dataset.scope === "header") {
+      const f = REGISTRY.find((x) => x.key === sel.dataset.key && x.scope === "header");
+      if (f) applyRuleUi(sel.closest(".reg-fld"), f, sel.value === "rule");
+    }
   }));
+  // ช่องที่ตั้งโหมดคำสั่งไว้แล้ว → แสดงเป็นกล่องคำสั่งตั้งแต่เปิดฟอร์ม
+  $("msBody").querySelectorAll('.ms-mode[data-scope="header"]').forEach((sel) => {
+    if (sel.value !== "rule") return;
+    const f = REGISTRY.find((x) => x.key === sel.dataset.key && x.scope === "header");
+    if (f) applyRuleUi(sel.closest(".reg-fld"), f, true);
+  });
 }
 function refreshMasterItems() {
   const sec = $("msiBody")?.closest(".md-section");
@@ -3120,6 +3160,9 @@ async function saveMaster() {
   //   แล้วเซิร์ฟเวอร์ตีความใหม่เป็น "ใช้ค่า Master" → ใบใหม่ได้น้ำหนัก/ปริมาณของชิปเมนต์เก่า
   //   (เจอจริง 8 ก.ย. 2569: Master ของ COCOS ที่ผู้ใช้เปิดแก้แล้วกดบันทึก เสียโหมดทั้ง 6 อัน)
   $("msBody").querySelectorAll(".ms-mode").forEach((el) => {
+    // ช่องที่มีทั้งหัวใบและในรายการ (เช่น เลขหมายหีบห่อ) ใช้ key เดียวกัน
+    //   โหมด "AI ทำตามคำสั่ง" ตั้งได้เฉพาะหัวใบ → dropdown ในรายการต้องไม่ทับ
+    if (field_modes[el.dataset.key] === "rule" && el.dataset.scope !== "header") return;
     field_modes[el.dataset.key] = el.value;
   });
   const splitList = (v) => String(v || "").split(",").map((x) => x.trim()).filter(Boolean);

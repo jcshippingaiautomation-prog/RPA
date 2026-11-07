@@ -27,6 +27,7 @@ import type { RawAttachment } from "./files.js";
 import { prepareFilesForAI } from "./files.js";
 import { classifyCustomer, extractDeclaration } from "./agents.js";
 import { postProcess, type DeclarationRecord } from "./postprocess.js";
+import type { InlineFile } from "./gemini.js";
 
 export interface InboxSummary {
   threads: number;
@@ -56,7 +57,7 @@ export async function extractFromAttachments(
   attachments: RawAttachment[],
   log: Log = () => {},
   customerHint?: string,
-): Promise<{ record: DeclarationRecord; customer: string }> {
+): Promise<{ record: DeclarationRecord; customer: string; files: InlineFile[] }> {
   const files = await prepareFilesForAI(attachments, log);
   if (!files.length) throw new Error("ไม่มีไฟล์ที่ AI อ่านได้");
 
@@ -109,7 +110,8 @@ export async function extractFromAttachments(
   // ถ้า user เลือกลูกค้ามา → ใช้ชื่อนั้นเป็นหลัก (กัน AI สกัดชื่อเพี้ยน)
   const finalCustomer = cs?.customer_name || keyword || String(record.customer_name ?? "");
   if (finalCustomer) record.customer_name = finalCustomer;
-  return { record, customer: finalCustomer };
+  // ส่งไฟล์ที่เตรียมให้ AI แล้วกลับไปด้วย — ใช้ต่อกับช่องที่ Master สั่งให้ AI ทำตามคำสั่ง (ไม่ต้องแปลงไฟล์ซ้ำ)
+  return { record, customer: finalCustomer, files };
 }
 
 /**

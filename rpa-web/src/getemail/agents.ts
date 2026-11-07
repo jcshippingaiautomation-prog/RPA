@@ -113,3 +113,46 @@ export async function extractDeclaration(
   const finalResp = await geminiGenerate(EXTRACTOR_SYSTEM_PROMPT, null, contents, null);
   return geminiText(finalResp);
 }
+
+/**
+ * Agent 3 — กรอกช่องที่ Master สั่งไว้เป็น "คำสั่ง" (โหมด rule)
+ *   ทำหลังเลือก Master ได้แล้ว เพราะคำสั่งผูกกับ Master (ผู้ซื้อ/สินค้า) ไม่ใช่กับลูกค้าทั้งราย
+ *   อ่านเอกสารชุดเดิม + ค่าที่สกัดมาแล้วรอบแรก (เช่น เลขใบกำกับ วันที่) → ตอบเฉพาะช่องที่ขอ
+ *   คืน { key: value } · ช่องที่หาไม่ได้ = "" (ผู้เรียกตัดสินเองว่าจะทำอย่างไร)
+ */
+export async function fillFieldsByInstruction(
+  files: InlineFile[],
+  fields: { key: string; label: string; type: string; instruction: string }[],
+  context: Record<string, unknown>,
+): Promise<Record<string, string>> {
+  if (!fields.length) return {};
+  const system =
+    "คุณคือผู้ช่วยเจ้าหน้าที่ชิปปิ้งที่กรอกใบขนสินค้าขาออก\n" +
+    "ได้รับ: เอกสารของชิปเมนต์ + ข้อมูลที่สกัดจากเอกสารชุดนี้แล้ว + รายการช่องที่ต้องกรอกพร้อมคำสั่งของเจ้าหน้าที่\n" +
+    "หน้าที่: ทำตามคำสั่งของแต่ละช่องให้ตรงที่สุด โดยใช้ข้อมูลจากเอกสารชุดนี้เท่านั้น\n" +
+    "กฎ:\n" +
+    "- ตอบเป็น JSON object อย่างเดียว ไม่มีคำอธิบาย: key = รหัสช่องตามที่ให้ไป, value = ข้อความที่จะกรอกลงช่องนั้น (string)\n" +
+    "- ช่องชนิดวันที่ (date): ตอบรูปแบบ YYYY-MM-DD (ค.ศ.) เสมอ แม้คำสั่งจะบอกให้แสดงแบบอื่น\n" +
+    "- ช่องข้อความ: ทำตามรูปแบบในคำสั่งเป๊ะ ๆ (ตัวพิมพ์ เว้นวรรค ขึ้นบรรทัดใหม่ใช้ \\n) ถ้าคำสั่งให้ใส่วันที่ในข้อความ ให้ใช้รูปแบบตามที่คำสั่งบอก ถ้าไม่บอกใช้ วว/ดด/ปปปป (ค.ศ.)\n" +
+    "- ค่าที่ต้องเอามาจากเอกสาร ให้ใช้ค่าของชิปเมนต์นี้เท่านั้น ห้ามใช้ค่าตัวอย่างในคำสั่ง\n" +
+    "- ถ้าหาข้อมูลตามคำสั่งไม่ได้จริง ๆ ให้ตอบ \"\" สำหรับช่องนั้น ห้ามเดา";
+  const ctx: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(context)) {
+    if (k.startsWith("_") || v == null || typeof v === "object") continue;
+    const s = String(v).trim();
+    if (s) ctx[k] = s.length > 300 ? s.slice(0, 300) + "…" : s;
+  }
+  const text =
+    "[ข้อมูลที่สกัดจากเอกสารชุดนี้แล้ว]\n" + JSON.stringify(ctx, null, 1) + "\n\n" +
+    "[ช่องที่ต้องกรอก + คำสั่ง]\n" +
+    fields.map((f) => `- รหัสช่อง "${f.key}" (${f.label}, ชนิด ${f.type}): ${f.instruction}`).join("\n") +
+    "\n\nตอบ JSON เช่น {" + fields.map((f) => `"${f.key}": "..."`).join(", ") + "}";
+  const response = await geminiGenerate(system, [{ text }, ...fileParts(files)] as GeminiPart[]);
+  const parsed = safeParseJson(geminiText(response)) as Record<string, unknown> | null;
+  const out: Record<string, string> = {};
+  for (const f of fields) {
+    const v = parsed ? parsed[f.key] : undefined;
+    out[f.key] = v == null ? "" : String(v).replace(/\\n/g, "\n").trim();
+  }
+  return out;
+}

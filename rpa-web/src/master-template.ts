@@ -5,6 +5,9 @@
 //    'master' → ใช้ค่าใน Master เสมอ ทับค่าที่ AI สกัดมา
 //    'ai'     → ปล่อยให้ AI สกัด; Master เติมให้เฉพาะช่องที่ AI ไม่ได้ค่า
 //    'off'    → ไม่กรอกช่องนี้ลง DCTK (worker ข้าม)
+//    'rule'   → ให้ AI ทำตามคำสั่ง: ค่าใน Master ของช่องนี้ "คือคำสั่ง" ไม่ใช่ค่าที่จะกรอก
+//               (เช่น เลขหมายหีบห่อ = "AS PER INVOICE NO.<เลขใบกำกับ> DATE: <วันที่ใบกำกับ>")
+//               AI อ่านเอกสารอีกรอบเฉพาะช่องพวกนี้หลังเลือก Master ได้แล้ว — ดู fillRuleFields()
 //
 //  ไม่ระบุโหมด = เดาให้อัตโนมัติ: Master มีค่า → 'master', ไม่มีค่า → 'ai'
 // ============================================================
@@ -19,7 +22,7 @@ const isEmpty = (v: unknown): boolean =>
 /** โหมดที่ใช้จริงของช่องหนึ่ง (ตามที่ตั้งไว้ หรือเดาจากการมีค่าใน Master) */
 export function effectiveMode(tpl: DeclarationTemplate, key: string): FieldMode {
   const set = tpl.field_modes?.[key];
-  if (set === "master" || set === "ai" || set === "off") return set;
+  if (set === "master" || set === "ai" || set === "off" || set === "rule") return set;
   return isEmpty(tpl.header?.[key]) ? "ai" : "master";
 }
 
@@ -32,6 +35,8 @@ export interface ApplyResult {
   overridden: string[];
   /** ช่องที่ Master เติมให้เพราะเดิมว่าง */
   filled: string[];
+  /** ช่องโหมด 'rule' + คำสั่งที่ต้องให้ AI ทำ (ยังไม่ได้ค่า — ผู้เรียกต้องไปถาม AI ต่อ) */
+  rules: { key: string; instruction: string }[];
 }
 
 /**
@@ -50,6 +55,7 @@ export function applyTemplate(
   const fieldModes: { [key: string]: FieldMode } = {};
   const overridden: string[] = [];
   const filled: string[] = [];
+  const rules: { key: string; instruction: string }[] = [];
 
   const header = tpl.header ?? {};
   // ครอบคลุมทั้งช่องที่ Master มีค่า และช่องที่ตั้งโหมดไว้แต่ไม่มีค่า (เช่นตั้ง 'off')
@@ -57,8 +63,15 @@ export function applyTemplate(
 
   for (const key of keys) {
     const mode = effectiveMode(tpl, key);
-    fieldModes[key] = mode;
+    // ใบขนเก็บเป็น 'ai' — worker/ส่วนอื่นรู้จักแค่ master/ai/off และค่าของช่องนี้มาจาก AI จริง ๆ
+    fieldModes[key] = mode === "rule" ? "ai" : mode;
     const tplVal = header[key];
+
+    if (mode === "rule") {
+      // ห้ามเอาคำสั่งไปกรอกเป็นค่าเด็ดขาด — คงค่าที่ AI อ่านรอบแรกไว้ก่อน (ใช้ต่อถ้ารอบคำสั่งล้มเหลว)
+      if (!isEmpty(tplVal)) rules.push({ key, instruction: String(tplVal) });
+      continue;
+    }
 
     if (mode === "off") {
       // ไม่กรอกช่องนี้ — ล้างค่าที่ติดมาจาก AI ด้วย กันหลุดลง DCTK
@@ -92,7 +105,7 @@ export function applyTemplate(
     record._items = tpl.items.map((it) => ({ ...it }));
   }
 
-  return { record, fieldModes, overridden, filled };
+  return { record, fieldModes, overridden, filled, rules };
 }
 
 /** ช่องที่สั่ง "ไม่กรอก" — worker เอาไปข้ามตอนกรอกฟอร์ม */

@@ -596,13 +596,13 @@ app.post("/api/upload", async (req, res) => {
       bytes: Buffer.from(f.dataBase64, "base64"),
     }));
     task.log(`📤 ประมวลผล ${attachments.length} ไฟล์ด้วย AI…`);
-    const { record, customer } = await extractFromAttachments(attachments, (line) => task.log(line), customerHint);
+    const { record, customer, files: aiFiles } = await extractFromAttachments(attachments, (line) => task.log(line), customerHint);
     // ⚠ จุดตัดสุดท้าย: ยกเลิกแล้วต้องไม่สร้างรายการ (AI อ่านเสร็จแล้วก็ทิ้งผลไป)
     //   หลังบรรทัดนี้ยกเลิกไม่ได้แล้ว — แจ้งหน้าเว็บให้ปิดปุ่มยกเลิก (ไม่งั้นบอกว่ายกเลิก แต่รายการถูกสร้างแล้ว → อัปซ้ำ)
     task.log("💾 กำลังบันทึกรายการ — ยกเลิกไม่ได้แล้ว");
     const needsReview = record._needs_review === true;
     const created = await createDeclaration(record, {
-      source: "upload", status: needsReview ? "new" : "ready", templateId,
+      source: "upload", status: needsReview ? "new" : "ready", templateId, aiFiles,
     });
     if (!created) { res.status(500).json({ error: "บันทึกรายการไม่สำเร็จ" }); return; }
     // เก็บไฟล์ต้นฉบับ ผูกด้วย customer+invoice

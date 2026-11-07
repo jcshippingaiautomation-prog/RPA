@@ -9,6 +9,7 @@ import { config } from "./config.js";
 import { splitRecord, rowToFields, loadRegistry } from "./field-registry.js";
 import { applyTemplate } from "./master-template.js";
 import { normalizeToDctkCodes } from "./normalize-codes.js";
+import type { InlineFile } from "./getemail/gemini.js";
 
 export interface DocumentRecord {
   id?: string;
@@ -1104,13 +1105,73 @@ function reconcileWeights(record: Record<string, unknown> & { _items?: Record<st
 }
 
 /**
+ * ให้ AI กรอกช่องที่ Master ตั้งโหมด "AI ทำตามคำสั่ง" (rule) — แก้ record ในที่
+ *   คืนคำเตือนสำหรับช่องที่ทำไม่ได้ (ไม่มีเอกสาร / AI หาไม่เจอ / ตอบผิดรูปแบบ)
+ *   ทำไม่ได้ = คงค่าที่ AI อ่านรอบแรกไว้ (ไม่เอาคำสั่งไปกรอกเป็นค่าเด็ดขาด)
+ */
+export async function fillRuleFields(
+  record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
+  rules: { key: string; instruction: string }[],
+  files: InlineFile[] | undefined,
+): Promise<string[]> {
+  if (!rules.length) return [];
+  const reg = new Map((await loadRegistry()).filter((f) => f.scope === "header").map((f) => [f.key, f]));
+  const fields = rules.map((r) => ({
+    key: r.key, instruction: r.instruction,
+    label: reg.get(r.key)?.label ?? r.key, type: reg.get(r.key)?.type ?? "text",
+  }));
+  const names = fields.map((f) => f.label).join(", ");
+  if (!files?.length) {
+    console.log(`[master] ช่อง ${names} ตั้งให้ AI ทำตามคำสั่ง แต่ไม่มีเอกสารให้อ่าน — ข้าม`);
+    return [`${names}: Master ตั้งให้ AI ทำตามคำสั่ง แต่ไม่มีเอกสารให้อ่าน — กรอกเองก่อนรัน`];
+  }
+  const warnings: string[] = [];
+  let vals: Record<string, string> = {};
+  try {
+    const { fillFieldsByInstruction } = await import("./getemail/agents.js");
+    vals = await fillFieldsByInstruction(files, fields, await rowToFields(record, "header"));
+  } catch (e) {
+    console.warn(`[master] AI ทำตามคำสั่งไม่สำเร็จ: ${errMsg(e)}`);
+    return [`${names}: AI ทำตามคำสั่งไม่สำเร็จ (${errMsg(e).slice(0, 80)}) — ตรวจช่องนี้ก่อนรัน`];
+  }
+  const patch: Record<string, unknown> = {};
+  for (const f of fields) {
+    let v = vals[f.key] ?? "";
+    if (v && f.type === "date" && !/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      warnings.push(`${f.label}: AI ตอบ "${v}" ไม่ใช่วันที่ — ใช้ค่าที่อ่านจากเอกสารแทน ตรวจก่อนรัน`);
+      v = "";
+    }
+    if (!v) {
+      if (!warnings.some((w) => w.startsWith(f.label + ":"))) {
+        warnings.push(`${f.label}: AI หาค่าตามคำสั่งใน Master ไม่เจอ — ใช้ค่าที่อ่านจากเอกสารแทน ตรวจก่อนรัน`);
+      }
+      continue;
+    }
+    patch[f.key] = v;
+    console.log(`[master] ${f.label} (AI ทำตามคำสั่ง): ${JSON.stringify(v)}`);
+  }
+  if (Object.keys(patch).length) {
+    const sp = await splitRecord(patch, "header");
+    Object.assign(record, sp.columns);
+    if (Object.keys(sp.extra).length) {
+      record.extra_fields = { ...((record.extra_fields ?? {}) as object), ...sp.extra };
+    }
+  }
+  return warnings;
+}
+
+/**
  * ประกอบ "ใบขนที่พร้อมบันทึก" จากสิ่งที่ AI อ่านมา — แยกออกจากการบันทึกลงฐานข้อมูล
  *   เพื่อให้ทดสอบได้โดยไม่ต้องเขียนข้อมูลจริง (ชุดทดสอบถอยหลัง golden-cli)
  *   ขั้นตอนทั้งหมดต้องเหมือนกับตอนอัปโหลดจริงเป๊ะ ๆ ไม่งั้นทดสอบไปก็ไม่ตรงของจริง
  */
 export async function prepareDeclarationRecord(
   record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
-  opts: { fieldModes?: { [k: string]: string }; templateId?: string; skipMaster?: boolean } = {},
+  opts: {
+    fieldModes?: { [k: string]: string }; templateId?: string; skipMaster?: boolean;
+    /** ไฟล์ที่เตรียมให้ AI แล้ว — ใช้กับช่องที่ Master ตั้ง "AI ทำตามคำสั่ง" (ไม่มี = ข้ามขั้นนี้ + เตือน) */
+    aiFiles?: InlineFile[];
+  } = {},
 ): Promise<{
   record: Record<string, unknown> & { _items?: Record<string, unknown>[] };
   fieldModes: { [k: string]: string };
@@ -1148,6 +1209,10 @@ export async function prepareDeclarationRecord(
     for (const n of mastered.masterNotes ?? []) {
       codeFixes.push({ key: n.key, label: n.label, from: n.from, to: n.to, scope: "item", itemLine: n.itemLine, listLabel: "ตาม Master" });
     }
+    // ── ช่องที่ Master สั่งให้ "AI ทำตามคำสั่ง" ─────────────────────────
+    //   เช่น เลขหมายหีบห่อ = "AS PER INVOICE NO.<เลขใบกำกับ> DATE: <วันที่>" — เปลี่ยนทุกใบ ตรึงค่าใน Master ไม่ได้
+    //   (เจอจริง THANAKORN ALF 03(A)/2026: Master ตรึง "AS PER INVOICE NO.ALF 02/2026" ไว้ ใบใหม่ได้เลขใบเก่า)
+    const ruleWarnings = await fillRuleFields(record, mastered.rules ?? [], opts.aiFiles);
 
     // ── หัวใบสรุปหน่วยจากรายการสินค้า ────────────────────────────────
     //   DCTK บังคับให้ "ส่วนควบคุม" (หัวใบ) มีหน่วยด้วย ไม่ใช่แค่ในรายการ
@@ -1176,7 +1241,7 @@ export async function prepareDeclarationRecord(
     //   (ยืนยันกับใบขนที่ยื่นกรมฯ จริง CTN2648: แถวตัวอย่างแถวแรก = 1 กล่อง)
     //   → เติมส่วนต่างคืนให้แถวของแถมแถวแรกที่เป็น 0 เมื่อส่วนต่างเล็กเท่านั้น
     reconcilePackageCount(record, await packageFromItems(String(record.customer_name ?? "")));
-    const warnings = reconcileWeights(record);
+    const warnings = [...ruleWarnings, ...reconcileWeights(record)];
     reconcileItemAmounts(record, await extraAmountAlloc(String(record.customer_name ?? "")));
     normalizeItemText(record,
       await customerPreset(String(record.customer_name ?? ""), "__product_code_from"),
@@ -1196,6 +1261,8 @@ export async function createDeclaration(
     templateId?: string;
     /** "full" (ปกติ) · "noMaster" ไม่ผสม Master ซ้ำ · "none" บันทึกตามที่ส่งมา (สำเนาใบที่เตรียมแล้ว) */
     prepare?: "full" | "noMaster" | "none";
+    /** ไฟล์ที่เตรียมให้ AI แล้ว (จาก extractFromAttachments) — ใช้กับช่อง "AI ทำตามคำสั่ง" ใน Master */
+    aiFiles?: InlineFile[];
   } = {},
 ): Promise<{ id: string; codeFixes?: { label: string; from: string; to: string; master?: boolean }[]; warnings?: string[] } | null> {
   const sb = getClient();
@@ -1207,6 +1274,7 @@ export async function createDeclaration(
       ? { record, fieldModes: opts.fieldModes ?? {}, codeFixes: [] as Awaited<ReturnType<typeof prepareDeclarationRecord>>["codeFixes"], warnings: [] as string[], templateName: undefined }
       : await prepareDeclarationRecord(record, {
         fieldModes: opts.fieldModes, templateId: opts.templateId, skipMaster: opts.prepare === "noMaster",
+        aiFiles: opts.aiFiles,
       });
     record = prepared.record;
     const fieldModes = prepared.fieldModes;
@@ -1533,6 +1601,8 @@ export async function applyMasterToRecord(
   templateName?: string;
   /** ช่องที่เอกสารเขียนค่ามาไม่ตรงกับที่ Master ล็อกไว้ → ใช้ค่า Master (ให้ผู้ใช้ตรวจ) */
   masterNotes?: { key: string; label: string; from: string; to: string; itemLine: number }[];
+  /** ช่องหัวใบที่ Master สั่งให้ AI ทำตามคำสั่ง (โหมด 'rule') — key ของ registry */
+  rules?: { key: string; instruction: string }[];
 }> {
   const consigneeName = String(record.consignee_name ?? "");
   const destCountry = String(record.destination_country_code ?? record.dest_country_code ?? "");
@@ -1609,7 +1679,8 @@ export async function applyMasterToRecord(
         //   เพราะค่าของรายการอยู่ใน tpl.items ไม่ใช่ header → จะได้ 'ai' หมดแล้วไม่มีอะไรผ่านเลย
         //   ที่ถูกคือ: ตั้งไว้ชัดเจนก็ใช้ตามนั้น · ไม่ได้ตั้งแต่รายการมีค่า = "ใช้ค่า Master"
         const set = tpl.field_modes?.[k];
-        const mode = (set === "master" || set === "ai" || set === "off")
+        // 'rule' (AI ทำตามคำสั่ง) ใช้ได้เฉพาะช่องหัวใบ — ในรายการถือเป็น "อ่านจากเอกสาร" ห้ามเอาคำสั่งมาเป็นค่า
+        const mode = set === "rule" ? "ai" : (set === "master" || set === "ai" || set === "off")
           ? set
           : (String((raw as Record<string, unknown>)[k] ?? "").trim() ? "master" : "ai");
         if (mode === "master") base[k] = (raw as Record<string, unknown>)[k];
@@ -1653,7 +1724,7 @@ export async function applyMasterToRecord(
   for (const n of masterNotes) {
     console.log(`[master] ⚠ รายการ ${n.itemLine}: ${n.label} เอกสารเขียน "${n.from}" → ใช้ "${n.to}" ตาม Master`);
   }
-  return { record: out, fieldModes: applied.fieldModes, templateName: tpl.name, masterNotes };
+  return { record: out, fieldModes: applied.fieldModes, templateName: tpl.name, masterNotes, rules: applied.rules };
 }
 
 export async function insertDeclaration(
@@ -1983,7 +2054,7 @@ export function subscribeJobLogs(
 //    'ai'     ปล่อยให้ AI สกัด — Master เติมให้เฉพาะตอนที่ AI ไม่ได้ค่า
 //    'off'    ไม่กรอกช่องนี้
 // ============================================================
-export type FieldMode = "master" | "ai" | "off";
+export type FieldMode = "master" | "ai" | "off" | "rule";
 
 export interface DeclarationTemplate {
   id?: string;

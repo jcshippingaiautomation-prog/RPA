@@ -106,10 +106,22 @@ function fails(c: CrossFieldRule, get: (k: string) => unknown): boolean {
  *   error = ใช้แล้วใบพังแน่ ๆ · warn = ควรดู แต่ไม่ถึงกับพัง
  */
 export async function validateMaster(
-  tpl: DeclarationTemplate,
+  tplIn: DeclarationTemplate,
 ): Promise<{ ok: boolean; issues: MasterIssue[] }> {
   const issues: MasterIssue[] = [];
   const add = (i: MasterIssue) => issues.push(i);
+  // ช่องโหมด "AI ทำตามคำสั่ง" เก็บ "คำสั่ง" ไว้ในช่องค่า — ไม่ใช่ค่าที่จะกรอก จึงไม่ตรวจเหมือนค่าปกติ
+  const ruleKeys = Object.keys(tplIn.header ?? {}).filter((k) => modeOf(tplIn, k) === "rule");
+  for (const k of Object.keys(tplIn.field_modes ?? {})) {
+    if (modeOf(tplIn, k) === "rule" && !has((tplIn.header ?? {})[k])) {
+      add({ level: "warn", key: k, label: k,
+        message: `ตั้งเป็น "AI ทำตามคำสั่ง" แต่ยังไม่ได้เขียนคำสั่ง — ช่องนี้จะได้ค่าที่ AI อ่านเองตามปกติ` });
+    }
+  }
+  const tpl: DeclarationTemplate = {
+    ...tplIn,
+    header: Object.fromEntries(Object.entries(tplIn.header ?? {}).filter(([k]) => !ruleKeys.includes(k))),
+  };
   const rules = await loadDctkRules();
   const items = (tpl.items ?? []) as Record<string, unknown>[];
 
@@ -183,7 +195,7 @@ export async function validateMaster(
 
   // ── 6) ช่องที่ควรมี แต่ยังว่าง ──────────────────────────────────
   for (const [k, label] of Object.entries(EXPECTED_KEYS)) {
-    if (modeOf(tpl, k) === "off") continue;               // ตั้งใจไม่กรอก = ไม่เตือน
+    if (modeOf(tpl, k) === "off" || modeOf(tpl, k) === "rule") continue;   // ตั้งใจไม่กรอก / ให้ AI ทำตามคำสั่ง = ไม่เตือน
     const inItems = items.some((it) => has(it[k]));
     if (has(pick(tpl, k)) || inItems) continue;
     add({ level: "warn", key: k, label,

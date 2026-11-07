@@ -767,3 +767,8 @@ tr.ms-group > td {
 .ms-filter { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 4px 0 12px; }
 .ms-filter .search-box input { width: 280px; }
 .pager-btn.active, .pager-btn.active:hover { background: var(--primary); color: #fff; border-color: var(--primary); cursor: default; }
+
+/* โหมด "AI ทำตามคำสั่ง" ใน Master */
+.m-rule, .mode-pill.m-rule, select.ms-mode.m-rule { background: #f1ecfd; color: #5b21b6; }
+.ms-edit.is-rule { border-color: #c4b5fd; background: #faf8ff; }
+.rule-hint { font-size: 12px; color: #5b21b6; margin-top: 4px; line-height: 1.45; }
