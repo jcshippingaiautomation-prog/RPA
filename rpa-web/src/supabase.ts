@@ -666,14 +666,37 @@ export async function getDeclaration(id: string): Promise<Record<string, unknown
 function reconcilePackageCount(
   record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
   fromItems = false,
+  alloc = "",
 ): void {
   const items = record._items ?? [];
-  if (items.length < 2) return;
+  if (!items.length) return;
   const n = (v: unknown) => {
     const x = Number(String(v ?? "").replace(/,/g, ""));
     return Number.isFinite(x) ? x : 0;
   };
   const sum0 = items.reduce((a, it) => a + n(it.container_or_volume_qty), 0);
+  const headQty = n(record.container_or_volume_qty);
+  // ลูกค้าตั้งไว้ว่า "ยอดหีบห่อทั้งหมดอยู่ที่รายการแรก รายการอื่น 0" (preset __package_alloc=first)
+  //   ZECK: สินค้าหลายรายการบรรจุรวมกัน (ลวดสลิงกับม้วนเหล็กอยู่ในลังเดียวกัน) เจ้าหน้าที่ใส่ยอดรวมไว้รายการแรก
+  //   ยอดรวม = หัวใบ (ตามเอกสาร) ถ้าหัวใบว่างใช้ผลรวมรายการ
+  if (alloc.trim().toLowerCase() === "first") {
+    const total = headQty > 0 ? headQty : sum0;
+    if (total > 0) {
+      items.forEach((it, i) => { it.container_or_volume_qty = i === 0 ? total : 0; });
+      record.container_or_volume_qty = total;
+      console.log(`[กระทบยอด] จำนวนหีบห่อ: ใส่ยอดรวม ${total} ไว้รายการแรก รายการอื่น 0 (ตั้งค่าลูกค้า __package_alloc=first)`);
+      return;
+    }
+  }
+  // ทุกรายการเป็น 0 แต่หัวใบมียอด (เอกสารบอกจำนวนหีบห่อรวมอย่างเดียว ไม่แยกรายการ)
+  //   → ใส่ยอดรวมไว้รายการแรก ไม่งั้นผลรวมรายรายการ (0) ไม่ตรงหัวใบ แล้วกรมฯ ไม่รับ
+  //   (เจอจริง ZECK 2611135: หัวใบ 8 DR · ทั้ง 4 รายการเป็น 0)
+  if (sum0 === 0 && headQty > 0) {
+    items[0].container_or_volume_qty = headQty;
+    console.log(`[กระทบยอด] จำนวนหีบห่อ: ทุกรายการเป็น 0 แต่หัวใบ ${headQty} → ใส่ไว้รายการแรก`);
+    return;
+  }
+  if (items.length < 2) return;
   // หัวใบไม่มีจำนวนหีบห่อ แต่รายการมี → ใช้ผลรวมรายการ
   //   (เอกสารบางราย เช่น สยามฮิตาชิ ไม่มีแถวสรุปจำนวนลัง ต้องรวมเอง
   //    ไม่งั้นช่องบังคับของ DCTK ว่างแล้วบันทึกหน้า 1 ไม่ผ่าน)
@@ -1240,7 +1263,8 @@ export async function prepareDeclarationRecord(
     //   ทำให้คอลัมน์เลื่อน AI จึงอ่านจำนวนกล่องของแถวนั้นเป็น 0 ทั้งที่เอกสารมี 1 กล่อง
     //   (ยืนยันกับใบขนที่ยื่นกรมฯ จริง CTN2648: แถวตัวอย่างแถวแรก = 1 กล่อง)
     //   → เติมส่วนต่างคืนให้แถวของแถมแถวแรกที่เป็น 0 เมื่อส่วนต่างเล็กเท่านั้น
-    reconcilePackageCount(record, await packageFromItems(String(record.customer_name ?? "")));
+    reconcilePackageCount(record, await packageFromItems(String(record.customer_name ?? "")),
+      await customerPreset(String(record.customer_name ?? ""), "__package_alloc"));
     const warnings = [...ruleWarnings, ...reconcileWeights(record)];
     reconcileItemAmounts(record, await extraAmountAlloc(String(record.customer_name ?? "")));
     normalizeItemText(record,
@@ -1748,7 +1772,7 @@ export async function insertDeclaration(
     // ── กระทบยอด/จัดรูปรายการ เหมือนทางอัปโหลดเอกสาร ────────────────
     //   เดิมทางนี้ (Get Email) ข้ามไปทั้งชุด ใบที่มาจากอีเมลจึงไม่ได้กระทบยอด
     //   จำนวนหีบห่อ/น้ำหนัก และรายการยังติดสกุลเงินของ Master → DCTK ตีกลับหน้า 3
-    reconcilePackageCount(rec, await packageFromItems(customer));
+    reconcilePackageCount(rec, await packageFromItems(customer), await customerPreset(customer, "__package_alloc"));
     const weightWarnings = reconcileWeights(rec);
     reconcileItemAmounts(rec, await extraAmountAlloc(customer));
     normalizeItemText(rec, await customerPreset(customer, "__product_code_from"),

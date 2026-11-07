@@ -143,6 +143,47 @@ function offField(r: Record, key: string): boolean {
 }
 
 /**
+ * ที่อยู่ผู้ซื้อ "สำรอง" จากเอกสาร — ใช้เฉพาะตอน DCTK ไม่มีที่อยู่ให้ (ผู้ซื้อรายใหม่ที่ยังไม่อยู่ในทะเบียนผู้ซื้อ)
+ *   ผู้ซื้อที่มีในทะเบียน DCTK ดึงที่อยู่มาเองตอนเลือกชื่อ · Master ที่ตั้งที่อยู่ไว้ก็กรอกไปแล้วใน fillFromRegistry
+ *   → ช่องยังว่าง = ไม่มีใครให้ค่า ถ้าปล่อยว่าง DCTK ไม่ให้บันทึกหน้า 2 แล้วทั้งใบพัง
+ *   (เจอจริง ZECK 2611135 SHERMAN AND REILLY / 2611137 ELECNOR: "เลขที่อยู่/อาคาร, ถนนของผู้ซื้อ : ไม่สามารถว่างได้")
+ */
+async function fillBuyerAddressFallback(page: Page, r: Record): Promise<void> {
+  const ef = (r.__extra_fields__ ?? {}) as { [k: string]: unknown };
+  const addr = String(ef.__doc_consignee_address ?? "").trim();
+  const post = String(ef.__doc_consignee_post_code ?? "").trim();
+  const cur = await page.evaluate(() => {
+    const v = (id: string) => {
+      const el = document.getElementById(id) as HTMLInputElement | null;
+      return el ? { value: el.value.trim(), max: el.maxLength > 0 ? el.maxLength : 0 } : null;
+    };
+    return { street: v("ConsigneeStreetAndNo"), post: v("ConsigneePostCode") };
+  }).catch(() => null);
+  if (!cur) return;
+  if (cur.street && !cur.street.value) {
+    if (!addr) {
+      log("  ⚠ ที่อยู่ผู้ซื้อว่าง (DCTK ไม่มีที่อยู่ของผู้ซื้อรายนี้ และเอกสาร/Master ไม่มีให้) — DCTK จะไม่ให้บันทึกหน้า 2");
+    } else {
+      const text = cur.street.max ? addr.slice(0, cur.street.max) : addr;
+      try {
+        await clickThenType(page, "#ConsigneeStreetAndNo", text, { commit: true });
+        log(`  🏠 ที่อยู่ผู้ซื้อว่างใน DCTK → ใช้ที่อยู่จากเอกสาร: ${text.slice(0, 60)}${text.length < addr.length ? " (ตัดให้พอดีช่อง)" : ""}`);
+      } catch (e) {
+        log(`  ⚠ พิมพ์ที่อยู่ผู้ซื้อจากเอกสารไม่ได้: ${e instanceof Error ? e.message.slice(0, 80) : e}`);
+      }
+    }
+  }
+  if (cur.post && !cur.post.value) {
+    // ช่องบังคับ — ประเทศที่ไม่มีรหัสไปรษณีย์ (เช่น แองโกลา) ใบขนจริงใส่ N/A
+    const text = (post || "N/A").slice(0, cur.post.max || 20);
+    try {
+      await clickThenType(page, "#ConsigneePostCode", text, { commit: true });
+      log(`  🏠 รหัสไปรษณีย์ผู้ซื้อว่างใน DCTK → ${post ? "ใช้จากเอกสาร" : "ใส่ N/A"}: ${text}`);
+    } catch { /* ไม่ใช่ทุกฟอร์มที่บังคับ */ }
+  }
+}
+
+/**
  * ตัวกรอกอัตโนมัติจากทะเบียนช่อง (field-registry) — สำหรับ "ช่องที่ยังไม่มีคอลัมน์ใน DB"
  * เช่น เลขที่ใบสั่งซื้อ, ที่อยู่ผู้ซื้อ, รหัสสิทธิพิเศษ, ประเทศต้นกำเนิด ฯลฯ
  *
@@ -1165,6 +1206,7 @@ export async function fillPage2Fill(page: Page, r: Record): Promise<Page> {
   // ---- ช่องเสริมจากทะเบียนช่อง (PO, เงื่อนไขชำระเงิน, ที่อยู่ผู้ซื้อ, หมายเหตุ ฯลฯ)
   //   ทำหลังตารางราคา/น้ำหนักเสร็จ เพื่อไม่ให้ recalc ของ Kendo มารีเซ็ตค่าที่เพิ่งกรอก
   await fillFromRegistry(page, r, 2, "header");
+  await fillBuyerAddressFallback(page, r);
 
   // ✅ ตรวจค่าจริงก่อนเซฟ (รอบเดียวรู้ผล): _Freight ต้อง="USD", _FreightForeign ต้อง=จำนวนเงิน
   try {

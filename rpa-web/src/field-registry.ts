@@ -125,6 +125,9 @@ export async function splitRecord(
   const bulk = record.extra_fields;
   if (bulk && typeof bulk === "object" && !Array.isArray(bulk)) {
     for (const [k, v] of Object.entries(bulk as Record<string, unknown>)) {
+      // "__xxx" = ค่าควบคุมของระบบ ไม่ใช่ช่องในฟอร์ม (เช่น __capture จาก Master, __doc_consignee_address
+      //   ที่อยู่ผู้ซื้อสำรองจากเอกสาร) — ต้องไปถึง worker ด้วย เดิมถูกตัดทิ้งเพราะไม่มีในทะเบียนช่อง
+      if (k.startsWith("__")) { if (v != null && v !== "") extra[k] = v; continue; }
       const def = byKey.get(k);
       if (def && !def.computed && !byCol.has(k)) extra[k] = v;   // ชนชื่อคอลัมน์ = ไม่ใช่ช่องเสริม
     }

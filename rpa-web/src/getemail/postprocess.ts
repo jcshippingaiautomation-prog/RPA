@@ -112,6 +112,18 @@ export function postProcess(rawText: string): DeclarationRecord {
   // ค่าขนส่งโรงงาน (ส่วนบวก EXW→FOB) — ไม่มีคอลัมน์ของตัวเอง เก็บใน extra_fields (RPA กรอกช่อง _ForwardForeign)
   const fwdHead = toNumber(parsed.forward_charge);
   if (fwdHead > 0) r.extra_fields = { ...((r.extra_fields ?? {}) as Record<string, unknown>), forward_foreign: String(fwdHead) };
+  // ที่อยู่ผู้ซื้อจากเอกสาร — เก็บเป็น "ค่าสำรอง" (__doc_*) ไม่ใช่ช่องจริง
+  //   RPA พิมพ์ให้เฉพาะตอนที่ DCTK ไม่มีที่อยู่ของผู้ซื้อรายนี้ (ผู้ซื้อรายใหม่) — ไม่ทับที่อยู่ที่ DCTK ดึงจากทะเบียนผู้ซื้อ
+  //   (เจอจริง ZECK 2611135/2611137: ผู้ซื้อใหม่ ที่อยู่ว่าง → DCTK ไม่ให้บันทึกหน้า 2 ทั้งใบพัง)
+  const addr = String(parsed.consignee_address ?? "").replace(/\s+/g, " ").trim();
+  const post = String(parsed.consignee_post_code ?? "").trim();
+  if (addr || post) {
+    r.extra_fields = {
+      ...((r.extra_fields ?? {}) as Record<string, unknown>),
+      ...(addr ? { __doc_consignee_address: addr } : {}),
+      ...(post ? { __doc_consignee_post_code: post } : {}),
+    };
+  }
 
   // items[] — normalize แต่ละรายการ
   r._items = [];

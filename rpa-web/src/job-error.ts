@@ -51,6 +51,20 @@ const asLine = (payload: unknown): string => {
 export function humanizeError(raw: string): { text: string; hint?: string; fields?: string[] } | null {
   const s = (raw || "").toLowerCase();
 
+  // 0) DCTK ไม่ให้บันทึกเพราะช่องบังคับว่าง — บอกชื่อช่องจริงที่ DCTK แจ้ง
+  //   "ไม่สามารถบันทึกข้อมูลได้เลขที่อยู่/อาคาร, ถนนของผู้ซื้อ : ไม่สามารถว่างได้จำนวนข้อผิดพลาดทั้งหมด 1"
+  const empty = (raw || "").match(/ไม่สามารถบันทึกข้อมูลได้\s*(.+?)\s*:\s*ไม่สามารถว่างได้/);
+  if (empty) {
+    const field = empty[1].trim();
+    const buyer = /ผู้ซื้อ/.test(field);
+    return {
+      text: `DCTK ไม่ให้บันทึก — ช่อง "${field}" ว่าง`,
+      hint: buyer
+        ? "ผู้ซื้อรายนี้ยังไม่มีในทะเบียนผู้ซื้อของ DCTK จึงไม่มีที่อยู่ให้ — ใส่ที่อยู่ในหน้ารายละเอียด (หรือใน Master ของผู้ซื้อรายนี้) แล้วกดรันใหม่ · ใบร่างที่ค้างใน DCTK ลบได้"
+        : "กรอกช่องนี้ในหน้ารายละเอียด (หรือตั้งใน Master) แล้วกดรันใหม่",
+    };
+  }
+
   // 1) login / portfolio ไม่ขึ้น = ระบบ DCTK ช้าหรือล่ม (ไม่ใช่ข้อมูลผิด)
   if (s.includes("portfolio") || s.includes("login เกิน") || (s.includes("login") && s.includes("timeout"))) {
     return {
@@ -134,7 +148,9 @@ function lineToIssue(line: string, inDctkErrorBlock: boolean): JobIssue | null {
   // ✗ = error รุนแรง (record fail), ⚠ = เตือน (กรอกข้าม/ค่าอาจผิด)
   const isError = /[✗❌]/.test(body) || /\berror\b/i.test(body);
   const isWarn = /⚠/.test(body);
-  const isMaster = /📋/.test(body) || /ไม่อยู่ใน master/.test(body);
+  // 📋 ใช้ทั้งบรรทัดปัญหา ("… ไม่อยู่ใน master") และบรรทัดสำเร็จ ("กรอกช่องเสริม … สำเร็จ 11 ช่อง")
+  //   เดิมนับทุกบรรทัด 📋 เป็น error → พาดหัวขึ้นว่า "กรอกช่องเสริมหน้า 1 สำเร็จ 11 ช่อง" ทั้งที่ติดหน้า 2
+  const isMaster = /ไม่อยู่ใน master|ไม่มีรายการเลย|ไม่พบตัวเลือก/.test(body);
   const isModal = /\[MODAL\]/i.test(body) || /DCTK แสดง error/.test(body);
   // bullet (•) เป็นปัญหาก็ต่อเมื่ออยู่ในบล็อก DCTK error เท่านั้น
   //   (บรรทัด "• รายการ i/N: ..." ปกติเป็นแค่ progress — ไม่ใช่ error)
@@ -243,7 +259,10 @@ export function summarizeJobError(logs: JobLogRow[]): JobErrorSummary {
   const cleanHeadline = (t: string) =>
     t.replace(/^(Record\s*\d+\s*error)\s*[:：]\s*/i, "").trim();
   // หา error ที่เป็นเนื้อหาจริง (สำหรับ humanize) — ข้ามบรรทัดหัวข้อ
-  const meaningfulError = errorIssues.find((i) => !/:\s*$/.test(i.text)) || errorIssues[0];
+  //   ข้อความ "ไม่สามารถบันทึกข้อมูลได้ …" ของ DCTK บอกชื่อช่องชัดที่สุด → ใช้ก่อน
+  //   (บรรทัดแรกของบล็อกมักเป็นแค่ "* ไม่สามารถว่างได้" ไม่บอกว่าช่องไหน)
+  const meaningfulError = errorIssues.find((i) => /ไม่สามารถบันทึกข้อมูลได้/.test(i.text))
+    || errorIssues.find((i) => !/:\s*$/.test(i.text)) || errorIssues[0];
   const rawForHuman = meaningfulError ? meaningfulError.text : (rawError || "");
   const human = failed ? humanizeError(rawForHuman) : null;
 
@@ -254,7 +273,9 @@ export function summarizeJobError(logs: JobLogRow[]): JobErrorSummary {
     headline = "ไม่พบข้อผิดพลาด";
   } else if (human) {
     // ✅ แปลเป็นภาษาคนได้ — ใช้ข้อความอ่านง่าย + คำแนะนำ + ช่องที่ต้องแก้
-    headline = stuckAt ? `${human.text} (${stuckAt})` : human.text;
+    // ตำแหน่ง = ที่ที่เจอ error นั้นจริง (ไม่ใช่จุดสุดท้ายที่ RPA ไปถึง — มักไปต่ออีกหน้าก่อนล้ม)
+    const at = meaningfulError?.where || stuckAt;
+    headline = at ? `${human.text} (${at})` : human.text;
     humanHint = human.hint;
     affectedFields = human.fields;
   } else if (errorIssues.length && meaningfulError) {
