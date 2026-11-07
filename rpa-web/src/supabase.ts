@@ -814,6 +814,43 @@ function reconcileTotalQuantity(
   record.extra_fields = extra;
 }
 
+/**
+ * แปลงถ้อยคำในเอกสาร → รหัสสินค้าในคลัง DCTK ด้วยตาราง (preset __product_map) แทนการให้ AI เดา
+ *   รูปแบบ: บรรทัดละกฎ "คำในเอกสาร (regex ไม่สนตัวพิมพ์) => รหัสสินค้า [| หน่วยปริมาณในใบขน]" กฎแรกที่ตรงชนะ
+ *   หน่วย (ถ้าใส่) = หน่วยหลังพิกัดที่ใบจริงใช้ (เช่น STEEL DRUM 84 | RL) — AI เดาเป็น SET บ้าง C62 บ้าง
+ *   ทำก่อนผสม Master เพื่อให้จับคู่แถวใน Master ด้วยรหัสที่ถูก
+ *   (เจอจริง ZECK 7 พ.ย.: เอกสารเดียวกัน AI ตอบ "Steel Drum 90"" เป็น DRUM STAND / STEEL DRUM / STEEL DRUM 84", US PAINTED
+ *    สลับกันไปแต่ละรอบ ทั้งที่ใบที่ยื่นจริงใช้ STEEL DRUM 84 ทุกใบ)
+ */
+function applyProductMap(
+  record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
+  preset: string,
+): void {
+  const rules: { re: RegExp; code: string; unit?: string }[] = [];
+  for (const line of preset.split(/\n|;/)) {
+    const m = line.match(/^\s*(.+?)\s*=>\s*(.+?)\s*$/);
+    if (!m) continue;
+    const [code, unit] = m[2].split("|").map((x) => x.trim());
+    try { rules.push({ re: new RegExp(m[1], "im"), code, unit: unit || undefined }); } catch { console.warn(`[สินค้า] กฎ __product_map ใช้ไม่ได้: ${line}`); }
+  }
+  if (!rules.length) return;
+  (record._items ?? []).forEach((it, i) => {
+    // ถ้อยคำจากเอกสาร (AI ใส่ไว้ใน description_eng_field) — ไม่มีก็ใช้รหัสที่ AI ตอบ
+    const text = String(it.description_eng_field ?? "").trim() || String(it.description_eng ?? "");
+    const hit = rules.find((r) => r.re.test(text));
+    if (!hit) return;
+    const before = String(it.description_eng ?? "");
+    if (before !== hit.code) {
+      it.description_eng = hit.code;
+      console.log(`[สินค้า] รายการ ${i + 1}: "${text.slice(0, 40)}" → รหัสสินค้า ${hit.code} (เดิม AI ตอบ "${before}")`);
+    }
+    if (hit.unit && String(it.customs_unit_code ?? "") !== hit.unit) {
+      console.log(`[สินค้า] รายการ ${i + 1}: หน่วยปริมาณในใบขน ${String(it.customs_unit_code ?? "-")} → ${hit.unit}`);
+      it.customs_unit_code = hit.unit;
+    }
+  });
+}
+
 function normalizeItemText(
   record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
   productCodeFrom = "",
@@ -1212,6 +1249,7 @@ export async function prepareDeclarationRecord(
     // หน่วยที่เอกสารลูกค้ารายนี้เขียน แต่รหัสกรมฯ ตีความคนละอย่าง (preset __unit_map เช่น "PC=C62,REEL=RL")
     //   ZECK TSE: เอกสารเขียน PC = ชิ้น แต่รหัส PC ของกรมฯ = PARCEL → ตัวแปลงรหัสกลางไม่แตะเพราะเป็นรหัสที่มีอยู่จริง
     applyUnitMap(record, await customerPreset(String(record.customer_name ?? ""), "__unit_map"));
+    applyProductMap(record, await customerPreset(String(record.customer_name ?? ""), "__product_map"));
     const codeFixes = await normalizeToDctkCodes(record);
     for (const f of codeFixes) {
       console.log(`[code] ${f.scope === "item" ? `รายการ ${f.itemLine}: ` : ""}${f.label}: "${f.from}" → "${f.to}" (${f.listLabel})`);
