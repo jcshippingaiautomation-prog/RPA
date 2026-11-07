@@ -4,6 +4,13 @@
 // ============================================================
 import { runImport, captureExistingDeclaration, scanDeclaration, setLogSink, type AppConfig, type RowInfo, type RunProgress, type CaptureSelection } from "rpa-import-node";
 import { config, assertConfig } from "./config.js";
+import { execSync } from "node:child_process";
+
+// รุ่นโค้ดที่ worker ตัวนี้รันอยู่ — เขียนลง log ทุกงาน จะได้รู้ว่า VM อัปเดตแล้วหรือยัง (เดิมดูไม่ได้เลย)
+const CODE_VERSION = (() => {
+  try { return execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim(); }
+  catch { return "ไม่ทราบ"; }
+})();
 import {
   claimNextJob,
   appendLog,
@@ -41,10 +48,13 @@ function cancelledMessage(draftNo?: string): string {
 async function runRpaImport(job: JobRow): Promise<void> {
   // งานแคปหน้าจอที่ฝากมากับคิวสร้างใบ (ตอนฐานข้อมูลยังไม่รับชนิดงาน rpa_capture — ก่อนรัน sql/14)
   if ((job.payload as { capture?: boolean })?.capture) { await runRpaCapture(job); return; }
-  const payload = job.payload as { onlyRows?: number[]; headless?: boolean; declId?: string };
+  const payload = job.payload as { onlyRows?: number[]; headless?: boolean; declId?: string; noFinalize?: boolean };
   const dryRun = !!job.dry_run;
+  // ทดสอบบน VM: บันทึกครบ 3 หน้าจริง แต่ไม่ยื่น/ไม่พิมพ์ (ได้ใบร่างค้างใน DCTK) — dry run เข้าไม่ถึงหน้า 2
+  const noFinalize = payload.noFinalize === true;
   const onlyRows = Array.isArray(payload.onlyRows) ? payload.onlyRows : undefined;
   const declId = payload.declId;
+  await appendLog(job.id, "log", { line: `[WORKER] โค้ดรุ่น ${CODE_VERSION}${noFinalize ? " · โหมดทดสอบ: บันทึกครบแต่ไม่ยื่นกรมฯ" : ""}` });
   let declDocUploaded = false; // ได้ไฟล์ใบขนจริง (kind=declaration) ไหม — ใช้ตัดสินสถานะ
 
   // 🔒 ใบนี้ยังรอทำอยู่จริงไหม (กดรันซ้ำ/ส่งซ้ำจากหลายแท็บ → งานที่สองต้องไม่ยื่นใบซ้ำ และไม่ไปทับสถานะ "เสร็จ")
@@ -102,6 +112,7 @@ async function runRpaImport(job: JobRow): Promise<void> {
   const runOnce = () => runImport({
     configOverrides,
     dryRun,
+    noFinalize,
     fieldRulesOverride,
     captureOverride,
     presetsOverride,
