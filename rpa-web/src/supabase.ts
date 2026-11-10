@@ -1165,6 +1165,42 @@ function reconcileWeights(record: Record<string, unknown> & { _items?: Record<st
 }
 
 /**
+ * Master เปลี่ยน "ตัวตนผู้ซื้อ" ของใบให้ต่างจากเอกสาร → เตือน (ไม่แก้กลับเอง เพราะบางครั้ง Master ตั้งใจล็อก)
+ *   เจอจริง 10 พ.ย. CFK 01/2026: Master สำเนามาจาก Master ของผู้ซื้ออีกราย (AUSTRALASIAN ออสเตรเลีย)
+ *   เอกสารเป็น CHARMFREGS เกาหลี แต่ใบออกมาเป็นประเทศผู้ซื้อ AU ปลายทาง VN ที่อยู่ออสเตรเลีย — ยื่นไปแล้วไม่มีใครเห็น
+ */
+function identityWarnings(
+  doc: { consignee: string; buyer: string; dest: string },
+  record: Record<string, unknown>,
+  templateName?: string,
+): string[] {
+  if (!templateName) return [];
+  const out: string[] = [];
+  const norm = (s: string) => s.toUpperCase().replace(/[^A-Z0-9ก-๙]/g, "");
+  const after = {
+    consignee: String(record.consignee_name ?? "").trim(),
+    buyer: String(record.buyer_country_code ?? "").trim().toUpperCase(),
+    dest: String(record.destination_country_code ?? "").trim().toUpperCase(),
+  };
+  const a = norm(doc.consignee), b = norm(after.consignee);
+  if (a && b && !a.includes(b) && !b.includes(a)) {
+    out.push(`ผู้ซื้อ: เอกสารเป็น "${doc.consignee}" แต่ Master "${templateName}" ตั้งเป็น "${after.consignee}"`);
+  }
+  // ประเทศ: เตือนเมื่อ "ทั้งคู่" ไม่ตรงเอกสาร — ถ้าต่างแค่ช่องเดียวมักเป็น AI อ่านพลาดแล้ว Master แก้ให้ถูก
+  //   (MEK: ผู้ซื้ออยู่ออสเตรเลียแต่ส่งของไปเวียดนาม AI ชอบตอบผู้ซื้อ = VN · Master ล็อก AU ไว้ถูกแล้ว)
+  const buyerDiff = !!(doc.buyer && after.buyer && doc.buyer !== after.buyer);
+  const destDiff = !!(doc.dest && after.dest && doc.dest !== after.dest);
+  if (buyerDiff && destDiff) {
+    out.push(`ประเทศผู้ซื้อ/ปลายทาง: เอกสาร ${doc.buyer}/${doc.dest} แต่ Master ตั้ง ${after.buyer}/${after.dest}`);
+  }
+  if (out.length) {
+    out.push("Master นี้อาจเป็นของผู้ซื้อรายอื่น (เช่นสำเนามาแล้วยังแก้ไม่ครบ) — ตรวจผู้ซื้อ/ที่อยู่/ประเทศก่อนรัน");
+    console.log(`[master] ⚠ ${out.join(" · ")}`);
+  }
+  return out;
+}
+
+/**
  * ให้ AI กรอกช่องที่ Master ตั้งโหมด "AI ทำตามคำสั่ง" (rule) — แก้ record ในที่
  *   คืนคำเตือนสำหรับช่องที่ทำไม่ได้ (ไม่มีเอกสาร / AI หาไม่เจอ / ตอบผิดรูปแบบ)
  *   ทำไม่ได้ = คงค่าที่ AI อ่านรอบแรกไว้ (ไม่เอาคำสั่งไปกรอกเป็นค่าเด็ดขาด)
@@ -1255,6 +1291,12 @@ export async function prepareDeclarationRecord(
       console.log(`[code] ${f.scope === "item" ? `รายการ ${f.itemLine}: ` : ""}${f.label}: "${f.from}" → "${f.to}" (${f.listLabel})`);
     }
 
+    // ค่าที่เอกสารบอกก่อนผสม Master — ไว้เทียบว่า Master ไปเปลี่ยน "ตัวตนผู้ซื้อ" ของใบหรือเปล่า
+    const docIdentity = {
+      consignee: String(record.consignee_name ?? "").trim(),
+      buyer: String(record.buyer_country_code ?? "").trim().toUpperCase(),
+      dest: String(record.destination_country_code ?? "").trim().toUpperCase(),
+    };
     // skipMaster: ค่ามาจาก Master + ผู้ใช้แก้ในฟอร์มแล้ว (สร้างใบจาก Master) — ผสม Master ซ้ำจะทับค่าที่ผู้ใช้แก้
     const mastered = opts.skipMaster
       ? { record, fieldModes: undefined, templateName: undefined, masterNotes: [] }
@@ -1274,6 +1316,7 @@ export async function prepareDeclarationRecord(
     //   เช่น เลขหมายหีบห่อ = "AS PER INVOICE NO.<เลขใบกำกับ> DATE: <วันที่>" — เปลี่ยนทุกใบ ตรึงค่าใน Master ไม่ได้
     //   (เจอจริง THANAKORN ALF 03(A)/2026: Master ตรึง "AS PER INVOICE NO.ALF 02/2026" ไว้ ใบใหม่ได้เลขใบเก่า)
     const ruleWarnings = await fillRuleFields(record, mastered.rules ?? [], opts.aiFiles);
+    ruleWarnings.push(...identityWarnings(docIdentity, record, mastered.templateName));
 
     // ── หัวใบสรุปหน่วยจากรายการสินค้า ────────────────────────────────
     //   DCTK บังคับให้ "ส่วนควบคุม" (หัวใบ) มีหน่วยด้วย ไม่ใช่แค่ในรายการ

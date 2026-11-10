@@ -193,6 +193,19 @@ export async function validateMaster(
       message: `ตั้งค่าตายตัวไว้ ("${str(vHead || vItem?.[k])}") จะทับค่าที่อ่านจากเอกสารทุกใบ — ช่องนี้ปกติเปลี่ยนทุกชิปเมนต์ ควรตั้งเป็น "อ่านจากเอกสาร"` });
   }
 
+  // ── 5.5) ชื่อผู้ซื้อในหน้า 2 ไม่ตรงกับ "ใช้กับผู้ซื้อ" ของ Master เอง ──
+  //   มักเกิดจากสำเนา Master ของผู้ซื้ออีกรายมาแล้วแก้ไม่ครบ (เจอจริง CFK 10 พ.ย.: ชื่อเป็น CHARMFREGS
+  //   แต่เงื่อนไข/ที่อยู่/ประเทศยังเป็นของ AUSTRALASIAN → ใบออกมาเป็นออสเตรเลีย)
+  {
+    const nm = (s: string) => s.toUpperCase().replace(/[^A-Z0-9ก-๙]/g, "");
+    const cn = nm(str(pick(tpl, "consignee_name")));
+    const scope = (tplIn.consignee_names ?? []).map((x) => nm(String(x))).filter(Boolean);
+    if (cn && scope.length && !scope.some((s) => s.includes(cn) || cn.includes(s))) {
+      add({ level: "warn", key: "consignee_name", label: "ชื่อผู้ซื้อ",
+        message: `ชื่อผู้ซื้อ "${str(pick(tpl, "consignee_name"))}" ไม่ตรงกับ "ใช้กับผู้ซื้อ" ของ Master นี้ (${(tplIn.consignee_names ?? []).join(", ")}) — ถ้าสำเนามาจาก Master อื่น ตรวจที่อยู่ ประเทศผู้ซื้อ และประเทศปลายทางด้วย` });
+    }
+  }
+
   // ── 6) ช่องที่ควรมี แต่ยังว่าง ──────────────────────────────────
   for (const [k, label] of Object.entries(EXPECTED_KEYS)) {
     if (modeOf(tpl, k) === "off" || modeOf(tpl, k) === "rule") continue;   // ตั้งใจไม่กรอก / ให้ AI ทำตามคำสั่ง = ไม่เตือน
