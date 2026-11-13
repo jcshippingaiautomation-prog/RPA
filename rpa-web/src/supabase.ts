@@ -1209,48 +1209,110 @@ export async function fillRuleFields(
   record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
   rules: { key: string; instruction: string }[],
   files: InlineFile[] | undefined,
+  itemRules: { idx: number; key: string; instruction: string }[] = [],
 ): Promise<string[]> {
-  if (!rules.length) return [];
-  const reg = new Map((await loadRegistry()).filter((f) => f.scope === "header").map((f) => [f.key, f]));
-  const fields = rules.map((r) => ({
-    key: r.key, instruction: r.instruction,
-    label: reg.get(r.key)?.label ?? r.key, type: reg.get(r.key)?.type ?? "text",
-  }));
-  const names = fields.map((f) => f.label).join(", ");
-  if (!files?.length) {
-    console.log(`[master] ช่อง ${names} ตั้งให้ AI ทำตามคำสั่ง แต่ไม่มีเอกสารให้อ่าน — ข้าม`);
-    return [`${names}: Master ตั้งให้ AI ทำตามคำสั่ง แต่ไม่มีเอกสารให้อ่าน — กรอกเองก่อนรัน`];
-  }
+  if (!rules.length && !itemRules.length) return [];
+  const registry = await loadRegistry();
+  const reg = new Map(registry.filter((f) => f.scope === "header").map((f) => [f.key, f]));
+  const regItem = new Map(registry.filter((f) => f.scope === "item").map((f) => [f.key, f]));
   const warnings: string[] = [];
-  let vals: Record<string, string> = {};
-  try {
-    const { fillFieldsByInstruction } = await import("./getemail/agents.js");
-    vals = await fillFieldsByInstruction(files, fields, await rowToFields(record, "header"));
-  } catch (e) {
-    console.warn(`[master] AI ทำตามคำสั่งไม่สำเร็จ: ${errMsg(e)}`);
-    return [`${names}: AI ทำตามคำสั่งไม่สำเร็จ (${errMsg(e).slice(0, 80)}) — ตรวจช่องนี้ก่อนรัน`];
-  }
-  const patch: Record<string, unknown> = {};
-  for (const f of fields) {
-    let v = vals[f.key] ?? "";
-    if (v && f.type === "date" && !/^\d{4}-\d{2}-\d{2}$/.test(v)) {
-      warnings.push(`${f.label}: AI ตอบ "${v}" ไม่ใช่วันที่ — ใช้ค่าที่อ่านจากเอกสารแทน ตรวจก่อนรัน`);
-      v = "";
-    }
-    if (!v) {
-      if (!warnings.some((w) => w.startsWith(f.label + ":"))) {
-        warnings.push(`${f.label}: AI หาค่าตามคำสั่งใน Master ไม่เจอ — ใช้ค่าที่อ่านจากเอกสารแทน ตรวจก่อนรัน`);
+  const headerVals: Record<string, string> = {};
+
+  // ── 1) หัวใบ ──
+  if (rules.length) {
+    const fields = rules.map((r) => ({
+      key: r.key, instruction: r.instruction,
+      label: reg.get(r.key)?.label ?? r.key, type: reg.get(r.key)?.type ?? "text",
+    }));
+    const names = fields.map((f) => f.label).join(", ");
+    if (!files?.length) {
+      console.log(`[master] ช่อง ${names} ตั้งให้ AI ทำตามคำสั่ง แต่ไม่มีเอกสารให้อ่าน — ข้าม`);
+      warnings.push(`${names}: Master ตั้งให้ AI ทำตามคำสั่ง แต่ไม่มีเอกสารให้อ่าน — กรอกเองก่อนรัน`);
+    } else {
+      let vals: Record<string, string> = {};
+      try {
+        const { fillFieldsByInstruction } = await import("./getemail/agents.js");
+        vals = await fillFieldsByInstruction(files, fields, await rowToFields(record, "header"));
+      } catch (e) {
+        console.warn(`[master] AI ทำตามคำสั่งไม่สำเร็จ: ${errMsg(e)}`);
+        warnings.push(`${names}: AI ทำตามคำสั่งไม่สำเร็จ (${errMsg(e).slice(0, 80)}) — ตรวจช่องนี้ก่อนรัน`);
       }
-      continue;
+      const patch: Record<string, unknown> = {};
+      for (const f of fields) {
+        let v = vals[f.key] ?? "";
+        if (v && f.type === "date" && !/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+          warnings.push(`${f.label}: AI ตอบ "${v}" ไม่ใช่วันที่ — ใช้ค่าที่อ่านจากเอกสารแทน ตรวจก่อนรัน`);
+          v = "";
+        }
+        if (!v) {
+          if (!warnings.some((w) => w.startsWith(f.label + ":"))) {
+            warnings.push(`${f.label}: AI หาค่าตามคำสั่งใน Master ไม่เจอ — ใช้ค่าที่อ่านจากเอกสารแทน ตรวจก่อนรัน`);
+          }
+          continue;
+        }
+        patch[f.key] = v;
+        headerVals[f.key] = v;
+        console.log(`[master] ${f.label} (AI ทำตามคำสั่ง): ${JSON.stringify(v)}`);
+      }
+      if (Object.keys(patch).length) {
+        const sp = await splitRecord(patch, "header");
+        Object.assign(record, sp.columns);
+        if (Object.keys(sp.extra).length) {
+          record.extra_fields = { ...((record.extra_fields ?? {}) as object), ...sp.extra };
+        }
+      }
     }
-    patch[f.key] = v;
-    console.log(`[master] ${f.label} (AI ทำตามคำสั่ง): ${JSON.stringify(v)}`);
   }
-  if (Object.keys(patch).length) {
-    const sp = await splitRecord(patch, "header");
-    Object.assign(record, sp.columns);
-    if (Object.keys(sp.extra).length) {
-      record.extra_fields = { ...((record.extra_fields ?? {}) as object), ...sp.extra };
+
+  const items = record._items ?? [];
+  const setItem = async (idx: number, key: string, v: string) => {
+    const it = items[idx];
+    if (!it) return;
+    const sp = await splitRecord({ [key]: v }, "item");
+    Object.assign(it, sp.columns);
+    if (Object.keys(sp.extra).length) it.extra_fields = { ...((it.extra_fields ?? {}) as object), ...sp.extra };
+  };
+
+  // ── 2) ช่องที่มีทั้งหัวใบและในรายการ (เช่น เลขหมายหีบห่อ) — ใช้ผลเดียวกับหัวใบ ไม่ถาม AI ซ้ำ ──
+  //   field_modes ใช้ key เดียวกันทั้งสองระดับ คำสั่งอยู่ที่หัวใบ · ค่าเก่าในแถว Master ไม่ใช้
+  const sharedKeys = new Set(rules.map((r) => r.key).filter((k) => regItem.has(k)));
+  for (const k of sharedKeys) {
+    if (!headerVals[k]) continue;
+    for (let i = 0; i < items.length; i++) await setItem(i, k, headerVals[k]);
+  }
+
+  // ── 3) ช่องเฉพาะในรายการ — ถาม AI ครั้งเดียวทุกรายการ ──
+  const own = itemRules.filter((r) => !sharedKeys.has(r.key) && items[r.idx]);
+  if (own.length) {
+    const label = (k: string) => regItem.get(k)?.label ?? k;
+    const names = [...new Set(own.map((r) => label(r.key)))].join(", ");
+    if (!files?.length) {
+      warnings.push(`${names} (รายการสินค้า): Master ตั้งให้ AI ทำตามคำสั่ง แต่ไม่มีเอกสารให้อ่าน — กรอกเองก่อนรัน`);
+    } else {
+      try {
+        const { fillItemFieldsByInstruction } = await import("./getemail/agents.js");
+        const asks = own.map((r) => ({
+          idx: r.idx, key: r.key, label: label(r.key), type: regItem.get(r.key)?.type ?? "text", instruction: r.instruction,
+        }));
+        const got = await fillItemFieldsByInstruction(files, asks, await rowToFields(record, "header"),
+          items.map((it) => ({
+            line: Number(it.line_no ?? 0) || undefined,
+            product: String(it.description_eng ?? ""),
+            description: String(it.description_eng_field ?? "").slice(0, 200),
+          })));
+        for (const a of asks) {
+          const v = got[`${a.idx}|${a.key}`] ?? "";
+          if (!v) {
+            warnings.push(`รายการ ${a.idx + 1} ${a.label}: AI หาค่าตามคำสั่งใน Master ไม่เจอ — ใช้ค่าที่อ่านจากเอกสารแทน ตรวจก่อนรัน`);
+            continue;
+          }
+          await setItem(a.idx, a.key, v);
+          console.log(`[master] รายการ ${a.idx + 1} ${a.label} (AI ทำตามคำสั่ง): ${JSON.stringify(v)}`);
+        }
+      } catch (e) {
+        console.warn(`[master] AI ทำตามคำสั่ง (รายการสินค้า) ไม่สำเร็จ: ${errMsg(e)}`);
+        warnings.push(`${names} (รายการสินค้า): AI ทำตามคำสั่งไม่สำเร็จ — ตรวจช่องนี้ก่อนรัน`);
+      }
     }
   }
   return warnings;
@@ -1315,7 +1377,8 @@ export async function prepareDeclarationRecord(
     // ── ช่องที่ Master สั่งให้ "AI ทำตามคำสั่ง" ─────────────────────────
     //   เช่น เลขหมายหีบห่อ = "AS PER INVOICE NO.<เลขใบกำกับ> DATE: <วันที่>" — เปลี่ยนทุกใบ ตรึงค่าใน Master ไม่ได้
     //   (เจอจริง THANAKORN ALF 03(A)/2026: Master ตรึง "AS PER INVOICE NO.ALF 02/2026" ไว้ ใบใหม่ได้เลขใบเก่า)
-    const ruleWarnings = await fillRuleFields(record, mastered.rules ?? [], opts.aiFiles);
+    const ruleWarnings = await fillRuleFields(record, mastered.rules ?? [], opts.aiFiles,
+      (mastered as { itemRules?: { idx: number; key: string; instruction: string }[] }).itemRules ?? []);
     ruleWarnings.push(...identityWarnings(docIdentity, record, mastered.templateName));
 
     // ── หัวใบสรุปหน่วยจากรายการสินค้า ────────────────────────────────
@@ -1708,6 +1771,8 @@ export async function applyMasterToRecord(
   masterNotes?: { key: string; label: string; from: string; to: string; itemLine: number }[];
   /** ช่องหัวใบที่ Master สั่งให้ AI ทำตามคำสั่ง (โหมด 'rule') — key ของ registry */
   rules?: { key: string; instruction: string }[];
+  /** ช่องในรายการที่ Master สั่งให้ AI ทำตามคำสั่ง — idx = ลำดับรายการ (0 = รายการแรก) */
+  itemRules?: { idx: number; key: string; instruction: string }[];
 }> {
   const consigneeName = String(record.consignee_name ?? "");
   const destCountry = String(record.destination_country_code ?? record.dest_country_code ?? "");
@@ -1761,6 +1826,8 @@ export async function applyMasterToRecord(
   //   (ตรงข้ามกับที่ตกลงไว้ว่า "ของตายตัวต่อ consignee ให้มาจาก Master")
   //   → ผสมทีละช่องตามโหมด: master = ทับค่า AI · ai = เติมเฉพาะช่องว่าง · off = ไม่กรอก
   const tplItems = tpl.items ?? [];
+  // ช่องในรายการที่ Master ตั้ง "AI ทำตามคำสั่ง" — คำสั่งอยู่ในแถว Master ที่จับคู่ได้ (แต่ละแถวสั่งต่างกันได้)
+  const itemRules: { idx: number; key: string; instruction: string }[] = [];
   const masterNotes: { key: string; label: string; from: string; to: string; itemLine: number }[] = [];
   if (!(record._items?.length)) {
     if (tplItems.length) out._items = tplItems.map((it) => ({ ...it }));
@@ -1780,12 +1847,17 @@ export async function applyMasterToRecord(
       //   (เจอจริง: ค่าระวางหัวใบ 140 แต่รายการกลายเป็น 260 ของใบต้นแบบ)
       const base: Record<string, unknown> = {};
       for (const k of Object.keys(raw)) {
+        if (tpl.field_modes?.[k] === "rule") {
+          const ins = String((raw as Record<string, unknown>)[k] ?? "").trim();
+          if (ins) itemRules.push({ idx: i, key: k, instruction: ins });
+          continue;
+        }
         // ⚠ effectiveMode() เดาโหมดปริยายจาก tpl.header — ใช้กับช่อง "ในรายการ" ไม่ได้
         //   เพราะค่าของรายการอยู่ใน tpl.items ไม่ใช่ header → จะได้ 'ai' หมดแล้วไม่มีอะไรผ่านเลย
         //   ที่ถูกคือ: ตั้งไว้ชัดเจนก็ใช้ตามนั้น · ไม่ได้ตั้งแต่รายการมีค่า = "ใช้ค่า Master"
         const set = tpl.field_modes?.[k];
         // 'rule' (AI ทำตามคำสั่ง) ใช้ได้เฉพาะช่องหัวใบ — ในรายการถือเป็น "อ่านจากเอกสาร" ห้ามเอาคำสั่งมาเป็นค่า
-        const mode = set === "rule" ? "ai" : (set === "master" || set === "ai" || set === "off")
+        const mode = (set === "master" || set === "ai" || set === "off")
           ? set
           : (String((raw as Record<string, unknown>)[k] ?? "").trim() ? "master" : "ai");
         if (mode === "master") base[k] = (raw as Record<string, unknown>)[k];
@@ -1829,7 +1901,7 @@ export async function applyMasterToRecord(
   for (const n of masterNotes) {
     console.log(`[master] ⚠ รายการ ${n.itemLine}: ${n.label} เอกสารเขียน "${n.from}" → ใช้ "${n.to}" ตาม Master`);
   }
-  return { record: out, fieldModes: applied.fieldModes, templateName: tpl.name, masterNotes, rules: applied.rules };
+  return { record: out, fieldModes: applied.fieldModes, templateName: tpl.name, masterNotes, rules: applied.rules, itemRules };
 }
 
 export async function insertDeclaration(

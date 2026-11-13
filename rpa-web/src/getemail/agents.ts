@@ -156,3 +156,44 @@ export async function fillFieldsByInstruction(
   }
   return out;
 }
+
+/**
+ * Agent 4 — ช่องในรายการสินค้าที่ Master สั่งไว้เป็น "คำสั่ง" (ตอบแยกทีละรายการ)
+ *   คืน { "idx|key": value } — idx = ลำดับรายการ (0 = รายการแรก)
+ */
+export async function fillItemFieldsByInstruction(
+  files: InlineFile[],
+  asks: { idx: number; key: string; label: string; type: string; instruction: string }[],
+  header: Record<string, unknown>,
+  items: { line?: number; product: string; description: string }[],
+): Promise<Record<string, string>> {
+  if (!asks.length) return {};
+  const system =
+    "คุณคือผู้ช่วยเจ้าหน้าที่ชิปปิ้งที่กรอกใบขนสินค้าขาออก (ส่วนรายการสินค้า)\n" +
+    "ได้รับ: เอกสารของชิปเมนต์ + ข้อมูลหัวใบที่สกัดแล้ว + รายการสินค้าตามลำดับ + ช่องที่ต้องกรอกในแต่ละรายการพร้อมคำสั่ง\n" +
+    "กฎ:\n" +
+    "- ตอบเป็น JSON object อย่างเดียว: {\"items\":[{\"idx\":ลำดับรายการ,\"key\":\"รหัสช่อง\",\"value\":\"ข้อความ\"}, ...]} ตอบครบทุกคู่ที่ขอ\n" +
+    "- ค่าของแต่ละรายการต้องมาจากสินค้ารายการนั้นในเอกสาร ห้ามเอาค่าของรายการอื่น ห้ามใช้ค่าตัวอย่างในคำสั่ง\n" +
+    "- ช่องชนิดวันที่ (date): ตอบ YYYY-MM-DD · ช่องข้อความ: ทำตามรูปแบบในคำสั่งเป๊ะ ๆ ขึ้นบรรทัดใหม่ใช้ \\n\n" +
+    "- หาไม่ได้จริง ๆ ให้ value เป็น \"\" ห้ามเดา";
+  const ctx: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(header)) {
+    if (k.startsWith("_") || v == null || typeof v === "object") continue;
+    const s = String(v).trim();
+    if (s) ctx[k] = s.length > 200 ? s.slice(0, 200) + "…" : s;
+  }
+  const text =
+    "[ข้อมูลหัวใบ]\n" + JSON.stringify(ctx, null, 1) + "\n\n" +
+    "[รายการสินค้า]\n" + items.map((it, i) => `- idx ${i}${it.line ? ` (ลำดับ ${it.line})` : ""}: ${it.product} — ${it.description}`).join("\n") +
+    "\n\n[ช่องที่ต้องกรอก]\n" +
+    asks.map((a) => `- idx ${a.idx} · รหัสช่อง "${a.key}" (${a.label}, ชนิด ${a.type}): ${a.instruction}`).join("\n");
+  const response = await geminiGenerate(system, [{ text }, ...fileParts(files)] as GeminiPart[]);
+  const parsed = safeParseJson(geminiText(response)) as { items?: { idx?: unknown; key?: unknown; value?: unknown }[] } | null;
+  const out: Record<string, string> = {};
+  for (const r of parsed?.items ?? []) {
+    const idx = Number(r.idx);
+    if (!Number.isInteger(idx) || typeof r.key !== "string") continue;
+    out[`${idx}|${r.key}`] = r.value == null ? "" : String(r.value).replace(/\\n/g, "\n").trim();
+  }
+  return out;
+}

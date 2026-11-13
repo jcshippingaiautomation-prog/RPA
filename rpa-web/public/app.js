@@ -2762,23 +2762,30 @@ function ruleExample(f) {
 /** สลับหน้าตาช่องตามโหมด — โหมดคำสั่งใช้กล่องข้อความใหญ่ + คำอธิบาย */
 function applyRuleUi(fld, f, isRule) {
   if (!fld) return;
-  let el = fld.querySelector(".ms-edit");
+  let el = fld.querySelector(".ms-edit, .msi-edit");
   if (!el) return;
-  if (isRule && el.tagName !== "TEXTAREA") {
+  // ช่องในรายการที่มีช่องชื่อเดียวกันในหัวใบ (เช่น เลขหมายหีบห่อ) — โหมดใช้ร่วมกัน
+  //   ตั้งคำสั่งที่หน้า 1 ช่องเดียว ผลที่ได้ใช้กับทุกรายการ → ช่องในรายการไม่ต้องกรอก (ค่าเก่าไม่ถูกใช้)
+  const shared = f.scope === "item" && REGISTRY.some((x) => x.key === f.key && x.scope === "header");
+  if (isRule && !shared && el.tagName !== "TEXTAREA") {
     const ta = document.createElement("textarea");
-    ta.className = el.className; ta.dataset.key = el.dataset.key; ta.rows = 3; ta.value = el.value;
+    ta.className = el.className; ta.rows = 3; ta.value = el.value;
+    Object.assign(ta.dataset, el.dataset);
+    if (el.classList.contains("msi-edit")) ta.oninput = () => { msItems[+ta.dataset.i][ta.dataset.key] = ta.value; };
     el.replaceWith(ta); el = ta;
   }
-  if (isRule && el.rows < 3) el.rows = 3;
+  if (isRule && !shared && el.rows < 3) el.rows = 3;
+  el.disabled = isRule && shared;
   el.classList.toggle("is-rule", isRule);
-  el.placeholder = isRule ? ruleExample(f) : "";
+  el.placeholder = isRule && !shared ? ruleExample(f) : "";
   let hint = fld.querySelector(".rule-hint");
-  if (isRule && !hint) {
-    hint = document.createElement("div");
-    hint.className = "rule-hint";
-    hint.textContent = "🤖 ช่องนี้คือคำสั่งให้ AI — ทุกใบที่ใช้ Master นี้ AI จะอ่านเอกสารแล้วเขียนค่าตามคำสั่ง (ค่าที่ได้ตรวจ/แก้ได้ในหน้ารายละเอียดใบ)";
-    fld.appendChild(hint);
-  } else if (!isRule && hint) hint.remove();
+  if (!isRule) { if (hint) hint.remove(); return; }
+  if (!hint) { hint = document.createElement("div"); hint.className = "rule-hint"; fld.appendChild(hint); }
+  hint.textContent = shared
+    ? "🤖 ใช้ผลเดียวกับช่องนี้ในหน้า 1 (AI ทำตามคำสั่ง) — ค่าในช่องนี้ไม่ถูกใช้ เขียนคำสั่งที่หน้า 1"
+    : f.scope === "item"
+      ? "🤖 คำสั่งให้ AI สำหรับรายการนี้ — AI อ่านเอกสารแล้วเขียนค่าของสินค้ารายการนี้ตามคำสั่ง"
+      : "🤖 ช่องนี้คือคำสั่งให้ AI — ทุกใบที่ใช้ Master นี้ AI จะอ่านเอกสารแล้วเขียนค่าตามคำสั่ง (ค่าที่ได้ตรวจ/แก้ได้ในหน้ารายละเอียดใบ)";
 }
 
 /** โหมดที่ใช้จริงของช่อง (ตามที่ตั้งไว้ หรือเดาจากการมีค่า) — ตรงกับ effectiveMode ฝั่ง server */
@@ -3090,9 +3097,10 @@ function renderMasterItems(formPage = 3) {
                ${regIsMultiline(f)
                  ? `<textarea class="inp msi-edit" data-i="${i}" data-key="${f.key}" rows="2">${escapeHtml(it[f.key] != null ? String(it[f.key]) : "")}</textarea>`
                  : `<input class="inp msi-edit" data-i="${i}" data-key="${f.key}" value="${escapeHtml(it[f.key] != null ? String(it[f.key]) : "")}" />`}
-               <select class="sel sel-sm ms-mode m-${mode}" data-key="${f.key}">
+               <select class="sel sel-sm ms-mode m-${mode}" data-key="${f.key}" data-scope="item">
                  <option value="master" ${mode === "master" ? "selected" : ""}>ใช้ค่า Master</option>
                  <option value="ai" ${mode === "ai" ? "selected" : ""}>อ่านจากเอกสาร</option>
+                 <option value="rule" ${mode === "rule" ? "selected" : ""}>AI ทำตามคำสั่ง</option>
                  <option value="off" ${mode === "off" ? "selected" : ""}>ไม่กรอก</option>
                </select>
              </div></div>`;
@@ -3113,19 +3121,23 @@ function bindMasterItems() {
   }
   if ($("msiAdd")) $("msiAdd").onclick = () => { msItems.push({ brand_name: "NO BRAND" }); refreshMasterItems(); };
   // สีของ dropdown โหมดเปลี่ยนตามค่าที่เลือก (อ่านง่ายเวลามี 100+ ช่อง)
+  //   โหมดเก็บเป็นค่าเดียวต่อ key (ใช้ร่วมกันทั้งหัวใบ/ทุกรายการ) → เปลี่ยนที่ไหน dropdown ของ key เดียวกันต้องเปลี่ยนตาม
+  //   ไม่งั้นหน้าจอโชว์คนละโหมด แต่ตอนบันทึกได้โหมดเดียว (เดิมหน้า 3 โชว์ "ใช้ค่า Master" ทั้งที่หน้า 1 เป็นคำสั่ง)
+  const ruleUiFor = (sel) => {
+    const f = REGISTRY.find((x) => x.key === sel.dataset.key && x.scope === (sel.dataset.scope || "header"));
+    if (f) applyRuleUi(sel.closest(".fld"), f, sel.value === "rule");
+  };
   $("msBody").querySelectorAll(".ms-mode").forEach((sel) => (sel.onchange = () => {
-    sel.className = `sel sel-sm ms-mode m-${sel.value}`;
-    if (sel.dataset.scope === "header") {
-      const f = REGISTRY.find((x) => x.key === sel.dataset.key && x.scope === "header");
-      if (f) applyRuleUi(sel.closest(".reg-fld"), f, sel.value === "rule");
-    }
+    const key = sel.dataset.key, val = sel.value;
+    msEditing.field_modes = { ...(msEditing.field_modes || {}), [key]: val };
+    $("msBody").querySelectorAll(`.ms-mode[data-key="${key}"]`).forEach((s) => {
+      s.value = val;
+      s.className = `sel sel-sm ms-mode m-${val}`;
+      ruleUiFor(s);
+    });
   }));
   // ช่องที่ตั้งโหมดคำสั่งไว้แล้ว → แสดงเป็นกล่องคำสั่งตั้งแต่เปิดฟอร์ม
-  $("msBody").querySelectorAll('.ms-mode[data-scope="header"]').forEach((sel) => {
-    if (sel.value !== "rule") return;
-    const f = REGISTRY.find((x) => x.key === sel.dataset.key && x.scope === "header");
-    if (f) applyRuleUi(sel.closest(".reg-fld"), f, true);
-  });
+  $("msBody").querySelectorAll(".ms-mode").forEach((sel) => { if (sel.value === "rule") ruleUiFor(sel); });
 }
 function refreshMasterItems() {
   const sec = $("msiBody")?.closest(".md-section");

@@ -118,9 +118,12 @@ export async function validateMaster(
         message: `ตั้งเป็น "AI ทำตามคำสั่ง" แต่ยังไม่ได้เขียนคำสั่ง — ช่องนี้จะได้ค่าที่ AI อ่านเองตามปกติ` });
     }
   }
+  const isRule = (k: string) => modeOf(tplIn, k) === "rule";
   const tpl: DeclarationTemplate = {
     ...tplIn,
     header: Object.fromEntries(Object.entries(tplIn.header ?? {}).filter(([k]) => !ruleKeys.includes(k))),
+    // ช่องในรายการที่เป็นโหมดคำสั่ง ก็เก็บคำสั่งไว้ในช่องค่าเหมือนกัน
+    items: (tplIn.items ?? []).map((it) => Object.fromEntries(Object.entries(it as Record<string, unknown>).filter(([k]) => !isRule(k)))),
   };
   const rules = await loadDctkRules();
   const items = (tpl.items ?? []) as Record<string, unknown>[];
