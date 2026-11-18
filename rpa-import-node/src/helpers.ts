@@ -600,7 +600,12 @@ export async function comboPickStrict(
     } else {
       log(`  📋 เปิด dropdown แบบไม่ใส่คำค้นแล้วไม่มีรายการเลย — บริษัทนี้อาจยังไม่ได้ลงทะเบียนสินค้าไว้`);
     }
-    throw new Error(`${fieldLabel}: ไม่พบรายการใน master DCTK สำหรับ "${value}" (ต้องเพิ่มสินค้าใน master ก่อน)`);
+    // ใส่ชื่อที่ใกล้เคียงที่สุดลงในข้อความ error เลย — ผู้ใช้เห็นในหน้าเว็บ ไม่ต้องเปิด log/DCTK หาเอง
+    //   (เจอจริง MEK 19(G)/2026: ส่ง "REFINED SOYBEAN OIL (REGULAR)" แต่คลังมี "REFINED SOYBEAN OIL")
+    const near = closestNames(avail, want, 3);
+    throw new Error(avail.length
+      ? `${fieldLabel}: ไม่พบ "${value}" ในคลังสินค้า DCTK ของบริษัทนี้ — ชื่อที่ใกล้เคียงในคลัง: ${near.join(" / ")}`
+      : `${fieldLabel}: ไม่พบ "${value}" ในคลังสินค้า DCTK — บริษัทนี้ยังไม่มีสินค้าในคลัง ต้องลงทะเบียนสินค้าใน DCTK ก่อน`);
   }
 
   // อ่าน text ทุกแถว (cell แรกถ้าเป็น grid ไม่งั้นทั้ง row)
@@ -653,7 +658,22 @@ export async function comboPickStrict(
   }
   log(`  📋 ${fieldLabel} "${value}" ไม่อยู่ใน master — รายการที่มีใน master (${n} รายการ):`);
   master.forEach((m) => log(`     • ${m}`));
-  throw new Error(`${fieldLabel}: "${value}" ไม่ตรงกับ master DCTK — master มี: ${master.slice(0, 6).join(" / ")}${n > 6 ? ` …(${n} รายการ)` : ""}`);
+  throw new Error(`${fieldLabel}: ไม่พบ "${value}" ในคลังสินค้า DCTK ของบริษัทนี้ — ชื่อที่ใกล้เคียงในคลัง: ${closestNames(master, want, 3).join(" / ")}${n > 10 ? ` (คลังมี ${n} รายการ)` : ""}`);
+}
+
+/** เรียงชื่อในคลังตามความเหมือนกับชื่อที่ต้องการ (คำซ้ำกันมาก + ซ้อนกันได้ = ใกล้กว่า) */
+function closestNames(names: string[], want: string, k: number): string[] {
+  // แถวในคลัง DCTK = "รหัส คำอธิบายไทย คำอธิบายอังกฤษ null ปี" → เอาเฉพาะรหัส (ข้อความก่อนอักษรไทยตัวแรก)
+  names = names.map((n) => n.split(/[\u0E00-\u0E7F]/)[0].replace(/\s+null\b.*$/i, "").trim()).filter(Boolean);
+  const wt = new Set(productTokens(want));
+  const W = want.toUpperCase();
+  const score = (n: string) => {
+    const t = productTokens(n);
+    const common = t.filter((x) => wt.has(x)).length;
+    const nest = W.includes(n.toUpperCase()) || n.toUpperCase().includes(W) ? 2 : 0;
+    return common / Math.max(1, Math.max(t.length, wt.size)) + nest;
+  };
+  return [...new Set(names)].map((n) => ({ n, s: score(n) })).sort((a, b) => b.s - a.s).slice(0, k).map((x) => x.n);
 }
 
 /** token ของชื่อสินค้า (ตัดวงเล็บ/อักขระพิเศษ/stopword ออก) เพื่อเทียบความเหมือน */

@@ -91,7 +91,10 @@ export function validateDeclaration(decl: Decl): ValidationResult {
     if (isEmpty(it.customs_unit_code)) {
       add("error", "customs_unit_code", `รายการที่ ${line}: ขาด 'หน่วยปริมาณในใบขน' (customs_unit_code)`, line);
     }
-    if (!it.is_foc && num(it.container_or_volume_qty) <= 0) {
+    // ยอดหีบห่อทั้งหมดอยู่ที่รายการแรก (ตั้งใจ เช่น ZECK __package_alloc=first ตามใบที่ยื่นจริง) → รายการอื่นเป็น 0 ได้
+    const firstHoldsAll = line > 1 && num(items[0]?.container_or_volume_qty) > 0
+      && Math.abs(num(items[0]?.container_or_volume_qty) - num(decl.container_or_volume_qty)) < 0.001;
+    if (!it.is_foc && num(it.container_or_volume_qty) <= 0 && !firstHoldsAll) {
       add("warn", "container_or_volume_qty", `รายการที่ ${line}: 'จำนวน/ปริมาณ' เป็น 0 — ตรวจสอบ (ถ้าไม่ใช่ของแถม FOC ควรมีจำนวน)`, line);
     }
   });
@@ -119,9 +122,34 @@ export async function validateDeclarationFull(decl: Decl): Promise<ValidationRes
       import("./field-registry.js"),
     ]);
     const extra = await checkDctkRules(decl, await columnMap());
-    const issues = [...base.issues, ...extra];
+    const issues = [...base.issues, ...extra, ...(await productCodeIssues(decl))];
     return { ok: !issues.some((i) => i.level === "error"), issues };
   } catch {
     return base;                 // ไม่มีไฟล์กฎ → ใช้ผลเดิม (ไม่ทำให้ระบบล่ม)
   }
+}
+
+/**
+ * รหัสสินค้าที่ "คล้ายแต่ไม่ตรง" กับรหัสที่ลูกค้ารายนี้เคยยื่นผ่าน → เตือน (ไม่บล็อกการกดรันเอง)
+ *   การรันอัตโนมัติหลังอัปโหลดจะหยุดรอให้ตรวจถ้าเจอข้อนี้
+ */
+async function productCodeIssues(decl: Decl): Promise<ValidationIssue[]> {
+  const customer = String(decl.customer_name ?? "").trim();
+  const items = decl._items ?? [];
+  if (!customer || !items.length) return [];
+  try {
+    const { productCodeSuspects } = await import("./supabase.js");
+    const sus = await productCodeSuspects(customer, items.map((it) => String(it.description_eng ?? "")));
+    if (!sus.length) return [];
+    const out: ValidationIssue[] = [];
+    items.forEach((it, i) => {
+      const s = sus.find((x) => x.code === String(it.description_eng ?? "").trim());
+      if (!s) return;
+      out.push({
+        level: "warn", field: "description_eng", itemLine: i + 1,
+        message: `รหัสสินค้า "${s.code}" ไม่เคยใช้ผ่านกับลูกค้ารายนี้ — ใบที่ผ่านใช้ "${s.near.join('" / "')}" · ถ้าคลังสินค้า DCTK ไม่มีชื่อนี้ RPA จะหยุดที่หน้า 3`,
+      });
+    });
+    return out;
+  } catch { return []; }
 }

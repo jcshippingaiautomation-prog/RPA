@@ -158,10 +158,16 @@ function isCancelError(e, task) {
 
 // ---- Confirm dialog (Promise) — แทน confirm() ของ browser ----
 let _confirmResolve = null;
-function confirmDialog(message, title = "ยืนยันการลบ", okLabel = "ลบ", icon = "trash") {
+function confirmDialog(message, title = "ยืนยันการลบ", okLabel = "ลบ", icon = "trash", opts = {}) {
+  // opts.tone: "danger" (ลบ — ค่าเดิม) · "warn" (แจ้งเตือน/ต้องตรวจ) · opts.noCancel: มีปุ่มเดียว
+  const tone = opts.tone || "danger";
   $("cfTitle").textContent = title;
   $("cfMsg").innerHTML = message; // อนุญาต <b> ในข้อความ
   $("cfOk").innerHTML = svgIcon(icon, 16) + " " + escapeHtml(okLabel);
+  $("cfOk").className = "btn " + (tone === "danger" ? "btn-danger" : "btn-primary");
+  const ico = document.querySelector("#modalConfirm .confirm-ico");
+  if (ico) { ico.className = "confirm-ico" + (tone === "warn" ? " is-warn" : ""); ico.innerHTML = svgIcon(tone === "warn" ? "alert-triangle" : "trash", 26); }
+  $("cfCancel").style.display = opts.noCancel ? "none" : "";
   $("modalConfirm").style.display = "flex";
   return new Promise((resolve) => { _confirmResolve = resolve; });
 }
@@ -633,6 +639,7 @@ async function loadDecls() {
     const lastPage = Math.max(1, Math.ceil((d.total || 0) / declSize));
     if (declPage > lastPage) { declPage = lastPage; return loadDecls(); }
     DECLS = d.declarations || [];
+    for (const x of DECLS) checkWatched(x.id, effStatus(x));   // ใบที่เฝ้าอยู่จบระหว่างที่ไม่ได้เปิดหน้า
     DECL_TOTAL = d.total || 0;
     DECL_COUNTS = d.counts || { total: DECLS.length, ready: 0, done: 0, error: 0 };
     if (Array.isArray(d.customers)) DECL_CUSTOMERS = d.customers;
@@ -690,6 +697,80 @@ async function cancelDeclarationRun(id) {
 // ---- รัน RPA ต่อใบ ----
 // ใบที่กำลังส่งคำสั่งรันอยู่ — กันกดซ้ำระหว่างรอเซิร์ฟเวอร์ตอบ (ส่งซ้ำ = ยื่นใบขนซ้ำใน DCTK)
 const RUN_INFLIGHT = new Set();
+// ============================================================
+//  แจ้งเตือนเมื่องานนำเข้ากรมฯ จบ (สำเร็จ/พลาด) — ผู้ใช้ไม่ต้องคอยเฝ้าหน้าจอ
+//   จำใบที่ "สั่งรันจากแท็บนี้" ไว้ใน localStorage (รีเฟรช/ปิดแท็บแล้วเปิดใหม่ก็ยังแจ้ง)
+//   ได้ข่าวจาก 3 ทาง: SSE decl-status · โหลดรายการใหม่ · ถามสถานะเองทุก 30 วินาที (กันพลาด event)
+// ============================================================
+const WATCH_KEY = "watchDecls";
+function watchGet() { try { return JSON.parse(localStorage.getItem(WATCH_KEY) || "{}"); } catch { return {}; } }
+function watchSet(w) { try { localStorage.setItem(WATCH_KEY, JSON.stringify(w)); } catch { /* ไม่เป็นไร */ } }
+function watchDecl(id, name) {
+  const w = watchGet();
+  w[id] = { name: name || "", since: Date.now() };
+  watchSet(w);
+  askNotifyPermission();
+}
+function askNotifyPermission() {
+  try { if ("Notification" in window && Notification.permission === "default") Notification.requestPermission(); } catch { /* */ }
+}
+function browserNotify(title, body, id) {
+  try {
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    const n = new Notification(title, { body, tag: "decl-" + id });
+    n.onclick = () => { window.focus(); openDetail(id); n.close(); };
+  } catch { /* บางเบราว์เซอร์ไม่รองรับ */ }
+}
+const FINAL_STATUS = ["done", "error", "partial", "cancelled"];
+/** ใบที่เฝ้าอยู่จบแล้วหรือยัง → แจ้งครั้งเดียวแล้วเลิกเฝ้า */
+async function checkWatched(id, status) {
+  const w = watchGet();
+  const item = w[id];
+  if (!item || !FINAL_STATUS.includes(status)) return;
+  delete w[id]; watchSet(w);
+  const d = DECLS.find((x) => x.id === id);
+  const name = item.name || (d ? `${d.customer_name || ""} / ${d.invoice_number || ""}` : "ใบขน");
+  if (status === "done") {
+    toast(`✓ ${name} — นำเข้ากรมฯ สำเร็จ ได้ใบขนแล้ว`, "success", 10000);
+    browserNotify("นำเข้ากรมฯ สำเร็จ", name, id);
+  } else if (status === "partial") {
+    toast(`${name} — สร้างใบใน DCTK แล้ว แต่ยังไม่ได้ไฟล์ใบขน (กดพิมพ์ใบขนซ้ำ)`, "info", 10000);
+    browserNotify("สร้างใบแล้ว แต่ยังไม่ได้ไฟล์ใบขน", name, id);
+  } else if (status === "cancelled") {
+    toast(`${name} — ยกเลิกแล้ว`, "info");
+  } else {
+    // พลาด → ดึงสาเหตุที่แปลเป็นภาษาคนแล้วมาเด้งบอกเลย ไม่ต้องไปหาเอง
+    let headline = "", hint = "";
+    try {
+      const r = await api(`/api/declarations/${encodeURIComponent(id)}`);
+      headline = (r.errorSummary && r.errorSummary.headline) || (r.declaration && r.declaration.status_message) || "";
+      hint = (r.errorSummary && r.errorSummary.humanHint) || "";
+    } catch { /* ใช้ข้อความกลาง */ }
+    browserNotify("นำเข้ากรมฯ ไม่สำเร็จ", `${name}\n${headline}`, id);
+    const open = await confirmDialog(
+      `<b>${escapeHtml(name)}</b><br><br>${escapeHtml(headline || "RPA มีข้อผิดพลาด")}${hint ? `<br><br><span class="muted">${escapeHtml(hint)}</span>` : ""}`,
+      "นำเข้ากรมฯ ไม่สำเร็จ", "เปิดใบนี้", "list", { tone: "warn" });
+    if (open) openDetail(id);
+  }
+}
+/** ถามสถานะใบที่เฝ้าอยู่เอง — เผื่อพลาด event (เว็บหลับ/เน็ตหลุด) */
+async function pollWatched() {
+  const ids = Object.keys(watchGet());
+  for (const id of ids) {
+    const w = watchGet()[id];
+    if (!w) continue;
+    if (Date.now() - w.since > 6 * 3600e3) { const all = watchGet(); delete all[id]; watchSet(all); continue; }   // ลืมไปแล้ว 6 ชม.
+    try {
+      const r = await api(`/api/declarations/${encodeURIComponent(id)}`);
+      const d = r.declaration;
+      if (!d) { const all = watchGet(); delete all[id]; watchSet(all); continue; }   // ใบถูกลบ
+      const st = d.doc_status && !["queued", "running"].includes(d.status) ? "done" : d.status;
+      await checkWatched(id, st);
+    } catch { /* ลองรอบหน้า */ }
+  }
+}
+setInterval(() => { if (Object.keys(watchGet()).length) pollWatched(); }, 30000);
+
 async function runDeclaration(id) {
   const d = DECLS.find((x) => x.id === id);
   if (RUN_INFLIGHT.has(id) || (d && ["queued", "running"].includes(d.status))) {
@@ -703,7 +784,8 @@ async function runDeclaration(id) {
   RUN_INFLIGHT.add(id);
   try {
     await api(`/api/declarations/${encodeURIComponent(id)}/run`, "POST", {});
-    toast(`ส่งเข้าคิว RPA แล้ว — กำลังรัน (⏱ ประมาณ ${est})`, "info");
+    toast(`ส่งเข้าคิว RPA แล้ว — กำลังรัน (⏱ ประมาณ ${est}) · เสร็จแล้วจะแจ้งเตือน`, "info");
+    watchDecl(id, name);
     setDeclStatusLocal(id, "queued", `ส่งเข้าคิว RPA แล้ว (⏱ ประมาณ ${est})`);
   } catch (e) { toast("รันไม่สำเร็จ: " + e.message, "error"); }
   finally { RUN_INFLIGHT.delete(id); }
@@ -793,6 +875,7 @@ function setDeclStatusLocal(id, status, message) {
   const d = DECLS.find((x) => x.id === id);
   if (d) { d.status = status; if (message !== undefined) d.status_message = message; }
   renderList();
+  checkWatched(id, status);
 }
 
 // ============================================================
@@ -1828,6 +1911,15 @@ function setUploadStep(n) {
 }
 function openUpload() {
   uploadFiles = []; renderFileList(); $("upProgress").textContent = "";
+  // รันต่ออัตโนมัติ: ค่าเริ่มต้น "เปิด" · จำค่าที่ผู้ใช้เลือกล่าสุด
+  if ($("upAutoRun")) {
+    let v = "1"; try { v = localStorage.getItem("uploadAutoRun") ?? "1"; } catch { /* */ }
+    $("upAutoRun").checked = v === "1";
+    $("upAutoRun").onchange = () => {
+      try { localStorage.setItem("uploadAutoRun", $("upAutoRun").checked ? "1" : "0"); } catch { /* */ }
+      if ($("upAutoRun").checked) askNotifyPermission();
+    };
+  }
   setUploadStep(1); loadCustomerNames(); $("modalUpload").style.display = "flex";
 }
 function closeUpload() {
@@ -1910,7 +2002,8 @@ $("upSubmit").onclick = async () => {
     $("upProcTitle").textContent = "AI กำลังอ่านและสกัดข้อมูลจากเอกสาร…";
     const customer = $("upCustomer").value || "";
     const templateId = ($("upTemplate") || {}).value || "";
-    const r = await api("/api/upload", "POST", { files, customer, templateId, taskId: task.id }, { signal: task.ctrl.signal });
+    const autoRun = !!($("upAutoRun") && $("upAutoRun").checked);
+    const r = await api("/api/upload", "POST", { files, customer, templateId, taskId: task.id, autoRun }, { signal: task.ctrl.signal });
     // งานเสร็จแล้ว → ปลดก่อนปิดหน้าต่าง ไม่งั้น closeUpload() ถามว่า "ยกเลิกไหม" แล้วถ้าตอบไม่ หน้าต่างค้างหมุนทั้งที่สร้างรายการแล้ว
     if (upTask === task) upTask = null;
     clearInterval(timer);
@@ -1918,7 +2011,12 @@ $("upSubmit").onclick = async () => {
     await loadDecls().catch(() => {});   // รายการสร้างแล้ว — โหลดตารางพลาดก็ไม่ใช่ "สกัดไม่สำเร็จ"
     // → ขั้นที่ 3: เปิดหน้าตรวจสอบ (detail modal + เอกสารต้นฉบับเป็นภาพ)
     // ระบบปรับหน่วย/สกุลเงินให้ตรงรหัสกรมฯ → บอกผู้ใช้ด้วย จะได้ตรวจว่าถูกไหม
-    if (r && r.id) {
+    const held = r && r.autoRun && r.autoRun.held;
+    if (r && r.id && r.autoRun && r.autoRun.queued) {
+      // ไม่มีจุดต้องตรวจ → ส่งเข้าคิวแล้ว ไม่ต้องเปิดหน้าตรวจ · จบแล้วเด้งแจ้งเอง
+      watchDecl(r.id, `${r.customer || ""} / ${r.invoice || ""}`);
+      toast(`AI อ่านแล้ว ไม่พบจุดต้องตรวจ — ${r.customer || ""} ${r.invoice ? "/ " + r.invoice : ""} ส่งเข้าคิวนำเข้ากรมฯ อัตโนมัติ · เสร็จแล้วจะแจ้งเตือน`, "success", 10000);
+    } else if (r && r.id) {
       openDetail(r.id, { wizard: true });
     } else {
       toast(`สร้างรายการแล้ว: ${r.customer || ""} ${r.invoice ? "/ " + r.invoice : ""}`, "success");
@@ -1938,7 +2036,13 @@ $("upSubmit").onclick = async () => {
     }
     // ระบบเจอค่าที่ขัดกับเอกสาร แต่แก้ให้เองไม่ได้ → ต้องให้ผู้ใช้แก้ (ขึ้นท้ายสุด ค้างนาน)
     const warns = (r && Array.isArray(r.warnings)) ? r.warnings : [];
-    if (warns.length) toast(`⚠ ${warns.join(" · ")}`, "error", 15000);
+    if (warns.length && !held) toast(`⚠ ${warns.join(" · ")}`, "error", 15000);
+    if (held) {
+      const reasons = r.autoRun.reasons || [];
+      await confirmDialog(
+        `ระบบยังไม่ส่งใบนี้เข้ากรมฯ อัตโนมัติ เพราะเจอจุดที่ต้องตรวจ:<ul class="held-list">${reasons.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>ตรวจ/แก้ในหน้ารายละเอียด แล้วกด <b>"นำเข้าระบบกรมฯ"</b>`,
+        "ต้องตรวจก่อนนำเข้ากรมฯ", "เข้าใจแล้ว", "check", { tone: "warn", noCancel: true });
+    }
   } catch (e) {
     // กลับไปขั้นที่ 1 ให้แก้ไฟล์/ลองใหม่ พร้อมข้อความ error
     setUploadStep(1);

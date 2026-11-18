@@ -209,6 +209,20 @@ export async function validateMaster(
     }
   }
 
+  // ── 5.6) รหัสสินค้าคล้ายแต่ไม่ตรงกับที่ลูกค้ารายนี้เคยยื่นผ่าน (เช่นเติม "(REGULAR)" ต่อท้าย) ──
+  if (tplIn.customer_name && items.length) {
+    try {
+      const { productCodeSuspects } = await import("./supabase.js");
+      const sus = await productCodeSuspects(tplIn.customer_name, items.map((it) => str(it.product_code)));
+      items.forEach((it, i) => {
+        const s = sus.find((x) => x.code === str(it.product_code));
+        if (!s) return;
+        add({ level: "warn", key: "product_code", label: "รหัสสินค้า", itemLine: i + 1,
+          message: `"${s.code}" ไม่เคยใช้ผ่านกับลูกค้ารายนี้ — ใบที่ผ่านใช้ "${s.near.join('" / "')}" · ต้องตรงกับชื่อในคลังสินค้า DCTK ทุกตัวอักษร ไม่งั้น RPA ค้นไม่เจอ` });
+      });
+    } catch { /* เช็กประวัติไม่ได้ ไม่เป็นไร */ }
+  }
+
   // ── 6) ช่องที่ควรมี แต่ยังว่าง ──────────────────────────────────
   for (const [k, label] of Object.entries(EXPECTED_KEYS)) {
     if (modeOf(tpl, k) === "off" || modeOf(tpl, k) === "rule") continue;   // ตั้งใจไม่กรอก / ให้ AI ทำตามคำสั่ง = ไม่เตือน

@@ -395,42 +395,75 @@ const BUSY_MSG = "ใบนี้มีงาน RPA อยู่ในคิว
 const stableStatus = (st: unknown) => (["queued", "running"].includes(String(st ?? "")) ? "partial" : String(st ?? ""));
 
 // รัน RPA สำหรับใบขนใบเดียว → enqueue job (worker หยิบไปกรอกฟอร์ม)
+/**
+ * เหตุผลที่ "ไม่ควรรันเองอัตโนมัติ" หลังอัปโหลด — ว่าง = รันได้
+ *   ใช้คำเตือนที่ระบบมีอยู่แล้วทั้งหมด + ผลตรวจก่อนรัน (รวมคำเตือน ไม่ใช่แค่ error)
+ */
+async function autoRunBlockers(
+  id: string,
+  info: { needsReview: boolean; warnings: string[]; masterFixes: string[]; templateName?: string; customer: string },
+): Promise<string[]> {
+  const out: string[] = [];
+  if (info.needsReview) out.push("AI ไม่มั่นใจว่าอ่านถูก");
+  out.push(...info.warnings);
+  out.push(...info.masterFixes);
+  if (!info.templateName && info.customer) {
+    const masters = await listTemplates(info.customer).catch(() => []);
+    if (masters.length) out.push("ไม่เจอ Master ที่ตรงกับใบนี้ (ผู้ซื้อ/สินค้าไม่ตรงกับ Master ไหนเลย) — ใบจะขาดค่าที่ Master เก็บไว้");
+  }
+  const decl = await getDeclaration(id);
+  if (decl) {
+    const v = await validateDeclarationFull(decl as Record<string, unknown> & { _items?: Record<string, unknown>[] });
+    for (const i of v.issues) out.push(`${i.itemLine ? `รายการ ${i.itemLine}: ` : ""}${i.message}`);
+  }
+  return [...new Set(out.map((x) => x.trim()).filter(Boolean))];
+}
+
+/**
+ * ส่งใบเข้าคิว RPA (ใช้ร่วมกัน: ปุ่มรัน + รันต่ออัตโนมัติหลังอัปโหลด)
+ *   คืน { ok, jobId } หรือ { status, error, validation } ให้ผู้เรียกตอบกลับเอง
+ */
+async function queueDeclarationRun(
+  id: string,
+  opts: { userId?: string | null; force?: boolean; headless?: boolean; triggerSource?: string; message?: string } = {},
+): Promise<{ ok: true; jobId: string } | { ok: false; status: number; error: string; validation?: unknown }> {
+  if (await declarationBusy(id)) return { ok: false, status: 409, error: BUSY_MSG };
+  // ---- ตรวจข้อมูลก่อนรัน (กันรันแล้วไม่ผ่าน) ----
+  //   ถ้ามี error และไม่ได้ force → ไม่ enqueue, ส่ง issues กลับให้ user แก้ก่อน
+  const declForCheck = await getDeclaration(id);
+  if (declForCheck) {
+    const check = await validateDeclarationFull(declForCheck as Record<string, unknown> & { _items?: Record<string, unknown>[] });
+    if (!check.ok && !opts.force) return { ok: false, status: 422, error: "ข้อมูลไม่ครบ — แก้ไขก่อนรัน", validation: check };
+  }
+  // หา index ของใบนี้ใน preview order (worker รับ onlyRows เป็น index)
+  const rows = await buildPreviewRows();
+  const row = rows.find((r) => String(r.declarationId) === String(id));
+  if (!row) return { ok: false, status: 404, error: "ไม่พบใบขนนี้ในรายการที่ดึงมา (อาจถูกลบ/เปลี่ยน)" };
+  const jobId = await enqueueJob(
+    "rpa_import",
+    // declId ลง payload ด้วย (persistent) — bridge fallback อ่านได้แม้เว็บ restart/หน่วยความจำหาย
+    { onlyRows: [row.index], headless: opts.headless ?? true, declId: id },
+    { dryRun: false, triggeredBy: opts.userId ?? null, triggerSource: opts.triggerSource ?? "manual" },
+  );
+  if (!jobId) return { ok: false, status: 409, error: "กำลังรันอยู่ หรือคิวไม่พร้อม" };
+  const msg = opts.message ?? "ส่งเข้าคิว RPA แล้ว";
+  await setDeclarationStatus(id, "queued", msg, jobId);
+  // ผูก job → declaration id ไว้ ให้ bridge อัปเดตสถานะใบได้
+  jobToDeclaration.set(jobId, id);
+  jobKind.set(jobId, "import");
+  state.running = true;
+  state.activeJobId = jobId;
+  broadcast("decl-status", { id, status: "queued", message: msg });
+  return { ok: true, jobId };
+}
+
 app.post("/api/declarations/:id/run", async (req, res) => {
   if (!supabaseEnabled()) { res.status(400).json({ error: "ยังไม่ได้ตั้งค่า Supabase" }); return; }
-  const id = req.params.id;
   try {
-    if (await declarationBusy(id)) { res.status(409).json({ error: BUSY_MSG }); return; }
-    // ---- ตรวจข้อมูลก่อนรัน (กันรันแล้วไม่ผ่าน) ----
-    //   ถ้ามี error และไม่ได้ force → ไม่ enqueue, ส่ง issues กลับให้ user แก้ก่อน
-    const force = !!(req.body && (req.body as { force?: boolean }).force);
-    const declForCheck = await getDeclaration(id);
-    if (declForCheck) {
-      const check = await validateDeclarationFull(declForCheck as Record<string, unknown> & { _items?: Record<string, unknown>[] });
-      if (!check.ok && !force) {
-        res.status(422).json({ error: "ข้อมูลไม่ครบ — แก้ไขก่อนรัน", validation: check });
-        return;
-      }
-    }
-    // หา index ของใบนี้ใน preview order (worker รับ onlyRows เป็น index)
-    const rows = await buildPreviewRows();
-    const row = rows.find((r) => String(r.declarationId) === String(id));
-    if (!row) { res.status(404).json({ error: "ไม่พบใบขนนี้ในรายการที่ดึงมา (อาจถูกลบ/เปลี่ยน)" }); return; }
-    const headless = (req.body && (req.body as { headless?: boolean }).headless) ?? true;
-    const jobId = await enqueueJob(
-      "rpa_import",
-      // declId ลง payload ด้วย (persistent) — bridge fallback อ่านได้แม้เว็บ restart/หน่วยความจำหาย
-      { onlyRows: [row.index], headless, declId: id },
-      { dryRun: false, triggeredBy: req.user?.id ?? null, triggerSource: "manual" },
-    );
-    if (!jobId) { res.status(409).json({ error: "กำลังรันอยู่ หรือคิวไม่พร้อม" }); return; }
-    await setDeclarationStatus(id, "queued", "ส่งเข้าคิว RPA แล้ว", jobId);
-    // ผูก job → declaration id ไว้ ให้ bridge อัปเดตสถานะใบได้
-    jobToDeclaration.set(jobId, id);
-    jobKind.set(jobId, "import");
-    state.running = true;
-    state.activeJobId = jobId;
-    broadcast("decl-status", { id, status: "queued", message: "ส่งเข้าคิว RPA แล้ว" });
-    res.json({ ok: true, jobId });
+    const b = (req.body || {}) as { force?: boolean; headless?: boolean };
+    const r = await queueDeclarationRun(req.params.id, { userId: req.user?.id ?? null, force: !!b.force, headless: b.headless });
+    if (!r.ok) { res.status(r.status).json({ error: r.error, ...(r.validation ? { validation: r.validation } : {}) }); return; }
+    res.json({ ok: true, jobId: r.jobId });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -583,6 +616,8 @@ app.post("/api/upload", async (req, res) => {
   const body = (req.body || {}) as {
     files?: { filename: string; mimeType?: string; dataBase64: string }[];
     customer?: string; templateId?: string;
+    /** อ่านเสร็จแล้วนำเข้ากรมฯ ต่อเลย (ถ้าไม่เจอจุดน่าสงสัย) */
+    autoRun?: boolean;
   };
   const files = Array.isArray(body.files) ? body.files : [];
   const customerHint = (body.customer || "").trim();
@@ -612,7 +647,34 @@ app.post("/api/upload", async (req, res) => {
     }
     broadcast("log", { line: `[UPLOAD] ✓ สร้างรายการ: ${customer} / ${inv || "(ไม่มี invoice)"}` });
     broadcast("decl-status", { id: created.id, status: needsReview ? "new" : "ready" });
-    res.json({ ok: true, id: created.id, customer, invoice: inv, needsReview, codeFixes: created.codeFixes ?? [], warnings: created.warnings ?? [] });
+
+    // ── รันต่ออัตโนมัติ (คุณแพรวขอ 18 พ.ย.: อัปโหลดแล้วชอบลืมกลับมากดรัน) ──
+    //   รันเองเฉพาะใบที่ "ไม่มีจุดน่าสงสัย" — ใบที่ระบบเตือนต้องให้คนดูก่อน ไม่งั้นข้อมูลผิดเข้ากรมฯ โดยไม่มีใครเห็น
+    //   (เช่น CFK 01/2026 ที่ Master ทำให้ยื่นเป็นออสเตรเลีย)
+    let autoRun: { queued: true; jobId: string } | { held: true; reasons: string[] } | undefined;
+    if (body.autoRun) {
+      const reasons = await autoRunBlockers(created.id, {
+        needsReview, warnings: created.warnings ?? [],
+        masterFixes: (created.codeFixes ?? []).filter((f) => f.master).map((f) => `${f.label}: เอกสารเขียน ${f.from} → Master ใช้ ${f.to}`),
+        templateName: created.templateName, customer,
+      });
+      if (!reasons.length) {
+        const q = await queueDeclarationRun(created.id, {
+          userId: req.user?.id ?? null, triggerSource: "auto-upload",
+          message: "AI อ่านแล้ว ไม่พบจุดต้องตรวจ — ส่งเข้าคิวนำเข้ากรมฯ อัตโนมัติ",
+        });
+        autoRun = q.ok ? { queued: true, jobId: q.jobId } : { held: true, reasons: [q.error] };
+      } else {
+        autoRun = { held: true, reasons };
+      }
+      if ("held" in autoRun) {
+        const msg = `⏸ ยังไม่ส่งเข้ากรมฯ อัตโนมัติ — ต้องตรวจก่อน: ${autoRun.reasons.slice(0, 3).join(" · ")}`;
+        await setDeclarationStatus(created.id, needsReview ? "new" : "ready", msg.slice(0, 900));
+        broadcast("decl-status", { id: created.id, status: needsReview ? "new" : "ready", message: msg });
+      }
+      broadcast("log", { line: `[UPLOAD] ${"queued" in autoRun ? "▶ ส่งเข้าคิวอัตโนมัติ" : "⏸ รอตรวจ: " + autoRun.reasons.join(" · ")}` });
+    }
+    res.json({ ok: true, id: created.id, customer, invoice: inv, needsReview, codeFixes: created.codeFixes ?? [], warnings: created.warnings ?? [], autoRun });
   } catch (err) {
     if (err instanceof TaskCancelled) {
       broadcast("log", { line: "[UPLOAD] ⏹ ผู้ใช้กดยกเลิก — ไม่ได้สร้างรายการ" });

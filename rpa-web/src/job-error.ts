@@ -73,6 +73,17 @@ export function humanizeError(raw: string): { text: string; hint?: string; field
     };
   }
 
+  // 1.5) รหัสสินค้าไม่มีในคลังสินค้า DCTK — RPA ส่งชื่อที่ใกล้เคียงมาด้วย → บอกผู้ใช้ตรง ๆ ว่าควรใช้ชื่อไหน
+  const notInCatalog = (raw || "").match(/ไม่พบ "([^"]+)" ในคลังสินค้า DCTK[^—]*—\s*(.+)$/);
+  if (notInCatalog) {
+    const near = notInCatalog[2].replace(/^ชื่อที่ใกล้เคียงในคลัง:\s*/, "").trim();
+    return {
+      text: `รหัสสินค้า "${notInCatalog[1]}" ไม่มีในคลังสินค้า DCTK — ในคลังมี: ${near}`,
+      hint: "แก้รหัสสินค้าให้ตรงกับชื่อในคลังทุกตัวอักษร (ในหน้ารายละเอียดใบนี้ และใน Master ถ้าค่ามาจาก Master) แล้วกดรันใหม่ · ใบร่างที่ค้างใน DCTK ลบได้",
+      fields: ["รายการสินค้า"],
+    };
+  }
+
   // 2) รหัสสินค้า/พิกัด ไม่อยู่ใน master = ข้อมูลในใบไม่ตรงกับระบบกรมฯ
   if (s.includes("ไม่อยู่ใน master") || s.includes("รหัสสินค้า") || s.includes("พิกัด")) {
     return {

@@ -772,3 +772,12 @@ tr.ms-group > td {
 .m-rule, .mode-pill.m-rule, select.ms-mode.m-rule { background: #f1ecfd; color: #5b21b6; }
 .ms-edit.is-rule { border-color: #c4b5fd; background: #faf8ff; }
 .rule-hint { font-size: 12px; color: #5b21b6; margin-top: 4px; line-height: 1.45; }
+
+/* รันต่ออัตโนมัติหลังอัปโหลด */
+.auto-run-opt { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: #f7f9fd; cursor: pointer; font-size: 13px; line-height: 1.5; }
+.auto-run-opt input { width: 17px; height: 17px; margin-top: 2px; accent-color: var(--primary); flex: none; }
+.auto-run-opt .muted { font-size: 12px; }
+.held-list { margin: 8px 0 10px 18px; padding: 0; text-align: left; }
+.held-list li { margin: 4px 0; }
+.confirm-ico.is-warn { background: #fdf3e3; color: var(--amber); }
+#cfMsg .held-list { text-align: left; }

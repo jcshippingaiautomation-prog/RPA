@@ -1432,7 +1432,7 @@ export async function createDeclaration(
     /** ไฟล์ที่เตรียมให้ AI แล้ว (จาก extractFromAttachments) — ใช้กับช่อง "AI ทำตามคำสั่ง" ใน Master */
     aiFiles?: InlineFile[];
   } = {},
-): Promise<{ id: string; codeFixes?: { label: string; from: string; to: string; master?: boolean }[]; warnings?: string[] } | null> {
+): Promise<{ id: string; codeFixes?: { label: string; from: string; to: string; master?: boolean }[]; warnings?: string[]; templateName?: string } | null> {
   const sb = getClient();
   if (!sb) return null;
   try {
@@ -1488,7 +1488,7 @@ export async function createDeclaration(
     const items = record._items ?? [];
     if (declId && items.length) await insertItems(declId, items);
     // คืนรายการที่ระบบปรับค่าให้ด้วย — ผู้ใช้ควรรู้ว่าเราแก้อะไรไป ไม่ใช่แก้เงียบ ๆ
-    return { id: declId, codeFixes: codeFixes.map((f) => ({ label: f.label, from: f.from, to: f.to, master: f.listLabel === "ตาม Master" })), warnings: prepared.warnings };
+    return { id: declId, codeFixes: codeFixes.map((f) => ({ label: f.label, from: f.from, to: f.to, master: f.listLabel === "ตาม Master" })), warnings: prepared.warnings, templateName: prepared.templateName };
   } catch (err) {
     console.error("[supabase] createDeclaration error:", errMsg(err));
     return null;
@@ -2533,4 +2533,46 @@ export async function listCaptures(limit = 300): Promise<{ documents: DocumentRe
     && (j.payload as { mode?: string })?.mode !== "scan");
   // หน้าเว็บแบ่งหน้าเอง — ส่งย้อนหลังพอสมควร
   return { documents: (docs.data ?? []) as DocumentRecord[], jobs: capJobs.slice(0, 300) };
+}
+
+// ============================================================
+//  รหัสสินค้า "คล้ายแต่ไม่ตรง" กับที่เคยยื่นผ่าน
+//   ช่องรหัสสินค้าใน DCTK ต้องเลือกจากคลังสินค้าของบริษัท พิมพ์ต่างไปนิดเดียวก็ค้นไม่เจอ แล้วใบหยุดที่หน้า 3
+//   เจอจริง 18 พ.ย. MEK 19(G)/2026: Master ตั้ง "REFINED SOYBEAN OIL (REGULAR)" แต่คลังมีแค่ "REFINED SOYBEAN OIL"
+//   (ใบ THANAKORN ที่ผ่าน 10 ใบใช้ชื่อหลัง) → เตือนเฉพาะรหัสที่ "มีรหัสที่ผ่านแล้วซ้อนอยู่ข้างใน หรือกลับกัน"
+//   ไม่เตือนสินค้าใหม่ที่ไม่คล้ายอะไรเลย (เช่น ZECK ที่เพิ่งเริ่ม) — พวกนั้นตัดสินจากประวัติไม่ได้
+// ============================================================
+const _usedCodesCache = new Map<string, { at: number; codes: string[] }>();
+async function usedProductCodes(customer: string): Promise<string[]> {
+  const key = customer.trim().toUpperCase();
+  const hit = _usedCodesCache.get(key);
+  if (hit && Date.now() - hit.at < 5 * 60_000) return hit.codes;
+  const sb = getClient();
+  if (!sb || !key) return [];
+  const { data } = await sb.from("declarations")
+    .select("declaration_items(description_eng)")
+    .eq("customer_name", customer).eq("doc_status", true).limit(2000);
+  const codes = [...new Set(((data ?? []) as { declaration_items?: { description_eng?: string }[] }[])
+    .flatMap((d) => (d.declaration_items ?? []).map((it) => String(it.description_eng ?? "").trim()))
+    .filter(Boolean))];
+  _usedCodesCache.set(key, { at: Date.now(), codes });
+  return codes;
+}
+
+export async function productCodeSuspects(
+  customer: string,
+  codes: string[],
+): Promise<{ code: string; near: string[] }[]> {
+  const used = await usedProductCodes(customer).catch(() => []);
+  if (!used.length) return [];
+  const norm = (s: string) => s.toUpperCase().replace(/[^A-Z0-9ก-๙]+/g, " ").trim();
+  const usedN = used.map((u) => ({ raw: u, n: norm(u) }));
+  const out: { code: string; near: string[] }[] = [];
+  for (const code of [...new Set(codes.map((c) => c.trim()).filter(Boolean))]) {
+    const c = norm(code);
+    if (!c || usedN.some((u) => u.n === c)) continue;          // เคยผ่านแล้ว
+    const near = usedN.filter((u) => u.n.length >= 4 && (c.includes(u.n) || u.n.includes(c))).map((u) => u.raw);
+    if (near.length) out.push({ code, near: near.slice(0, 3) });
+  }
+  return out;
 }
