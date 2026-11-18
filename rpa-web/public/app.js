@@ -1911,15 +1911,7 @@ function setUploadStep(n) {
 }
 function openUpload() {
   uploadFiles = []; renderFileList(); $("upProgress").textContent = "";
-  // รันต่ออัตโนมัติ: ค่าเริ่มต้น "เปิด" · จำค่าที่ผู้ใช้เลือกล่าสุด
-  if ($("upAutoRun")) {
-    let v = "1"; try { v = localStorage.getItem("uploadAutoRun") ?? "1"; } catch { /* */ }
-    $("upAutoRun").checked = v === "1";
-    $("upAutoRun").onchange = () => {
-      try { localStorage.setItem("uploadAutoRun", $("upAutoRun").checked ? "1" : "0"); } catch { /* */ }
-      if ($("upAutoRun").checked) askNotifyPermission();
-    };
-  }
+
   setUploadStep(1); loadCustomerNames(); $("modalUpload").style.display = "flex";
 }
 function closeUpload() {
@@ -2002,7 +1994,9 @@ $("upSubmit").onclick = async () => {
     $("upProcTitle").textContent = "AI กำลังอ่านและสกัดข้อมูลจากเอกสาร…";
     const customer = $("upCustomer").value || "";
     const templateId = ($("upTemplate") || {}).value || "";
-    const autoRun = !!($("upAutoRun") && $("upAutoRun").checked);
+    // อัปโหลด = นำเข้ากรมฯ ต่อเลยเสมอ (คุณแพรวขอ: ไม่ต้องมีให้ติ๊ก) — ระบบหยุดเองถ้าเจอจุดน่าสงสัย
+    const autoRun = true;
+    askNotifyPermission();
     const r = await api("/api/upload", "POST", { files, customer, templateId, taskId: task.id, autoRun }, { signal: task.ctrl.signal });
     // งานเสร็จแล้ว → ปลดก่อนปิดหน้าต่าง ไม่งั้น closeUpload() ถามว่า "ยกเลิกไหม" แล้วถ้าตอบไม่ หน้าต่างค้างหมุนทั้งที่สร้างรายการแล้ว
     if (upTask === task) upTask = null;

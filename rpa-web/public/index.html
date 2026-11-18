@@ -470,11 +470,10 @@
         </div>
         <div id="fileList" class="file-list"></div>
         <div class="eta-note" id="upEta" style="display:none">⏱ ใช้เวลาประมาณ <b>&nbsp;1–2 นาที</b></div>
-        <label class="auto-run-opt" for="upAutoRun">
-          <input type="checkbox" id="upAutoRun" />
-          <span><b>อ่านเสร็จแล้วนำเข้าระบบกรมฯ ต่อเลย</b><br>
-            <span class="muted">ถ้าระบบเจอจุดที่ต้องตรวจ จะหยุดรอและเด้งบอกว่าต้องดูอะไร · รันเสร็จหรือพลาดจะแจ้งเตือน</span></span>
-        </label>
+        <div class="auto-run-opt">
+          <span><b>อ่านเสร็จแล้วระบบจะนำเข้ากรมฯ ต่อให้เลย</b><br>
+            <span class="muted">ถ้าเจอจุดที่น่าจะทำให้ไม่ผ่าน จะหยุดรอและเด้งบอกว่าต้องดูอะไร · รันเสร็จหรือไม่สำเร็จจะแจ้งเตือน</span></span>
+        </div>
         <div id="upErr" class="note"></div>
       </div>
       <!-- ขั้นที่ 2: กำลังประมวลผล -->
