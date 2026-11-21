@@ -1096,6 +1096,101 @@ function reconcileItemAmounts(
   }
 }
 
+/**
+ * พิกัด 2 ค่าเป็น "คนละสินค้า" ไหม — เทียบระดับ HS 6 หลัก (ส่วนที่ใบกำกับพิมพ์มา)
+ *   ค่าที่เข้ามาถูกเติม 0 ข้างหน้าจนครบ 12 หลักแบบ DCTK: 1507.90 → "000000150790" · 15079090 → "000015079090"
+ *   → ตัด 0 ที่เติมออก แล้วเติมคืน 1 ตัวถ้าจำนวนหลักเป็นเลขคี่ (พิกัดตอน 01-09 ขึ้นต้นด้วย 0 เช่น 0306.17)
+ *   ข้อมูลน้อยกว่า 4 หลัก = เทียบไม่ได้ → ถือว่าไม่ต่าง (ไม่เตือนมั่ว)
+ */
+export function hsDiffers(a: string, b: string): boolean {
+  const hs = (s: string) => {
+    let d = String(s ?? "").replace(/\D/g, "").replace(/^0+/, "");
+    if (d.length % 2 === 1) d = "0" + d;
+    return d;
+  };
+  const x = hs(a), y = hs(b);
+  const n = Math.min(6, x.length, y.length);
+  if (n < 4) return false;
+  return x.slice(0, n) !== y.slice(0, n);
+}
+
+/**
+ * จัดรูปแบบชื่อเรือ/เที่ยวเรือ ให้เป็นแบบที่ชิปปิ้งยื่นจริง (คุณแพรวสั่ง 20 พ.ย. — ใช้กับทุกลูกค้า)
+ *   1) เที่ยวเรือไม่มีคำนำหน้า "V." — DCTK เติม "V." ให้เองตอนพิมพ์ใบขน
+ *      เจอจริง DKN 28(B)/2026: Booking "DONGJIN CONFIDENT V.0154N" → AI ได้ "V.0154N" → ใบขนพิมพ์ "V.V.0154N"
+ *   2) ตัด 0 นำหน้า "เฉพาะที่ตามด้วยตัวเลข": 0154N → 154N · 015W → 15W
+ *      ⚠ ห้ามแตะ 0MDGLW1MA (เที่ยวเรือ CMA ของ COCOS: 0 ตามด้วยตัวอักษร = ส่วนหนึ่งของรหัส)
+ *      ⚠ ห้ามตัด "V" ของ FV647N / GU647W (MSC — ตัวอักษรเป็นส่วนของรหัส)
+ *   3) ชื่อเรือที่ติด "V." ท้ายชื่อ (DP WORLD JEBEL ALI V. · MAERSK ALGOL V. 647E) → ตัดออก
+ *      ถ้าเที่ยวเรือยังว่าง ใช้เลขที่ติดมาเป็นเที่ยวเรือ
+ */
+export function normalizeVesselVoyage(record: Record<string, unknown>): void {
+  const cleanVoyage = (v: string): string => {
+    let s = v.trim();
+    for (let i = 0; i < 3; i++) {
+      const next = s
+        .replace(/^VOY(?:AGE)?\.?\s*(?=[0-9A-Z])/i, "")
+        .replace(/^V\.\s*/i, "")
+        .replace(/^V\s*(?=\d)/i, "")
+        .trim();
+      if (next === s) break;
+      s = next;
+    }
+    return s.replace(/^0+(?=\d)/, "");
+  };
+
+  const vessel = String(record.vessel_name ?? "").trim();
+  if (vessel) {
+    const m = vessel.match(/^(.*?\S)\s+(?:V|VOY|VOYAGE)\.\s*([0-9A-Z][0-9A-Z-]*)?\s*$/i)
+      ?? vessel.match(/^(.*?\S)\s+(?:V|VOY)\s+(\d[0-9A-Z-]*)\s*$/i);
+    if (m) {
+      record.vessel_name = m[1].trim();
+      const cur = String(record.voyage_number ?? record.voyage ?? "").trim();
+      if (!cur && m[2]) record.voyage_number = m[2];
+      console.log(`[เรือ] ชื่อเรือติดเที่ยวเรือมา "${vessel}" → "${record.vessel_name}"`);
+    }
+  }
+  for (const key of ["voyage_number", "voyage"]) {
+    const raw = record[key];
+    if (typeof raw !== "string" || !raw.trim()) continue;
+    const out = cleanVoyage(raw);
+    if (out && out !== raw) {
+      record[key] = out;
+      console.log(`[เรือ] เที่ยวเรือ "${raw}" → "${out}"`);
+    }
+  }
+}
+
+/**
+ * ใบ CIF/CFR ที่ท้ายใบกำกับ "ถอดกลับเป็น FOB" (ยอด CIF − ค่าระวาง − ประกัน = FOB ตัวหนาบรรทัดล่างสุด)
+ *   AI ชอบหยิบบรรทัด FOB มาใส่ยอดหัวใบ ทั้งที่รายการสินค้าได้ยอด CIF ถูก
+ *   → หัวใบ ≠ ผลรวมรายการ → DCTK ตีกลับหน้า 3 ("ผลรวมราคาสินค้าบาทไม่เท่ากับส่วนควบคุม")
+ *   เจอจริง 20 พ.ย. THANAKORN MEK 20(B)/2026: หัวใบ 119,214.81 (FOB) · รายการ 119,680 (CIF) · ค่าระวาง 350 + ประกัน 115.19
+ *   แก้เฉพาะเมื่อ "หัวใบ + ค่าระวาง + ประกัน = ผลรวมรายการ" พอดี (แปลว่าหัวใบเป็น FOB แน่ ๆ) — ไม่เข้าเงื่อนไขนี้ไม่แตะ
+ */
+function fixFobHeaderOnCifInvoice(
+  record: Record<string, unknown> & { _items?: Record<string, unknown>[] },
+): { scope: "header"; key: string; label: string; from: string; to: string; listLabel: string } | null {
+  const term = String(record.incoterms ?? "").trim().toUpperCase();
+  if (!["CIF", "CFR", "CNF", "C&F"].includes(term)) return null;
+  const items = record._items ?? [];
+  if (!items.length) return null;
+  const n = (v: unknown) => {
+    const x = Number(String(v ?? "").replace(/,/g, ""));
+    return Number.isFinite(x) ? x : 0;
+  };
+  const r2 = (x: number) => Number(x.toFixed(2));
+  const head = n(record.total_goods_amount);
+  const charges = n(record.freight_charge) + n(record.insurance_charge);
+  const sum = r2(items.reduce((a, it) => a + n(it.amount), 0));
+  if (head <= 0 || charges <= 0 || sum <= 0) return null;
+  if (Math.abs(head - sum) <= 0.05) return null;                 // ตรงกันอยู่แล้ว
+  if (Math.abs(head + charges - sum) > 0.05) return null;        // ไม่ใช่รูปแบบ FOB ที่หักค่าใช้จ่ายออก
+  record.total_goods_amount = sum;
+  console.log(`[ยอดเงิน] ${term}: ยอดหัวใบ ${head.toLocaleString()} เป็นยอด FOB (หักค่าระวาง/ประกันแล้ว) → ใช้ยอด ${term} ${sum.toLocaleString()} ตามรายการ`);
+  return { scope: "header", key: "total_goods_amount", label: "มูลค่าสินค้า", from: head.toFixed(2), to: sum.toFixed(2), listLabel: `ยอด ${term} (เอกสารหักเป็น FOB ไว้)` };
+}
+
 /** คืนคำเตือนที่ผู้ใช้ต้องตรวจก่อนรัน (ไม่แก้ค่าเงียบ ๆ เมื่อเดาไม่ได้แน่) */
 function reconcileWeights(record: Record<string, unknown> & { _items?: Record<string, unknown>[] }): string[] {
   const warnings: string[] = [];
@@ -1186,13 +1281,10 @@ function identityWarnings(
   if (a && b && !a.includes(b) && !b.includes(a)) {
     out.push(`ผู้ซื้อ: เอกสารเป็น "${doc.consignee}" แต่ Master "${templateName}" ตั้งเป็น "${after.consignee}"`);
   }
-  // ประเทศ: เตือนเมื่อ "ทั้งคู่" ไม่ตรงเอกสาร — ถ้าต่างแค่ช่องเดียวมักเป็น AI อ่านพลาดแล้ว Master แก้ให้ถูก
-  //   (MEK: ผู้ซื้ออยู่ออสเตรเลียแต่ส่งของไปเวียดนาม AI ชอบตอบผู้ซื้อ = VN · Master ล็อก AU ไว้ถูกแล้ว)
-  const buyerDiff = !!(doc.buyer && after.buyer && doc.buyer !== after.buyer);
-  const destDiff = !!(doc.dest && after.dest && doc.dest !== after.dest);
-  if (buyerDiff && destDiff) {
-    out.push(`ประเทศผู้ซื้อ/ปลายทาง: เอกสาร ${doc.buyer}/${doc.dest} แต่ Master ตั้ง ${after.buyer}/${after.dest}`);
-  }
+  // ประเทศ: ไม่เตือนแล้ว (user สั่ง 21 พ.ย. — เชื่อ Master)
+  //   AI อ่านประเทศพลาดบ่อยกับผู้ซื้อที่ซื้อประเทศหนึ่งแต่ส่งของไปอีกประเทศ
+  //   (SAVO 10(B)/2026: ผู้ซื้อ AUSTRALASIAN ออสเตรเลีย ส่งเวียดนาม → หยุดรันทั้งที่ Master AU/VN ถูก)
+  //   ยังกันเคส CFK ได้ด้วยการเทียบ "ชื่อผู้ซื้อ" ข้างบน (ชื่อบริษัท AI อ่านแม่น และต่างกันชัดเมื่อ Master ผิดราย)
   if (out.length) {
     out.push("Master นี้อาจเป็นของผู้ซื้อรายอื่น (เช่นสำเนามาแล้วยังแก้ไม่ครบ) — ตรวจผู้ซื้อ/ที่อยู่/ประเทศก่อนรัน");
     console.log(`[master] ⚠ ${out.join(" · ")}`);
@@ -1380,6 +1472,8 @@ export async function prepareDeclarationRecord(
     const ruleWarnings = await fillRuleFields(record, mastered.rules ?? [], opts.aiFiles,
       (mastered as { itemRules?: { idx: number; key: string; instruction: string }[] }).itemRules ?? []);
     ruleWarnings.push(...identityWarnings(docIdentity, record, mastered.templateName));
+    // หลังผสม Master + ช่อง "AI ทำตามคำสั่ง" → ค่าเรือ/เที่ยวเรือทุกแหล่งผ่านรูปแบบเดียวกัน
+    normalizeVesselVoyage(record);
 
     // ── หัวใบสรุปหน่วยจากรายการสินค้า ────────────────────────────────
     //   DCTK บังคับให้ "ส่วนควบคุม" (หัวใบ) มีหน่วยด้วย ไม่ใช่แค่ในรายการ
@@ -1411,6 +1505,8 @@ export async function prepareDeclarationRecord(
       await customerPreset(String(record.customer_name ?? ""), "__package_alloc"));
     const warnings = [...ruleWarnings, ...reconcileWeights(record)];
     reconcileItemAmounts(record, await extraAmountAlloc(String(record.customer_name ?? "")));
+    const fobFix = fixFobHeaderOnCifInvoice(record);
+    if (fobFix) codeFixes.push(fobFix);
     normalizeItemText(record,
       await customerPreset(String(record.customer_name ?? ""), "__product_code_from"),
       /^(1|true|yes)$/i.test(await customerPreset(String(record.customer_name ?? ""), "__skip_product_catalog")),
@@ -1834,6 +1930,9 @@ export async function applyMasterToRecord(
   } else if (tplItems.length) {
     const aiItems = record._items as Record<string, unknown>[];
     const labels = new Map((await loadRegistry()).filter((f) => f.scope === "item").map((f) => [f.key, f.label]));
+    // ลูกค้าที่ใบกำกับพิมพ์พิกัดคนละ 6 หลักกับที่ชิปปิ้งยื่นจริง "เป็นปกติ" → ไม่เทียบพิกัด (preset __tariff_check = off)
+    //   COCOS: ใบกำกับ 2009.89.90 ทุกใบ แต่ยื่นจริง 2009.11.00 ทุกรายการ (15/15 รายการที่ยื่นแล้ว) — DCTK ไม่มี 2009.89.90
+    const tariffCheckOff = /^(off|0|false|no)$/i.test((await customerPreset(customer, "__tariff_check")).trim());
     out._items = await Promise.all(aiItems.map(async (aiIt, i) => {
       // จับคู่แถวใน Master ด้วย "ชื่อสินค้า" ไม่ใช่ "ลำดับที่"
       //   ชิปเมนต์แต่ละครั้งมีสินค้าไม่เหมือนกันและไม่เรียงเหมือนกัน
@@ -1886,6 +1985,16 @@ export async function applyMasterToRecord(
         delete outIt[k];
         const mv = String(sp.extra[k] ?? "").trim();
         const digits = (s: string) => s.replace(/[^0-9A-Z]/gi, "").toUpperCase();
+        // พิกัด: เทียบแค่ 6 หลักแรก (HS สากล) — ใบกำกับพิมพ์แค่ 6 หลัก ส่วน 2 หลักท้ายชิปปิ้งเลือกเอง
+        //   ต่างกันที่ 6 หลัก = คนละสินค้าจริง → เตือน · ตรงกัน = Master ถูก ไม่ต้องเตือน (user สั่ง 21 พ.ย.)
+        //   เจอจริง WIS 16(D)/2026: ใบกำกับ 1507.90 (บริสุทธิ์) แต่ Master ตอนนั้นให้ 15071000 (ดิบ) → ยื่นผิดสินค้า
+        //   เดิมเทียบทั้งก้อน ("000000150790" vs "000015079090") → เตือนทุกใบแม้ Master ถูก จนคนชินกดข้าม
+        if (k === "tariff_code") {
+          if (mv && !tariffCheckOff && hsDiffers(docVal, mv)) {
+            masterNotes.push({ key: k, label: labels.get(k) ?? k, from: docVal, to: mv, itemLine: i + 1 });
+          }
+          continue;
+        }
         if (mv && digits(docVal) !== digits(mv) && !digits(mv).endsWith(digits(docVal))) {
           masterNotes.push({ key: k, label: labels.get(k) ?? k, from: docVal, to: mv, itemLine: i + 1 });
         }

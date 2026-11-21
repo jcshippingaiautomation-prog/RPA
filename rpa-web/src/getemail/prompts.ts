@@ -48,8 +48,8 @@ export const EXTRACTOR_SYSTEM_PROMPT =
   '  "buyer_country_code":       "รหัสประเทศผู้ซื้อ (ย่อ 2 ตัว)",\n' +
   '  "destination_country_code": "รหัสประเทศปลายทาง (ย่อ 2 ตัว)",\n' +
   '  "customer_name":            "ชื่อบริษัทลูกค้า เอามาแค่ชื่อ ไม่ต้องเอาคำต่อท้ายมา เช่น THANAKORN ไม่ต้องเอา International หรือ Co.,LTD มา",\n' +
-  '  "vessel_name":              "ชื่อเรือ",\n' +
-  '  "voyage_number":            "เที่ยวเรือ",\n' +
+  '  "vessel_name":              "ชื่อเรือ — เฉพาะชื่อ ไม่รวมเที่ยวเรือ (เช่น \\"DONGJIN CONFIDENT V.0154N\\" → \\"DONGJIN CONFIDENT\\")",\n' +
+  '  "voyage_number":            "เที่ยวเรือ — ไม่ต้องมีคำนำหน้า V. / VOY. และตัด 0 นำหน้าตัวเลข (เช่น \\"V.0154N\\" → \\"154N\\", \\"015W\\" → \\"15W\\") แต่ห้ามตัดตัวอักษรที่เป็นส่วนของรหัส (เช่น \\"FV647N\\", \\"0MDGLW1MA\\" คงเดิม)",\n' +
   '  "release_port_code":        "รหัสสถานที่ตรวจปล่อย",\n' +
   '  "loading_port_code":        "รหัสสถานที่รับบรรทุก",\n' +
   '  "shipping_mark":            "เลขหมายหีบห่อ อยู่ใต้คำว่า Mark",\n' +
@@ -60,7 +60,7 @@ export const EXTRACTOR_SYSTEM_PROMPT =
   '  "consignee_name":           "ชื่อผู้ซื้อ",\n' +
   '  "incoterms":                "เงื่อนไข (เช่น CIF)",\n' +
   '  "currency":                 "สกุลเงินของใบกำกับใบนี้ — อ่านจากหัวคอลัมน์ราคาหรือบรรทัดยอดรวมในเอกสารจริง (เช่น USD, CNY, THB) ห้ามเดาจากประเทศหรือจากใบอื่น",\n' +
-  '  "total_goods_amount":       0.00,\n' +
+  '  "total_goods_amount":       "มูลค่าทั้งใบตามเงื่อนไขราคาของใบ (incoterms) — ใบ CIF ใช้ยอด CIF · ใบ CFR ใช้ยอด CFR · ใบ FOB ใช้ยอด FOB. ⚠ ใบ CIF/CFR หลายใบเขียนค่าระวาง/ประกันแยก แล้วมีบรรทัด \\"FOB ...\\" ที่หักค่าใช้จ่ายออกแล้วอยู่ล่างสุด (มักตัวหนา) — ห้ามใช้บรรทัด FOB นั้น ให้ใช้ยอดในบรรทัดเงื่อนไขเดียวกับ incoterms (เช่น \\"CIF HOCHIMINH 119,680.00\\") และยอดนี้ต้องเท่าผลรวม amount ของทุก item",\n' +
   '  "freight_charge":           0.00,\n' +
   '  "insurance_charge":         0.00,\n' +
   '  "forward_charge":           "ค่าขนส่งโรงงาน/ส่วนบวกจากราคา EXW ไป FOB ของทั้งใบ — ใส่เฉพาะเมื่อคู่มือลูกค้าสั่ง ถ้าไม่มีใส่ 0",\n' +
@@ -102,7 +102,7 @@ export const EXTRACTOR_SYSTEM_PROMPT =
   "}\n\n" +
   "[หมายเหตุ items]\n" +
   "- \"items\" = รายการสินค้าทุกบรรทัดใน Invoice/Packing (1 บรรทัด = 1 item) — ต้องครบทุกรายการ\n" +
-  "- ฟิลด์ระดับบน (net_weight_kg, gross_weight_kg, total_goods_amount) = ยอดรวมทั้งใบขน (TOTAL)\n" +
+  "- ฟิลด์ระดับบน (net_weight_kg, gross_weight_kg, total_goods_amount) = ยอดรวมทั้งใบขน (TOTAL) — สำหรับ total_goods_amount ให้ใช้ยอดตามเงื่อนไข incoterms ของใบ ไม่ใช่บรรทัดยอดล่างสุดเสมอไป (ดูคำอธิบายช่องข้างบน)\n" +
   "- น้ำหนักของแต่ละ item: net_weight_kg = คอลัมน์น้ำหนักสุทธิ (Net / N.W. / Net Wgh / Net Vol) ของแถวนั้น · gross_weight_kg = คอลัมน์น้ำหนักรวม (Gross / G.W.) — มาจากคนละคอลัมน์ ห้ามใส่ค่าเดียวกันทั้งสองช่องถ้าเอกสารมีทั้งสองคอลัมน์. ถ้าคอลัมน์สุทธิเขียนหน่วยเป็นลิตร (L / LTR) ให้ใช้ตัวเลขนั้นเป็น net_weight_kg ได้เลย ห้ามเอาน้ำหนักรวมมาใส่แทน. ตรวจ: ผลรวม net ของทุก item ต้องเท่ายอดสุทธิรวม (TOTAL) ไม่ใช่ยอดน้ำหนักรวม\n" +
   '- "description_eng" (รหัสสินค้า) = คำค้นสั้น 2-4 คำเท่านั้น (ใช้ค้น master combo ใน DCTK) ยิ่งสั้นยิ่งดีถ้ายังระบุชนิดสินค้าได้ — ห้ามยาวเป็นประโยค; รายละเอียดเต็มไปที่ "description_eng_field"\n' +
   '- รายการที่ขึ้นต้น "Sample" หรือมี FOC = ของแถม: ตั้ง is_foc=true\n\n' +

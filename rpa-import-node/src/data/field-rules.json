@@ -10636,7 +10636,7 @@
       "headerKey": "amount_foreign",
       "itemKey": "amount_foreign",
       "tolerance": 1,
-      "level": "warn"
+      "level": "error"
     },
     {
       "id": "forward",
