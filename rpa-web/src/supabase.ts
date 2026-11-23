@@ -1114,6 +1114,45 @@ export function hsDiffers(a: string, b: string): boolean {
   return x.slice(0, n) !== y.slice(0, n);
 }
 
+/** เทียบชื่อบริษัท 2 ชื่อแบบผ่อนปรน (ตัวเดียวกับที่ scoreTemplate ใช้เทียบ consignee) */
+function companyNameHit(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.length >= 8 && b.length >= 8 && (a.startsWith(b) || b.startsWith(a))) return true;
+  const tok = (x: string) => x.replace(/[^A-Z0-9ก-๙ ]/g, " ").split(/\s+/).filter(Boolean);
+  const A = tok(a), B = tok(b);
+  if (A.length < 2 || B.length < 2 || A[0] !== B[0]) return false;
+  const setB = new Set(B);
+  const hit = A.filter((w) => setB.has(w)).length;
+  return hit / Math.min(A.length, B.length) >= 0.8;
+}
+
+/**
+ * เอกสารบางราย (เช่น THANAKORN MEK/SAVO) มี 2 บริษัทคนละราย — "Sold to Messrs" (ผู้ซื้อในประเทศปลายทาง)
+ * กับ "Notify Party" (ตัวแทนการค้า เช่น AUSTRALASIAN COMMODITIES) — ผู้ซื้อตัวจริงที่กรมฯ ต้องใช้คือ
+ * "ฝ่ายที่มี Master ลงทะเบียนไว้แล้ว" ซึ่งมักเป็น Notify Party แต่ AI เลือกไม่คงที่ (บางรอบจับ Sold to)
+ *   เจอจริง 23 พ.ย. MEK 20(E)/2026: AI บางรอบได้ "MEKONG COMMODITIES JSC" (Sold to) แทน
+ *   "AUSTRALASIAN COMMODITIES PTY LTD." (Notify Party, มี Master จริง) → Master หาไม่เจอ ใบขาดค่าคงที่ทั้งใบ
+ * กฎ: สลับไปใช้ Notify Party เฉพาะเมื่อ "AI เลือกมาไม่มี Master รู้จัก" แต่ "Notify Party มี Master รู้จัก"
+ *   (ไม่ยุ่งถ้าทั้งคู่มี/ไม่มี Master รู้จักเหมือนกัน — กันไม่ให้สลับผิดโดยไม่มีหลักฐาน)
+ */
+async function preferKnownNotifyParty(
+  record: Record<string, unknown> & { extra_fields?: Record<string, unknown> },
+  customer: string,
+): Promise<void> {
+  const notify = String(record.extra_fields?.__doc_notify_party ?? "").trim().toUpperCase();
+  const current = String(record.consignee_name ?? "").trim().toUpperCase();
+  if (!notify || !current || notify === current) return;
+  const masters = await listTemplates(customer).catch(() => []);
+  const knownNames = masters.flatMap((t) => (t.consignee_names ?? []).map((c) => String(c).trim().toUpperCase())).filter(Boolean);
+  if (!knownNames.length) return;
+  const currentKnown = knownNames.some((k) => companyNameHit(k, current));
+  const notifyKnown = knownNames.some((k) => companyNameHit(k, notify));
+  if (!currentKnown && notifyKnown) {
+    console.log(`[ผู้ซื้อ] AI เลือก "${record.consignee_name}" แต่ไม่มี Master รู้จัก ส่วน Notify Party "${notify}" มี Master รู้จัก → ใช้ Notify Party แทน`);
+    record.consignee_name = String(record.extra_fields?.__doc_notify_party ?? "").trim();
+  }
+}
+
 /**
  * จัดรูปแบบชื่อเรือ/เที่ยวเรือ ให้เป็นแบบที่ชิปปิ้งยื่นจริง (คุณแพรวสั่ง 20 พ.ย. — ใช้กับทุกลูกค้า)
  *   1) เที่ยวเรือไม่มีคำนำหน้า "V." — DCTK เติม "V." ให้เองตอนพิมพ์ใบขน
@@ -1444,6 +1483,9 @@ export async function prepareDeclarationRecord(
     for (const f of codeFixes) {
       console.log(`[code] ${f.scope === "item" ? `รายการ ${f.itemLine}: ` : ""}${f.label}: "${f.from}" → "${f.to}" (${f.listLabel})`);
     }
+
+    // AI เลือกผู้ซื้อผิดฝั่ง (Sold to แทน Notify Party) ไม่คงที่ — สลับไปใช้ฝั่งที่มี Master รู้จักก่อนค้นหา Master
+    await preferKnownNotifyParty(record, String(record.customer_name ?? ""));
 
     // ค่าที่เอกสารบอกก่อนผสม Master — ไว้เทียบว่า Master ไปเปลี่ยน "ตัวตนผู้ซื้อ" ของใบหรือเปล่า
     const docIdentity = {
@@ -2550,6 +2592,20 @@ export function scoreTemplate(
   const prodSim = tProds.length && prods.size
     ? Math.max(...tProds.map((p) => Math.max(...[...prods].map((q) => similarity(p, q)))))
     : null;
+  // คำค้นสั้นกว่า "ตรงเป๊ะ" กับคำค้นยาวกว่าที่มีคำสั้นนั้นครอบคลุมอยู่ทั้งหมด จะได้คะแนน similarity() เท่ากัน (1.0)
+  //   เพราะสูตรหารด้วยฝั่งที่สั้นกว่าเสมอ — แยกไม่ออกว่า Master ไหนตรงกว่ากัน
+  //   (เจอจริง THANAKORN MEK: AI อ่าน "SOYBEAN LECITHIN" ตรง Master "MEK / SOYBEAN LECITHIN" พอดี
+  //    แต่ไปเสมอกับ Master "MEK / SOYBEAN LECITHIN (COOK LECI-MAX)" เพราะคำ 2 คำแรกอยู่ในนั้นครบ)
+  //   → ถ้ามีคู่ไหน "คำชุดเดียวกันเป๊ะ" (ไม่ใช่แค่ครอบคลุม) ให้คะแนนสูงกว่าเคสครอบคลุมเฉย ๆ เสมอ
+  const prodExact = tProds.length && prods.size
+    ? tProds.some((p) => {
+        const A = words(p);
+        return [...prods].some((q) => {
+          const B = words(q);
+          return A.size > 0 && A.size === B.size && [...A].every((w) => B.has(w));
+        });
+      })
+    : false;
 
   // ผู้รับสินค้าระบุไว้แล้วไม่ตรง → ใช้ Master นี้ไม่ได้ (ชื่อผู้รับเชื่อถือได้)
   if (consMatch === false) return null;
@@ -2570,7 +2626,8 @@ export function scoreTemplate(
   const destMatch = tDest && norm(destCountry) ? tDest === norm(destCountry) : null;
 
   let score = 0;
-  if (prodSim !== null) score += prodSim >= 0.6 ? 4 : prodSim >= 0.4 ? 2 : 1;  // ระดับ 3 = สินค้า
+  if (prodExact) score += 5;                                                  // ตรงเป๊ะชนะครอบคลุมเฉย ๆ เสมอ
+  else if (prodSim !== null) score += prodSim >= 0.6 ? 4 : prodSim >= 0.4 ? 2 : 1;  // ระดับ 3 = สินค้า
   if (destMatch === true) score += 3;      // ปลายทางตรง
   if (consMatch === true) score += 2;      // ระดับ 2 ตรง
   if (t.is_default) score += 1;            // ค่าเริ่มต้นของลูกค้า

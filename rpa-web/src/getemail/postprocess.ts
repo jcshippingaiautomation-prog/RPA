@@ -124,6 +124,13 @@ export function postProcess(rawText: string): DeclarationRecord {
       ...(post ? { __doc_consignee_post_code: post } : {}),
     };
   }
+  // ชื่อบริษัทในช่อง "Notify Party" (ถ้าเอกสารมีแยกจาก Sold to/Consignee) — เก็บไว้เทียบใน prepareDeclarationRecord
+  //   เอกสารบางรายการ (เช่น THANAKORN MEK/SAVO) มี 2 บริษัทคนละราย AI เลือก "ผู้ซื้อ" ไม่คงที่
+  //   (บางรอบจับ Sold to บางรอบจับ Notify) → เก็บทั้งคู่ไว้ให้โค้ดตัดสินแทน ไม่พึ่ง AI เลือกเอง
+  const notifyParty = String(parsed.notify_party_name ?? "").replace(/\s+/g, " ").trim();
+  if (notifyParty) {
+    r.extra_fields = { ...((r.extra_fields ?? {}) as Record<string, unknown>), __doc_notify_party: notifyParty };
+  }
 
   // items[] — normalize แต่ละรายการ
   r._items = [];
