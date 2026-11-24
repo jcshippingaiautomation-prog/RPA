@@ -79,7 +79,7 @@ export const EXTRACTOR_SYSTEM_PROMPT =
   '  "items": [\n' +
   "    {\n" +
   '      "description_eng":         "คำค้นสั้นที่สุดที่ระบุชนิดสินค้าได้ (2-4 คำ) สำหรับค้น master ใน DCTK เช่น \\"REFINED BLEACHED\\", \\"FROZEN COCONUT WATER\\" — ห้ามใส่คำอธิบายเต็มประโยค/รุ่น/ขนาด/ยี่ห้อ (พวกนั้นไปที่ description_eng_field); สินค้าชนิดเดียวกันใช้ค่านี้เหมือนกัน",\n' +
-  '      "description_eng_field":   "คำอธิบายสินค้าภาษาอังกฤษแบบละเอียดของรายการนี้ (อิสระ ต่างกันได้ต่อรายการ เช่น ORGANIC RAW COCONUT CREAM SMOOTHIE BRAND ORGANIC SOURCE 250ML) ตัวพิมพ์ใหญ่ทั้งหมด",\n' +
+  '      "description_eng_field":   "คำอธิบายสินค้าภาษาอังกฤษแบบละเอียดของรายการนี้ — เอาเฉพาะ \\"ชื่อสินค้า\\" บรรทัดแรกใต้หัวข้อ Description/คำอธิบาย เท่านั้น (อิสระ ต่างกันได้ต่อรายการ เช่น ORGANIC RAW COCONUT CREAM SMOOTHIE BRAND ORGANIC SOURCE 250ML) ตัวพิมพ์ใหญ่ทั้งหมด\\n⚠ ห้ามต่อบรรทัดอื่นที่เป็นข้อมูลซึ่งมีช่องของตัวเองอยู่แล้วเข้ามาด้วย เช่น \\"PACKING: ...\\" (ไปที่ container_unit_code), \\"ORIGIN: ...\\" (ไปที่ origin_country_code), \\"TOTAL ... CONTAINER\\" (ไปที่ container_or_volume_qty) — ใส่แค่ชื่อสินค้าอย่างเดียว ไม่มี \\\\n ไม่มีป้ายกำกับเหล่านี้\\n⚠ ห้ามต่อชื่อสินค้าหลายชื่อเข้าด้วยกัน (เช่น ใบมีทั้ง \\\"SOYBEAN LECITHIN (COOK LECI-MAX)\\\" และ \\\"SOYBEAN LECITHIN\\\" ปนกัน) — รายการนี้คือสินค้า 1 ชนิด ใช้ชื่อเดียวที่ตรงกับรายการนั้นจริง ๆ",\n' +
   '      "product_description_thai": "คำอธิบายสินค้าภาษาไทยของรายการนี้ (เช่น น้ำมะพร้าวแช่แข็ง)",\n' +
   '      "brand_name":             "ยี่ห้อ (ถ้าไม่มีใส่ NO BRAND)",\n' +
   '      "container_or_volume_qty": "จำนวนกล่อง/หีบห่อของรายการนี้ (carton/box/case). ถ้าช่องนั้นเขียนปนตัวอักษร เช่น \\"TE1\\" / \\"TC1\\" ให้เอาเฉพาะตัวเลขมา (TE1 → 1)",\n' +
